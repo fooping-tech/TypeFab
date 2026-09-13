@@ -39,4 +39,14 @@
 - Preview server required sandbox network-listen escalation. Skill wrapper lacked CLI binary; used official `@playwright/cli` package directly.
 
 ## Publication
-- Pending commit/push, Pages enablement, Actions deployment and public URL verification.
+- Completed. See publication evidence below.
+
+## Publication verified (2026-09-13)
+- Implementation commit: `1c8f90a05c18478df56e83d41f648dc865bbbd8a`, pushed to `main`.
+- GitHub Pages enabled with workflow deployment and HTTPS.
+- Initial Actions run: https://github.com/fooping-tech/TypeFab/actions/runs/34749954638 — success.
+- Public URL: https://fooping-tech.github.io/TypeFab/ — HTTP 200.
+- Real Chromium on public URL: both bundled font assets loaded; Japanese sample rendered; automatic holding tabs and actual SVG download passed.
+- Public SVG parsed and verified: 240 x 160 mm, paths only, closed contours opened by holding tabs.
+- Public browser console: 0 errors, 0 warnings. Desktop screenshot inspected at 1440 x 960.
+- Physical laser cutting, material connectivity/strength, kerf and downstream laser-software compatibility remain unverified, as documented in README.
