@@ -17,6 +17,12 @@ import {
   resizeFromHandle,
   followBridges,
 } from "./operations.js";
+import {
+  selectionRect,
+  marqueeIds,
+  layerMovePlan,
+  wheelZoom,
+} from "./interaction.js";
 let typography;
 const shapingFonts = new Map();
 const typographyReady = import("./typography.js").then((m) => (typography = m));
@@ -253,11 +259,11 @@ $("#app").innerHTML = `
     "",
   )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで複数選択</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
-<section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g></svg><span class="origin-label">0, 0</span></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
+<section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
-<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.2</span></span></footer>
+<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.3</span></span></footer>
 <input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,application/json">
-<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは各閉輪郭に保持用の切り残しを追加します。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>`;
+<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字の内側の島と外側を非カット帯でつなぎ、穴のない輪郭には保持用の切り残しを追加します。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>`;
 
 function renderLayers() {
   $("#layers").innerHTML = [...project.layers]
@@ -265,7 +271,7 @@ function renderLayers() {
     .map(
       (
         l,
-      ) => `<div class="layer-group ${l.id === activeLayer ? "current" : ""}"><div class="layer-header">
+      ) => `<div data-drop-layer="${l.id}" class="layer-group ${l.id === activeLayer ? "current" : ""}"><div class="layer-header">
     <button data-active-layer="${l.id}" aria-label="${esc(l.name)}を選択" title="追加先レイヤー">${l.id === activeLayer ? "◆" : "◇"}</button>
     <input data-layer-name="${l.id}" aria-label="レイヤー名" value="${esc(l.name)}" maxlength="100">
     <button data-layer-action="visible" data-id="${l.id}" title="${l.visible ? "非表示にする" : "表示する"}" aria-label="${esc(l.name)}の表示切替">${l.visible ? "◉" : "○"}</button>
@@ -276,7 +282,7 @@ function renderLayers() {
       .reverse()
       .map(
         (i) =>
-          `<button class="layer ${selectionIds().includes(i.id) ? "selected" : ""} ${i.type === "bridge" ? "bridge-layer" : ""}" data-layer="${i.id}" ${!isEditable(project, i) ? "disabled" : ""}><span class="layer-icon">${icons[i.type] || "⌘"}</span><span>${esc(i.name)}</span><small>${i.type === "bridge" ? "TAB" : i.type === "text" ? "TEXT" : "PATH"}</small></button>`,
+          `<button class="layer ${selectionIds().includes(i.id) ? "selected" : ""} ${i.type === "bridge" ? "bridge-layer" : ""}" draggable="${isEditable(project, i)}" data-layer="${i.id}" ${!isEditable(project, i) ? "disabled" : ""}><span class="layer-icon">${icons[i.type] || "⌘"}</span><span>${esc(i.name)}</span><small>${i.type === "bridge" ? "TAB" : i.type === "text" ? "TEXT" : "PATH"}</small></button>`,
       )
       .join("")}
   </div>`,
@@ -367,7 +373,7 @@ function renderCanvas() {
   $("#hint").textContent = preview
     ? "赤い線をカットします。ブリッジ部分には線が出力されません。"
     : tool === "select"
-      ? "四隅で拡縮 · Shiftで複数選択 / 比率固定 · Deleteで削除"
+      ? "空白からドラッグで範囲選択 · スクロール / ピンチでズーム"
       : `${labels[tool]}を配置する場所をクリック`;
   $("#board-label").textContent = `${project.width} × ${project.height} mm`;
   $("#zoom-reset").textContent = `${Math.round(zoom * 100)}%`;
@@ -408,7 +414,7 @@ function render() {
   const c = cutGeometry(visibleItems(project)),
     outside = !withinBoard();
   $("#checks").innerHTML =
-    `<div class="check-row"><span>閉じた輪郭</span><b>${c.closed}</b></div><div class="check-row ${c.untouched ? "warning" : "success"}"><span>切り残しなし</span><b>${c.untouched}</b></div><div class="check-row"><span>ブリッジ</span><b>${project.items.filter((i) => i.type === "bridge").length}</b></div>${c.vanished ? `<div class="check-row warning"><span>完全に隠れた輪郭</span><b>${c.vanished}</b></div>` : ""}<div class="check-summary ${outside || c.vanished ? "warning" : ""}">${c.vanished ? "! ブリッジ幅を縮めて輪郭を残してください" : outside ? "! 加工エリア外にカット線があります" : c.untouched ? "! 脱落させたくない輪郭にブリッジを追加" : c.closed ? "✓ 全閉輪郭に切り残しあり · 強度は要確認" : "図形や文字を追加してください"}</div>`;
+    `<div class="check-row"><span>閉じた輪郭</span><b>${c.closed}</b></div><div class="check-row ${c.untouched ? "warning" : "success"}"><span>切り残しなし</span><b>${c.untouched}</b></div><div class="check-row ${c.unbridgedIslands ? "warning" : "success"}"><span>内外が未接続の島</span><b>${c.unbridgedIslands}</b></div><div class="check-row"><span>ブリッジ</span><b>${project.items.filter((i) => i.type === "bridge").length}</b></div>${c.vanished ? `<div class="check-row warning"><span>完全に隠れた輪郭</span><b>${c.vanished}</b></div>` : ""}<div class="check-summary ${outside || c.vanished ? "warning" : ""}">${c.vanished ? "! ブリッジ幅を縮めて輪郭を残してください" : outside ? "! 加工エリア外にカット線があります" : c.unbridgedIslands ? "! 内側の島に自動ブリッジを適用してください" : c.untouched ? "! 脱落させたくない輪郭にブリッジを追加" : c.closed ? "✓ 全閉輪郭に切り残しあり · 強度は要確認" : "図形や文字を追加してください"}</div>`;
   if (loading)
     document.querySelectorAll("button,input,select,textarea").forEach((el) => {
       el.dataset.loadingDisabled = String(el.disabled);
@@ -455,33 +461,88 @@ $("#properties").addEventListener("change", (e) => {
   else if (el.id === "font-select") updateSelected("font", el.value);
   else if (el.id === "vertical") updateSelected("vertical", el.checked);
   else if (el.id === "ratio-lock") updateSelected("ratioLocked", el.checked);
-  else if (el.id === "item-layer") {
-    const layer = project.layers.find((l) => l.id === el.value);
-    if (!layer?.visible || layer.locked) return;
-    if (
-      selectedItems().some(
-        (i) => i.targetId && !selectionIds().includes(i.targetId),
-      )
-    ) {
-      notify("対象付きブリッジは親アイテムと一緒にレイヤー移動してください。");
-      renderProperties();
-      return;
-    }
-    checkpoint();
-    for (const i of selectedItems()) {
-      i.layerId = layer.id;
-      for (const b of project.items.filter((b) => b.targetId === i.id))
-        b.layerId = layer.id;
-    }
-    activeLayer = layer.id;
-    commit();
-  }
+  else if (el.id === "item-layer")
+    moveSelectionToLayer(selectionIds(), el.value);
 });
 $("#properties").addEventListener("click", (e) => {
   if (e.target.closest("#add-font")) $("#font-file").click();
   if (e.target.closest("#item-auto-bridge")) applyAutoBridges();
   const op = e.target.closest("[data-boolean]");
   if (op) applyBoolean(op.dataset.boolean);
+});
+function moveSelectionToLayer(ids, layerId) {
+  try {
+    const moved = layerMovePlan(project, ids, layerId);
+    if (moved.every((i) => i.layerId === layerId)) return;
+    checkpoint();
+    for (const item of moved) item.layerId = layerId;
+    activeLayer = layerId;
+    multi = ids;
+    selected = multi.at(-1) || null;
+    commit();
+    notify(`${moved.length} アイテムをレイヤーへ移動しました。`);
+  } catch (e) {
+    notify(e.message);
+    renderProperties();
+  }
+}
+let layerDragIds = [];
+function clearLayerDrop() {
+  document
+    .querySelectorAll(".drop-target,.drop-rejected")
+    .forEach((el) => el.classList.remove("drop-target", "drop-rejected"));
+}
+$("#layers").addEventListener("dragstart", (e) => {
+  const row = e.target.closest("[data-layer]");
+  if (
+    loading ||
+    !row ||
+    !isEditable(
+      project,
+      project.items.find((i) => i.id === row.dataset.layer),
+    )
+  ) {
+    e.preventDefault();
+    return;
+  }
+  layerDragIds = selectionIds().includes(row.dataset.layer)
+    ? selectedItems().map((i) => i.id)
+    : [row.dataset.layer];
+  e.dataTransfer.setData(
+    "application/x-typefab-items",
+    JSON.stringify(layerDragIds),
+  );
+  e.dataTransfer.effectAllowed = "move";
+});
+$("#layers").addEventListener("dragover", (e) => {
+  const zone = e.target.closest("[data-drop-layer]");
+  if (!layerDragIds.length || !zone) return;
+  e.preventDefault();
+  clearLayerDrop();
+  try {
+    layerMovePlan(project, layerDragIds, zone.dataset.dropLayer);
+    zone.classList.add("drop-target");
+    e.dataTransfer.dropEffect = "move";
+  } catch {
+    zone.classList.add("drop-rejected");
+    e.dataTransfer.dropEffect = "none";
+  }
+});
+$("#layers").addEventListener("dragleave", (e) => {
+  if (!$("#layers").contains(e.relatedTarget)) clearLayerDrop();
+});
+$("#layers").addEventListener("drop", (e) => {
+  const zone = e.target.closest("[data-drop-layer]");
+  if (!layerDragIds.length || !zone) return;
+  e.preventDefault();
+  const ids = [...layerDragIds];
+  layerDragIds = [];
+  clearLayerDrop();
+  moveSelectionToLayer(ids, zone.dataset.dropLayer);
+});
+$("#layers").addEventListener("dragend", () => {
+  layerDragIds = [];
+  clearLayerDrop();
 });
 $("#layers").addEventListener("click", (e) => {
   const b = e.target.closest("[data-layer]");
@@ -757,6 +818,11 @@ $("#canvas").addEventListener("pointerdown", (e) => {
   if (loading || e.button !== 0 || preview) return;
   const p = canvasPoint(e);
   if (tool !== "select") {
+    if (e.pointerType === "touch") {
+      drag = { kind: "place", start: p, tool, moved: false };
+      $("#canvas").setPointerCapture(e.pointerId);
+      return;
+    }
     addItem(tool, snap ? Math.round(p.x) : p.x, snap ? Math.round(p.y) : p.y);
     return;
   }
@@ -783,6 +849,18 @@ $("#canvas").addEventListener("pointerdown", (e) => {
     )
   )
     return;
+  if (!id) {
+    drag = {
+      kind: "marquee",
+      start: p,
+      end: p,
+      base: e.shiftKey || e.ctrlKey || e.metaKey ? selectionIds() : [],
+      moved: false,
+    };
+    $("#canvas").setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
   if (e.shiftKey || e.ctrlKey || e.metaKey) {
     selectItem(id, true);
     render();
@@ -804,6 +882,21 @@ $("#canvas").addEventListener("pointerdown", (e) => {
 $("#canvas").addEventListener("pointermove", (e) => {
   if (!drag) return;
   const p = canvasPoint(e);
+  if (drag.kind === "place") {
+    if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) > 0.5)
+      drag.moved = true;
+    return;
+  }
+  if (drag.kind === "marquee") {
+    drag.end = p;
+    drag.moved = Math.hypot(p.x - drag.start.x, p.y - drag.start.y) > 0.5;
+    const r = selectionRect(drag.start, p);
+    const box = $("#marquee");
+    box.removeAttribute("hidden");
+    for (const key of ["x", "y", "w", "h"])
+      box.setAttribute({ w: "width", h: "height" }[key] || key, r[key]);
+    return;
+  }
   if (!drag.moved) {
     if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) < 0.3) return;
     checkpoint();
@@ -840,16 +933,145 @@ $("#canvas").addEventListener("pointermove", (e) => {
 });
 for (const event of ["pointerup", "pointercancel"])
   $("#canvas").addEventListener(event, () => {
-    if (drag?.moved) commit();
+    if (drag?.kind === "marquee") {
+      if (event === "pointerup") {
+        multi = drag.moved
+          ? marqueeIds(project, drag.start, drag.end, drag.base)
+          : drag.base;
+        selected = multi.at(-1) || null;
+        render();
+      }
+      $("#marquee").setAttribute("hidden", "");
+    } else if (drag?.kind === "place") {
+      if (event === "pointerup" && !drag.moved)
+        addItem(
+          drag.tool,
+          snap ? Math.round(drag.start.x) : drag.start.x,
+          snap ? Math.round(drag.start.y) : drag.start.y,
+        );
+    } else if (drag?.moved) commit();
     drag = null;
   });
-function setZoom(v) {
-  zoom = Math.min(4, Math.max(0.25, v));
+function setZoom(v, anchor) {
+  const viewport = $("#canvas-scroll"),
+    rect = viewport.getBoundingClientRect();
+  anchor = anchor || {
+    clientX: rect.left + rect.width / 2,
+    clientY: rect.top + rect.height / 2,
+  };
+  const before = canvasPoint(anchor);
+  zoom = Math.min(8, Math.max(0.25, v));
   renderCanvas();
+  const after = new DOMPoint(before.x, before.y).matrixTransform(
+    $("#canvas").getScreenCTM(),
+  );
+  viewport.scrollLeft += after.x - anchor.clientX;
+  viewport.scrollTop += after.y - anchor.clientY;
 }
 $("#zoom-in").onclick = () => setZoom(zoom * 1.25);
 $("#zoom-out").onclick = () => setZoom(zoom / 1.25);
 $("#zoom-reset").onclick = () => setZoom(1);
+$("#canvas-scroll").addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    if (loading || drag) return;
+    setZoom(wheelZoom(zoom, e.deltaY, e.deltaMode, e.ctrlKey), e);
+  },
+  { passive: false },
+);
+const touchPoints = new Map();
+let pinch = null,
+  pinchActive = false,
+  safariZoom = 1;
+const touchMeasure = () => {
+  const [a, b] = [...touchPoints.values()];
+  return {
+    distance: Math.max(
+      1,
+      Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+    ),
+    clientX: (a.clientX + b.clientX) / 2,
+    clientY: (a.clientY + b.clientY) / 2,
+  };
+};
+$("#canvas-scroll").addEventListener(
+  "pointerdown",
+  (e) => {
+    if (loading || e.pointerType !== "touch") return;
+    touchPoints.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+    if (touchPoints.size === 2) {
+      if (drag?.moved && ["move", "resize"].includes(drag.kind)) {
+        project = JSON.parse(history.pop());
+        future = [];
+        persist();
+      }
+      drag = null;
+      $("#marquee").setAttribute("hidden", "");
+      pinchActive = true;
+      pinch = touchMeasure();
+      for (const id of touchPoints.keys())
+        $("#canvas-scroll").setPointerCapture(id);
+      render();
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (pinchActive) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  },
+  true,
+);
+$("#canvas-scroll").addEventListener(
+  "pointermove",
+  (e) => {
+    if (e.pointerType !== "touch" || !touchPoints.has(e.pointerId)) return;
+    touchPoints.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+    if (!pinchActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (touchPoints.size >= 2) {
+      const next = touchMeasure();
+      setZoom((zoom * next.distance) / pinch.distance, pinch);
+      $("#canvas-scroll").scrollLeft += pinch.clientX - next.clientX;
+      $("#canvas-scroll").scrollTop += pinch.clientY - next.clientY;
+      pinch = next;
+    }
+  },
+  true,
+);
+for (const type of ["pointerup", "pointercancel"])
+  $("#canvas-scroll").addEventListener(
+    type,
+    (e) => {
+      if (e.pointerType !== "touch") return;
+      touchPoints.delete(e.pointerId);
+      if (pinchActive) {
+        e.preventDefault();
+        e.stopPropagation();
+        pinch = touchPoints.size >= 2 ? touchMeasure() : null;
+        if (touchPoints.size === 0) pinchActive = false;
+      }
+    },
+    true,
+  );
+$("#canvas-scroll").addEventListener(
+  "gesturestart",
+  (e) => {
+    e.preventDefault();
+    safariZoom = zoom;
+  },
+  { passive: false },
+);
+$("#canvas-scroll").addEventListener(
+  "gesturechange",
+  (e) => {
+    e.preventDefault();
+    if (!loading && !pinchActive)
+      setZoom(safariZoom * e.scale, Number.isFinite(e.clientX) ? e : undefined);
+  },
+  { passive: false },
+);
 new ResizeObserver(() => renderCanvas()).observe($("#canvas-scroll"));
 window.addEventListener("keydown", (e) => {
   if (loading) return;

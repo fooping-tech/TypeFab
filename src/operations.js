@@ -20,12 +20,10 @@ export function booleanContours(items, operation) {
     )
       throw Error("線分・ブリッジ・開いた輪郭はブーリアン演算できません。");
     const paths = worldContours(item).map((c) =>
-      c
-        .slice(0, -1)
-        .map((p) => ({
-          X: Math.round(p.x * SCALE),
-          Y: Math.round(p.y * SCALE),
-        })),
+      c.slice(0, -1).map((p) => ({
+        X: Math.round(p.x * SCALE),
+        Y: Math.round(p.y * SCALE),
+      })),
     );
     // Normalize each object's nonzero fill first; preserve holes and remove self intersections.
     return ClipperLib.Clipper.SimplifyPolygons(
@@ -127,8 +125,38 @@ export function followBridges(items, before, after) {
       x: next.x + (p.x - old.x) * (old.w ? next.w / old.w : 1),
       y: next.y + (p.y - old.y) * (old.h ? next.h / old.h : 1),
     };
+    if (bridge.bridgeMode === "island") {
+      const endpoints = [-1, 1].map((sign) => {
+        const angle = (bridge.rotation * Math.PI) / 180;
+        const local = transform(
+          {
+            x: bridge.x + (sign * Math.cos(angle) * bridge.w) / 2,
+            y: bridge.y + (sign * Math.sin(angle) * bridge.w) / 2,
+          },
+          before,
+          true,
+        );
+        return transform(
+          {
+            x: next.x + (local.x - old.x) * (old.w ? next.w / old.w : 1),
+            y: next.y + (local.y - old.y) * (old.h ? next.h / old.h : 1),
+          },
+          after,
+        );
+      });
+      bridge.w = Math.hypot(
+        endpoints[1].x - endpoints[0].x,
+        endpoints[1].y - endpoints[0].y,
+      );
+      bridge.rotation =
+        (Math.atan2(
+          endpoints[1].y - endpoints[0].y,
+          endpoints[1].x - endpoints[0].x,
+        ) *
+          180) /
+        Math.PI;
+    } else bridge.rotation += after.rotation - before.rotation;
     Object.assign(bridge, transform(q, after));
-    bridge.rotation += after.rotation - before.rotation;
     bridge.layerId = after.layerId;
   }
 }

@@ -164,7 +164,14 @@ export function cutGeometry(items) {
       paths.push(...runs);
     }
   }
-  return { paths, closed, untouched, removed, vanished };
+  return {
+    paths,
+    closed,
+    untouched,
+    removed,
+    vanished,
+    ...islandBridgeStatus(items),
+  };
 }
 const num = (n) => Number(n.toFixed(4));
 export function pathData(paths) {
@@ -264,22 +271,138 @@ export function bounds(contours) {
   }
   return { x, y, w: x2 - x, h: y2 - y };
 }
+function polygonArea(c) {
+  return Math.abs(
+    c.slice(1).reduce((sum, p, i) => sum + c[i].x * p.y - p.x * c[i].y, 0) / 2,
+  );
+}
+function containsPoint(p, c) {
+  let inside = false;
+  for (let i = 1; i < c.length; i++) {
+    const a = c[i - 1],
+      b = c[i];
+    if (
+      a.y > p.y !== b.y > p.y &&
+      p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x
+    )
+      inside = !inside;
+  }
+  return inside;
+}
+export function contourTree(item) {
+  const contours = worldContours(item).filter(
+    (c) => c.length > 3 && same(c[0], c.at(-1)),
+  );
+  const areas = contours.map(polygonArea);
+  return contours.map((points, index) => {
+    let parent = -1;
+    for (let j = 0; j < contours.length; j++)
+      if (
+        areas[j] > areas[index] + 1e-8 &&
+        containsPoint(points[0], contours[j]) &&
+        (parent < 0 || areas[j] < areas[parent])
+      )
+        parent = j;
+    return { points, parent };
+  });
+}
+function crossesContour(points, bridge) {
+  const runs = cutContour(points, [bridge]);
+  return runs.length !== 1 || !same(runs[0][0], runs[0].at(-1));
+}
+function linked(child, parent, bridges) {
+  return bridges.some(
+    (b) => crossesContour(child, b) && crossesContour(parent, b),
+  );
+}
+export function islandBridgeStatus(items) {
+  let islands = 0,
+    unbridgedIslands = 0;
+  for (const item of items.filter((i) => i.type !== "bridge")) {
+    const tree = contourTree(item),
+      bridges = items.filter(
+        (b) => b.type === "bridge" && (!b.targetId || b.targetId === item.id),
+      );
+    for (const node of tree)
+      if (node.parent >= 0) {
+        islands++;
+        if (!linked(node.points, tree[node.parent].points, bridges))
+          unbridgedIslands++;
+      }
+  }
+  return { islands, unbridgedIslands };
+}
+function nearestConnection(a, b) {
+  let best = { distance: Infinity };
+  const project = (p, u, v) => {
+    const dx = v.x - u.x,
+      dy = v.y - u.y,
+      length = dx * dx + dy * dy,
+      t = length
+        ? Math.max(
+            0,
+            Math.min(1, ((p.x - u.x) * dx + (p.y - u.y) * dy) / length),
+          )
+        : 0;
+    return { x: u.x + t * dx, y: u.y + t * dy };
+  };
+  const consider = (p, q) => {
+    const d = Math.hypot(p.x - q.x, p.y - q.y);
+    if (d < best.distance) best = { a: p, b: q, distance: d };
+  };
+  for (let i = 1; i < a.length; i++)
+    for (let j = 1; j < b.length; j++) {
+      consider(a[i - 1], project(a[i - 1], b[j - 1], b[j]));
+      consider(project(b[j - 1], a[i - 1], a[i]), b[j - 1]);
+    }
+  return best;
+}
 export function automaticBridges(items, width = 1.5, targetIds = null) {
   const existing = items.filter((i) => i.type === "bridge"),
     added = [];
   for (const item of items.filter(
     (i) => i.type !== "bridge" && (!targetIds || targetIds.includes(i.id)),
-  ))
-    for (const ps of worldContours(item)) {
-      if (!same(ps[0], ps.at(-1))) continue;
-      const runs = cutContour(
-        ps,
-        [...existing, ...added].filter(
-          (b) => !b.targetId || b.targetId === item.id,
-        ),
+  )) {
+    const tree = contourTree(item),
+      base = { targetId: item.id, layerId: item.layerId, type: "bridge" };
+    const applicable = () =>
+      [...existing, ...added].filter(
+        (b) => !b.targetId || b.targetId === item.id,
       );
-      if (runs.length !== 1 || !same(runs[0][0], runs[0].at(-1))) continue;
-      // Place a square holding tab at the midpoint of the longest segment.
+    // One continuous uncut band must cross BOTH boundaries of each nested loop.
+    // Independent old tabs on each contour do not satisfy this connection.
+    for (const node of tree)
+      if (node.parent >= 0) {
+        const parent = tree[node.parent].points;
+        if (linked(node.points, parent, applicable())) continue;
+        const connection = nearestConnection(node.points, parent);
+        if (!Number.isFinite(connection.distance)) continue;
+        const p = mid(connection.a, connection.b);
+        added.push({
+          ...base,
+          x: p.x,
+          y: p.y,
+          w: connection.distance + width,
+          h: width,
+          rotation:
+            (Math.atan2(
+              connection.b.y - connection.a.y,
+              connection.b.x - connection.a.x,
+            ) *
+              180) /
+            Math.PI,
+          name: "島つなぎブリッジ",
+          bridgeMode: "island",
+        });
+      }
+    // Simple closed shapes without an inner loop still get a holding tab.
+    for (const node of tree) {
+      if (
+        node.parent >= 0 ||
+        applicable().some((b) => crossesContour(node.points, b))
+      )
+        continue;
+      const ps = node.points;
       let longest = -1,
         index = 1;
       for (let i = 1; i < ps.length; i++) {
@@ -291,16 +414,16 @@ export function automaticBridges(items, width = 1.5, targetIds = null) {
       }
       const p = mid(ps[index - 1], ps[index]);
       added.push({
-        targetId: item.id,
-        layerId: item.layerId,
-        type: "bridge",
+        ...base,
         x: p.x,
         y: p.y,
         w: width,
         h: width,
         rotation: 0,
         name: "自動ブリッジ",
+        bridgeMode: "holding",
       });
     }
+  }
   return added;
 }

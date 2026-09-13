@@ -1056,3 +1056,45 @@ dialog .primary {
     display: none;
   }
 }
+#canvas-scroll {
+  display: block;
+  padding: 0;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+#canvas-stage {
+  display: grid;
+  place-items: center;
+  width: max-content;
+  height: max-content;
+  min-width: 100%;
+  min-height: 100%;
+  padding: 45px 50px;
+}
+#marquee[hidden] {
+  display: none;
+}
+.layer[draggable="true"] {
+  cursor: grab;
+}
+.layer[draggable="true"]:active {
+  cursor: grabbing;
+}
+.layer-group.drop-target {
+  outline: 2px solid #3788bb;
+  outline-offset: -2px;
+  background: #e6f1fa;
+}
+.layer-group.drop-rejected {
+  outline: 2px solid #bd6551;
+  outline-offset: -2px;
+  background: #fff0ed;
+}
+@media (max-width: 520px) {
+  #canvas-scroll {
+    padding: 0;
+  }
+  #canvas-stage {
+    padding: 30px;
+  }
+}
