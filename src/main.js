@@ -24,6 +24,7 @@ import {
   layerMovePlan,
   wheelZoom,
 } from "./interaction.js";
+import { splitCharacters, splitParts, reassignBridges } from "./grouping.js";
 let typography;
 const shapingFonts = new Map();
 const typographyReady = import("./typography.js").then((m) => (typography = m));
@@ -66,7 +67,8 @@ let selected = null,
   statusTimer;
 const uid = () => crypto.randomUUID();
 let multi = [],
-  activeLayer = "layer-default";
+  activeLayer = "layer-default",
+  textEdit = null;
 const selectionIds = () => (multi.length ? multi : selected ? [selected] : []);
 const selectedItems = () =>
   selectionIds()
@@ -161,6 +163,22 @@ function textContours(item) {
     fonts.get(item.font),
     shapingFonts.get(item.font),
   );
+}
+function textGlyphs(item) {
+  if (!typography) throw Error("フォントの準備が完了するまでお待ちください。");
+  return typography.layoutGlyphs(
+    item,
+    fonts.get(item.font),
+    shapingFonts.get(item.font),
+  );
+}
+const visibleChars = (text) => [...text].filter((c) => /\S/u.test(c)).length;
+// What ungrouping does next: text → one item per character → parts.
+function ungroupKind(item) {
+  if (item?.type === "text" && visibleChars(item.text) > 1) return "characters";
+  if (["text", "outline"].includes(item?.type) && splitParts(item).length > 1)
+    return "parts";
+  return null;
 }
 function addItem(type, x = 35, y = 45) {
   try {
@@ -258,13 +276,13 @@ $("#app").innerHTML = `
   )
   .join(
     "",
-  )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
+  )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button><button id="ungroup" class="tool" title="文字を1文字ずつ、もう一度で部位ごとに分解 (Ctrl/⌘ Shift G)"><span class="tool-icon">⊞</span>グループ化解除</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで複数選択</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
-<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.4</span></span></footer>
+<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.5</span></span></footer>
 <input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,application/json">
-<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>`;
+<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。「グループ化解除」で文字を1文字ずつに、もう一度で部位ごとに分解できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>`;
 
 function renderLayers() {
   $("#layers").innerHTML = [...project.layers]
@@ -305,6 +323,10 @@ function renderProperties() {
     $("#properties").innerHTML =
       `<section><h3>${chosen.length} アイテムを選択</h3><p class="note">差分の土台: ${esc(chosen[0].name)}</p><div class="boolean-actions"><button data-boolean="union">結合 ∪</button><button data-boolean="difference">切り抜き −</button><button data-boolean="intersection">交差 ∩</button><button data-boolean="xor">排他的 XOR</button></div><p class="note">閉じた図形・文字の輪郭に適用します。結果は固定パスになります。</p></section>`;
   if (chosen.length) {
+    const kinds = new Set(chosen.map(ungroupKind).filter(Boolean));
+    if (kinds.size)
+      $("#properties").innerHTML +=
+        `<section><button id="item-ungroup" class="wide-button">⊞ ${kinds.size > 1 ? "グループ化解除" : kinds.has("characters") ? "1文字ずつに分解" : "部位ごとに分解"}</button><p class="note">${kinds.has("characters") ? "文字ごとに移動・編集できます。もう一度で部位ごとに分解します。" : "つながった部位ごとの固定パスにします。"}</p></section>`;
     if (chosen.length === 1 && canResize(i))
       $("#properties").innerHTML +=
         `<section><label class="check"><input id="ratio-lock" type="checkbox" ${i.ratioLocked ? "checked" : ""}> 縦横比を固定</label><p class="note">四隅のハンドルをドラッグして拡縮。Shiftでも比率を固定できます。</p></section>`;
@@ -379,7 +401,8 @@ function renderCanvas() {
   $("#board-label").textContent = `${project.width} × ${project.height} mm`;
   $("#zoom-reset").textContent = `${Math.round(zoom * 100)}%`;
 }
-function render() {
+// While typing, the inspector is left intact so the text box keeps focus and IME state.
+function render({ properties = true } = {}) {
   document.querySelectorAll("[data-loading-disabled]").forEach((el) => {
     el.disabled = el.dataset.loadingDisabled === "true";
     delete el.dataset.loadingDisabled;
@@ -398,7 +421,10 @@ function render() {
   selected = valid.at(-1) || null;
   $("#project-name").textContent = project.name;
   renderLayers();
-  renderProperties();
+  if (properties) {
+    textEdit = null;
+    renderProperties();
+  } else $("#properties h3").textContent = selectedItem()?.name ?? "";
   renderCanvas();
   document
     .querySelectorAll("[data-tool]")
@@ -411,6 +437,7 @@ function render() {
   $("#auto-bridge").disabled = !selectedItems().some(
     (i) => i.type !== "bridge",
   );
+  $("#ungroup").disabled = !selectedItems().some(ungroupKind);
   $("#delete").disabled = $("#duplicate").disabled = !selectedItem();
   const c = cutGeometry(visibleItems(project)),
     outside = !withinBoard();
@@ -458,16 +485,57 @@ $("#properties").addEventListener("change", (e) => {
       return;
     }
     updateSelected(el.dataset.prop, el.valueAsNumber);
-  } else if (el.id === "text-content") updateSelected("text", el.value);
-  else if (el.id === "font-select") updateSelected("font", el.value);
+  } else if (el.id === "font-select") updateSelected("font", el.value);
   else if (el.id === "vertical") updateSelected("vertical", el.checked);
   else if (el.id === "ratio-lock") updateSelected("ratioLocked", el.checked);
   else if (el.id === "item-layer")
     moveSelectionToLayer(selectionIds(), el.value);
 });
+// Text edits apply on every input event. One undo step covers a typing session.
+function liveText(value) {
+  const current = selectedItem();
+  if (current?.type !== "text" || !isEditable(project, current)) return;
+  const next = { ...current, text: value, name: value || "空の文字" };
+  try {
+    next.contours = textContours(next);
+  } catch (e) {
+    notify(e.message);
+    return;
+  }
+  if (textEdit?.id !== current.id) {
+    checkpoint();
+    textEdit = {
+      id: current.id,
+      before: structuredClone(current),
+      bridges: project.items
+        .filter((i) => i.targetId === current.id)
+        .map((b) => structuredClone(b)),
+    };
+  }
+  // Scoped bridges follow from the session start, so keystrokes do not accumulate drift.
+  for (const bridge of project.items) {
+    const start = textEdit.bridges.find((b) => b.id === bridge.id);
+    if (start) Object.assign(bridge, structuredClone(start));
+  }
+  followBridges(project.items, textEdit.before, next);
+  project.items[project.items.indexOf(current)] = next;
+  render({ properties: false });
+  persist();
+}
+$("#properties").addEventListener("input", (e) => {
+  if (e.target.id === "text-content") liveText(e.target.value);
+});
+$("#properties").addEventListener("focusout", (e) => {
+  if (e.target.id !== "text-content") return;
+  textEdit = null;
+  // Text the font cannot draw is not kept; show what the canvas shows.
+  const current = selectedItem();
+  if (current?.type === "text") e.target.value = current.text;
+});
 $("#properties").addEventListener("click", (e) => {
   if (e.target.closest("#add-font")) $("#font-file").click();
   if (e.target.closest("#item-auto-bridge")) applyAutoBridges();
+  if (e.target.closest("#item-ungroup")) ungroup();
   const op = e.target.closest("[data-boolean]");
   if (op) applyBoolean(op.dataset.boolean);
 });
@@ -744,6 +812,51 @@ function applyBoolean(operation) {
     notify(e.message);
   }
 }
+function ungroup() {
+  try {
+    const replaced = [];
+    for (const item of selectedItems()) {
+      const kind = ungroupKind(item);
+      if (!kind) continue;
+      let pieces =
+        kind === "characters" ? splitCharacters(item, textGlyphs(item)) : [];
+      // Several characters shaped into one glyph fall through to parts.
+      if (pieces.length < 2) pieces = splitParts(item);
+      if (pieces.length > 1)
+        replaced.push({
+          item,
+          kind: pieces[0].type === "text" ? "characters" : "parts",
+          pieces: pieces.map((p) => ({ ...p, id: uid() })),
+        });
+    }
+    if (!replaced.length)
+      throw Error("選択中のアイテムはこれ以上分解できません。");
+    const added = replaced.reduce((n, r) => n + r.pieces.length - 1, 0);
+    if (project.items.length + added > 2000)
+      throw Error("オブジェクトが多すぎます。分解する文字を減らしてください。");
+    checkpoint();
+    for (const { item, pieces } of replaced) {
+      const copies = reassignBridges(project.items, item.id, pieces, uid);
+      project.items.splice(project.items.indexOf(item), 1, ...pieces);
+      project.items.push(...copies);
+    }
+    multi = replaced.flatMap((r) => r.pieces.map((p) => p.id));
+    selected = multi.at(-1);
+    preview = false;
+    commit();
+    const kinds = new Set(replaced.map((r) => r.kind));
+    notify(
+      kinds.size > 1
+        ? `${multi.length} アイテムに分解しました。元に戻す操作で復元できます。`
+        : kinds.has("characters")
+          ? `${multi.length} 文字に分解しました。もう一度で部位ごとに分解できます。`
+          : `${multi.length} つの部位に分解しました。元に戻す操作で復元できます。`,
+    );
+  } catch (e) {
+    notify(e.message);
+  }
+}
+$("#ungroup").onclick = ungroup;
 $("#export").onclick = exportFile;
 $("#save-project").onclick = () =>
   download(
@@ -1099,6 +1212,11 @@ new ResizeObserver(() => renderCanvas()).observe($("#canvas-scroll"));
 window.addEventListener("keydown", (e) => {
   if (loading) return;
   if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || $("#help").open) return;
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "g") {
+    e.preventDefault();
+    ungroup();
+    return;
+  }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
     e.preventDefault();
     e.shiftKey ? redo() : undo();

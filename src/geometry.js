@@ -371,7 +371,7 @@ export function contourTree(item) {
     return { points, parent };
   });
 }
-function crossesContour(points, bridge) {
+export function crossesContour(points, bridge) {
   const runs = cutContour(points, [bridge]);
   return runs.length !== 1 || !same(runs[0][0], runs[0].at(-1));
 }

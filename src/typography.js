@@ -25,10 +25,19 @@ export function verticalGlyphs(shaping, text) {
   }));
 }
 export function layoutText(item, font, shaping) {
+  return layoutGlyphs(item, font, shaping).flatMap((g) => g.contours);
+}
+// Per glyph cluster: its source text, contours, and the pen offset at which a
+// one-character text item with the same settings reproduces the glyph exactly.
+export function layoutGlyphs(item, font, shaping) {
   if (!font) throw Error("この文字のフォントを追加し、選び直してください。");
+  // opentype.js hasChar() is true for every character (it maps unknown ones to
+  // .notdef), so check for a real glyph index instead.
   const missing = [
     ...new Set(
-      [...item.text].filter((c) => !/[\s]/u.test(c) && !font.hasChar(c)),
+      [...item.text].filter(
+        (c) => !/[\s]/u.test(c) && !(font.charToGlyphIndex(c) > 0),
+      ),
     ),
   ];
   if (missing.length)
@@ -41,14 +50,30 @@ export function layoutText(item, font, shaping) {
     item.text.split("\n").forEach((line, column) => {
       let x = size / 2 - column * size * 1.3,
         y = 0;
-      for (const g of verticalGlyphs(shaping, line)) {
-        const glyph = font.glyphs.get(g.id);
-        all.push(
-          ...flatten(
+      const shaped = verticalGlyphs(shaping, line),
+        clusters = [...new Set(shaped.map((g) => g.cluster))].sort(
+          (a, b) => a - b,
+        );
+      let previous = null;
+      for (const g of shaped) {
+        const glyph = font.glyphs.get(g.id),
+          contours = flatten(
             glyph.getPath(x + g.xOffset * scale, y - g.yOffset * scale, size)
               .commands,
-          ),
-        );
+          );
+        // Glyphs shaped from the same characters stay together as one character.
+        if (previous?.cluster === g.cluster)
+          previous.contours.push(...contours);
+        else {
+          const end = clusters[clusters.indexOf(g.cluster) + 1] ?? line.length;
+          previous = {
+            cluster: g.cluster,
+            text: line.slice(g.cluster, end),
+            contours,
+            origin: { x: x - size / 2, y },
+          };
+          all.push(previous);
+        }
         x += g.xAdvance * scale;
         y -= g.yAdvance * scale;
         y += item.spacing;
@@ -64,7 +89,11 @@ export function layoutText(item, font, shaping) {
         continue;
       }
       const glyph = font.charToGlyph(char);
-      all.push(...flatten(glyph.getPath(x, y, size).commands));
+      all.push({
+        text: char,
+        contours: flatten(glyph.getPath(x, y, size).commands),
+        origin: { x, y: y - size },
+      });
       x +=
         ((glyph.advanceWidth || font.unitsPerEm) / font.unitsPerEm) * size +
         item.spacing;
