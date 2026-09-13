@@ -77,4 +77,9 @@
 - Downloaded SVG parsed as XML: two named layer groups, 240mm width, paths only; no text/masks/clipping rectangles.
 - Desktop and 390px mobile screenshots inspected; mobile document width equals viewport width.
 - README now documents the features, selection ordering, saved-project migration and remaining typography/manufacturing boundaries.
-- Publication pending for this expansion; previous v0.1 URL remains https://fooping-tech.github.io/TypeFab/.
+- Expansion commit `5dec5fe` deployed successfully: https://github.com/fooping-tech/TypeFab/actions/runs/34757423304. Public URL remains https://fooping-tech.github.io/TypeFab/.
+
+### Startup guard follow-up
+- Initial public validation confirmed v0.2 handles, layers, scoped bridge and SVG download. It also exposed a fast-interaction race while the full Japanese fonts were still loading.
+- Saved project restoration now occurs before asynchronous font loading; edit controls, canvas gestures and shortcuts wait until initialization completes. A font-load failure preserves restored data instead of rebuilding/overwriting it.
+- All 28 tests and the production build pass after the guard. A fresh Chromium session with font requests delayed 1800 ms confirmed controls disabled while loading, enabled afterward, and exact successful vertical text entry.

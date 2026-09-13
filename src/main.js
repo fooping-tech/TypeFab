@@ -46,6 +46,7 @@ let project = {
   height: 160,
   items: [],
 };
+let loading = true;
 let selected = null,
   tool = "select",
   preview = false,
@@ -372,6 +373,11 @@ function renderCanvas() {
   $("#zoom-reset").textContent = `${Math.round(zoom * 100)}%`;
 }
 function render() {
+  document.querySelectorAll("[data-loading-disabled]").forEach((el) => {
+    el.disabled = el.dataset.loadingDisabled === "true";
+    delete el.dataset.loadingDisabled;
+  });
+  $("#app").setAttribute("aria-busy", String(loading));
   ensureLayers(project);
   if (!project.layers.some((l) => l.id === activeLayer))
     activeLayer = project.layers[0].id;
@@ -403,6 +409,11 @@ function render() {
     outside = !withinBoard();
   $("#checks").innerHTML =
     `<div class="check-row"><span>閉じた輪郭</span><b>${c.closed}</b></div><div class="check-row ${c.untouched ? "warning" : "success"}"><span>切り残しなし</span><b>${c.untouched}</b></div><div class="check-row"><span>ブリッジ</span><b>${project.items.filter((i) => i.type === "bridge").length}</b></div>${c.vanished ? `<div class="check-row warning"><span>完全に隠れた輪郭</span><b>${c.vanished}</b></div>` : ""}<div class="check-summary ${outside || c.vanished ? "warning" : ""}">${c.vanished ? "! ブリッジ幅を縮めて輪郭を残してください" : outside ? "! 加工エリア外にカット線があります" : c.untouched ? "! 脱落させたくない輪郭にブリッジを追加" : c.closed ? "✓ 全閉輪郭に切り残しあり · 強度は要確認" : "図形や文字を追加してください"}</div>`;
+  if (loading)
+    document.querySelectorAll("button,input,select,textarea").forEach((el) => {
+      el.dataset.loadingDisabled = String(el.disabled);
+      el.disabled = true;
+    });
 }
 function updateSelected(key, value) {
   const old = selectedItem();
@@ -743,7 +754,7 @@ function canvasPoint(e) {
   return new DOMPoint(e.clientX, e.clientY).matrixTransform(matrix.inverse());
 }
 $("#canvas").addEventListener("pointerdown", (e) => {
-  if (e.button !== 0 || preview) return;
+  if (loading || e.button !== 0 || preview) return;
   const p = canvasPoint(e);
   if (tool !== "select") {
     addItem(tool, snap ? Math.round(p.x) : p.x, snap ? Math.round(p.y) : p.y);
@@ -841,6 +852,7 @@ $("#zoom-out").onclick = () => setZoom(zoom / 1.25);
 $("#zoom-reset").onclick = () => setZoom(1);
 new ResizeObserver(() => renderCanvas()).observe($("#canvas-scroll"));
 window.addEventListener("keydown", (e) => {
+  if (loading) return;
   if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || $("#help").open) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
     e.preventDefault();
@@ -880,6 +892,17 @@ window.addEventListener("keydown", (e) => {
 $("#help-button").onclick = () => $("#help").showModal();
 $("#close-help").onclick = $("#start").onclick = () => $("#help").close();
 async function init() {
+  let restored = false;
+  try {
+    const saved = localStorage.getItem("typefab-v1");
+    if (saved) {
+      project = validateProject(JSON.parse(saved));
+      restored = true;
+    }
+  } catch {
+    notify("自動保存データを復元できませんでした。");
+  }
+
   render();
   try {
     await typographyReady;
@@ -895,16 +918,6 @@ async function init() {
         shapingFonts.set(id, typography.makeShapingFont(bytes));
       }),
     );
-    let restored = false;
-    try {
-      const saved = localStorage.getItem("typefab-v1");
-      if (saved) {
-        project = validateProject(JSON.parse(saved));
-        restored = true;
-      }
-    } catch {
-      notify("自動保存データを復元できませんでした。");
-    }
     if (!restored) {
       const title = {
         id: uid(),
@@ -949,9 +962,12 @@ async function init() {
       ensureLayers(project);
       selectItem(title.id);
     }
+    loading = false;
     commit();
     notify("準備ができました。文字を編集して、あなただけのデザインに。");
   } catch (e) {
+    loading = false;
+    render();
     notify(`${e.message} · ページを再読み込みしてください。`);
   }
 }
