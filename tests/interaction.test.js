@@ -12,6 +12,7 @@ import {
 import { ensureLayers } from "../src/layers.js";
 import {
   shapeContours,
+  stencilContours,
   automaticBridges,
   cutGeometry,
   flatten,
@@ -163,8 +164,8 @@ test("old independent tabs do not count as a single bridge across a ring", () =>
   assert.equal(cutGeometry([donut, ...old]).untouched, 0);
   assert.equal(islandBridgeStatus([donut, ...old]).unbridgedIslands, 1);
   const added = automaticBridges([donut, ...old], 1.5, ["d"]);
-  assert.equal(added.length, 1);
-  assert.equal(added[0].bridgeMode, "island");
+  assert.equal(added.length, 2);
+  assert.equal(added[0].bridgeMode, "stencil");
   assert.equal(
     islandBridgeStatus([donut, ...old, ...added]).unbridgedIslands,
     0,
@@ -194,7 +195,7 @@ for (const file of [
       const tree = contourTree(item);
       assert.ok(tree.some((n) => n.parent >= 0));
       const bridges = automaticBridges([item], 1.5, ["yo"]);
-      assert.ok(bridges.some((b) => b.bridgeMode === "island" && b.w > b.h));
+      assert.ok(bridges.some((b) => b.bridgeMode === "stencil" && b.w > b.h));
       for (const n of tree.filter((n) => n.parent >= 0))
         assert.ok(
           bridges.some((b) =>
@@ -214,7 +215,19 @@ for (const file of [
         height: 120,
         items: [item, ...bridges],
       });
-      assert.doesNotMatch(svg, /<rect|<mask| Z/);
+      assert.doesNotMatch(svg, /<rect|<mask/);
+      assert.match(svg, / Z/);
+      const output = stencilContours(item, bridges);
+      assert.ok(output.length >= 2);
+      assert.ok(
+        output.every((c) => JSON.stringify(c[0]) === JSON.stringify(c.at(-1))),
+      );
+      assert.equal(
+        contourTree({ x: 0, y: 0, rotation: 0, contours: output }).filter(
+          (n) => n.parent >= 0,
+        ).length,
+        0,
+      );
       assert.equal(automaticBridges([item, ...bridges]).length, 0);
       const resized = structuredClone(item);
       resized.contours = resized.contours.map((c) =>
@@ -242,7 +255,56 @@ test("multiple nested loops connect to direct parents without affecting other it
   };
   const other = { ...item, id: "b" },
     tabs = automaticBridges([item, other], 1.5, ["a"]);
-  assert.equal(tabs.length, 2);
+  assert.equal(tabs.length, 4);
   assert.equal(islandBridgeStatus([item, ...tabs]).unbridgedIslands, 0);
   assert.equal(islandBridgeStatus([other, ...tabs]).unbridgedIslands, 2);
 });
+
+for (const file of [
+  "ZenKakuGothicNew-Regular.ttf",
+  "ShipporiMincho-Regular.ttf",
+]) {
+  test(`${file}: stencil subtraction opens counters in Japanese and Latin glyphs`, () => {
+    const raw = fs.readFileSync(
+      new URL(`../public/fonts/${file}`, import.meta.url),
+    );
+    const font = opentype.parse(
+      raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength),
+    );
+    for (const text of [
+      "よ",
+      "日",
+      "目",
+      "田",
+      "回",
+      "品",
+      "国",
+      "あ",
+      "ぬ",
+      "の",
+      "ABOPQR0689",
+    ]) {
+      const item = {
+        id: "glyph",
+        type: "text",
+        x: 0,
+        y: 0,
+        rotation: 0,
+        contours: flatten(font.getPath(text, 0, 50, 50).commands),
+      };
+      const tabs = automaticBridges([item]);
+      const output = stencilContours(item, tabs);
+      assert.equal(
+        contourTree({ ...item, contours: output }).filter((n) => n.parent >= 0)
+          .length,
+        0,
+        text,
+      );
+      assert.ok(
+        output.every((c) => JSON.stringify(c[0]) === JSON.stringify(c.at(-1))),
+        text,
+      );
+      assert.ok(output.length > 0, text);
+    }
+  });
+}

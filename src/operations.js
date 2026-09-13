@@ -125,7 +125,7 @@ export function followBridges(items, before, after) {
       x: next.x + (p.x - old.x) * (old.w ? next.w / old.w : 1),
       y: next.y + (p.y - old.y) * (old.h ? next.h / old.h : 1),
     };
-    if (bridge.bridgeMode === "island") {
+    if (["island", "stencil"].includes(bridge.bridgeMode)) {
       const endpoints = [-1, 1].map((sign) => {
         const angle = (bridge.rotation * Math.PI) / 180;
         const local = transform(

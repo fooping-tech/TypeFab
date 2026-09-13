@@ -1,3 +1,4 @@
+import ClipperLib from "clipper-lib";
 import { visibleItems } from "./layers.js";
 // All geometry uses millimetres. Curves are adaptively flattened to 0.02 mm.
 export const TOLERANCE = 0.02;
@@ -137,6 +138,60 @@ export function cutContour(points, bridges) {
   }
   return runs;
 }
+// Subtract bridge rectangles as areas, retaining their sidewalls in the cut path.
+export function stencilContours(item, bridges) {
+  const source = worldContours(item);
+  const bands = bridges.filter(
+    (b) =>
+      b.bridgeMode === "stencil" && (!b.targetId || b.targetId === item.id),
+  );
+  if (!bands.length) return source;
+  const scale = 10000;
+  const encode = (c) =>
+    c.map((p) => ({ X: Math.round(p.x * scale), Y: Math.round(p.y * scale) }));
+  const closed = source.filter((c) => c.length > 3 && same(c[0], c.at(-1)));
+  const open = source.filter((c) => c.length < 4 || !same(c[0], c.at(-1)));
+  if (!closed.length) return source;
+  const clipper = new ClipperLib.Clipper();
+  clipper.AddPaths(
+    closed.map((c) => encode(c.slice(0, -1))),
+    ClipperLib.PolyType.ptSubject,
+    true,
+  );
+  clipper.AddPaths(
+    bands.map((b) =>
+      encode(
+        [
+          [-1, -1],
+          [1, -1],
+          [1, 1],
+          [-1, 1],
+        ].map(([x, y]) => transform({ x: (x * b.w) / 2, y: (y * b.h) / 2 }, b)),
+      ),
+    ),
+    ClipperLib.PolyType.ptClip,
+    true,
+  );
+  const result = [];
+  if (
+    !clipper.Execute(
+      ClipperLib.ClipType.ctDifference,
+      result,
+      ClipperLib.PolyFillType.pftNonZero,
+      ClipperLib.PolyFillType.pftNonZero,
+    )
+  )
+    throw Error("ブリッジの切り抜きに失敗しました。");
+  return [
+    ...open,
+    ...result
+      .filter((c) => c.length >= 3)
+      .map((c) => {
+        const ps = c.map((p) => ({ x: p.X / scale, y: p.Y / scale }));
+        return [...ps, { ...ps[0] }];
+      }),
+  ];
+}
 export function cutGeometry(items) {
   const bridges = items.filter((i) => i.type === "bridge");
   let closed = 0,
@@ -145,10 +200,20 @@ export function cutGeometry(items) {
     vanished = 0;
   const paths = [];
   for (const item of items.filter((i) => i.type !== "bridge")) {
-    for (const contour of worldContours(item)) {
+    const stencil = bridges.filter(
+      (b) =>
+        b.bridgeMode === "stencil" && (!b.targetId || b.targetId === item.id),
+    );
+    const processed = stencilContours(item, stencil);
+    if (!processed.length && worldContours(item).length) vanished++;
+    for (const contour of processed) {
       const runs = cutContour(
         contour,
-        bridges.filter((b) => !b.targetId || b.targetId === item.id),
+        bridges.filter(
+          (b) =>
+            b.bridgeMode !== "stencil" &&
+            (!b.targetId || b.targetId === item.id),
+        ),
       );
       if (!runs.length) vanished++;
       const length = (ps) =>
@@ -159,7 +224,7 @@ export function cutGeometry(items) {
       removed += delta;
       if (same(contour[0], contour.at(-1))) {
         closed++;
-        if (delta < 1e-6) untouched++;
+        if (delta < 1e-6 && !stencil.length) untouched++;
       }
       paths.push(...runs);
     }
@@ -319,7 +384,17 @@ export function islandBridgeStatus(items) {
   let islands = 0,
     unbridgedIslands = 0;
   for (const item of items.filter((i) => i.type !== "bridge")) {
-    const tree = contourTree(item),
+    const processed = stencilContours(
+      item,
+      items.filter((b) => b.type === "bridge"),
+    );
+    const tree = contourTree({
+        ...item,
+        x: 0,
+        y: 0,
+        rotation: 0,
+        contours: processed,
+      }),
       bridges = items.filter(
         (b) => b.type === "bridge" && (!b.targetId || b.targetId === item.id),
       );
@@ -369,13 +444,57 @@ export function automaticBridges(items, width = 1.5, targetIds = null) {
       [...existing, ...added].filter(
         (b) => !b.targetId || b.targetId === item.id,
       );
-    // One continuous uncut band must cross BOTH boundaries of each nested loop.
-    // Independent old tabs on each contour do not satisfy this connection.
-    for (const node of tree)
-      if (node.parent >= 0) {
-        const parent = tree[node.parent].points;
-        if (linked(node.points, parent, applicable())) continue;
-        const connection = nearestConnection(node.points, parent);
+    // Use the glyph-local vertical direction so both bridges rotate with the letter.
+    for (const node of tree) {
+      if (node.parent < 0) continue;
+      const parent = tree[node.parent].points;
+      if (
+        linked(
+          node.points,
+          parent,
+          applicable().filter((b) => b.bridgeMode === "stencil"),
+        )
+      )
+        continue;
+      const local = node.points.map((p) => transform(p, item, true));
+      const outer = parent.map((p) => transform(p, item, true));
+      const box = bounds([local]);
+      const x = box.x + box.w / 2;
+      const crossings = (ps) =>
+        ps
+          .slice(1)
+          .flatMap((b, i) => {
+            const a = ps[i];
+            return (a.x <= x && b.x > x) || (b.x <= x && a.x > x)
+              ? [a.y + ((x - a.x) * (b.y - a.y)) / (b.x - a.x)]
+              : [];
+          })
+          .sort((a, b) => a - b);
+      const innerYs = crossings(local),
+        outerYs = crossings(outer);
+      const connections = [];
+      if (innerYs.length >= 2) {
+        const top = innerYs[0],
+          bottom = innerYs.at(-1);
+        const up = outerYs.filter((y) => y < top - 1e-7).at(-1),
+          down = outerYs.find((y) => y > bottom + 1e-7);
+        for (const pair of [
+          [top, up],
+          [bottom, down],
+        ])
+          if (Number.isFinite(pair[1])) {
+            const a = transform({ x, y: pair[0] }, item),
+              b = transform({ x, y: pair[1] }, item);
+            connections.push({
+              a,
+              b,
+              distance: Math.hypot(a.x - b.x, a.y - b.y),
+            });
+          }
+      }
+      if (!connections.length)
+        connections.push(nearestConnection(node.points, parent));
+      for (const connection of connections) {
         if (!Number.isFinite(connection.distance)) continue;
         const p = mid(connection.a, connection.b);
         added.push({
@@ -391,13 +510,16 @@ export function automaticBridges(items, width = 1.5, targetIds = null) {
             ) *
               180) /
             Math.PI,
-          name: "島つなぎブリッジ",
-          bridgeMode: "island",
+          name: "切り抜きブリッジ",
+          bridgeMode: "stencil",
         });
       }
+    }
     // Simple closed shapes without an inner loop still get a holding tab.
     for (const node of tree) {
       if (
+        item.type === "text" ||
+        item.type === "outline" ||
         node.parent >= 0 ||
         applicable().some((b) => crossesContour(node.points, b))
       )

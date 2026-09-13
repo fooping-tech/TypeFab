@@ -2,6 +2,7 @@ import opentype from "opentype.js";
 import "./style.css";
 import {
   worldContours,
+  stencilContours,
   pathData,
   cutGeometry,
   exportSVG,
@@ -261,9 +262,9 @@ $("#app").innerHTML = `
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで複数選択</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
-<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.3</span></span></footer>
+<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.4</span></span></footer>
 <input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,application/json">
-<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字の内側の島と外側を非カット帯でつなぎ、穴のない輪郭には保持用の切り残しを追加します。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>`;
+<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>`;
 
 function renderLayers() {
   $("#layers").innerHTML = [...project.layers]
@@ -330,7 +331,7 @@ function renderCanvas() {
     : normal
         .map(
           (i) =>
-            `<g data-object="${i.id}" class="canvas-object"><path d="${pathData(worldContours(i))}" fill="${i.type === "line" ? "none" : selectionIds().includes(i.id) ? "#d9e9f5" : "#354859"}" fill-opacity="${i.type === "line" ? 0 : 0.9}" fill-rule="nonzero" stroke="${selectionIds().includes(i.id) ? "#276c9c" : "#243b50"}" stroke-width="0.22"/><path d="${pathData(worldContours(i))}" fill="none" stroke="transparent" stroke-width="2"/></g>`,
+            `<g data-object="${i.id}" class="canvas-object"><path d="${pathData(stencilContours(i, bridges))}" fill="${i.type === "line" ? "none" : selectionIds().includes(i.id) ? "#d9e9f5" : "#354859"}" fill-opacity="${i.type === "line" ? 0 : 0.9}" fill-rule="nonzero" stroke="${selectionIds().includes(i.id) ? "#276c9c" : "#243b50"}" stroke-width="0.22"/><path d="${pathData(worldContours(i))}" fill="none" stroke="transparent" stroke-width="2"/></g>`,
         )
         .join("") +
       bridges
@@ -371,9 +372,9 @@ function renderCanvas() {
     ? "加工プレビュー · 実際に出力されるカット線"
     : "スケッチ編集中";
   $("#hint").textContent = preview
-    ? "赤い線をカットします。ブリッジ部分には線が出力されません。"
+    ? "赤い線をカットします。自動ブリッジは帯の側面を含む切り抜き輪郭です。"
     : tool === "select"
-      ? "空白からドラッグで範囲選択 · スクロール / ピンチでズーム"
+      ? "空白からドラッグで範囲選択 · 2本指スワイプで移動 · ピンチでズーム"
       : `${labels[tool]}を配置する場所をクリック`;
   $("#board-label").textContent = `${project.width} × ${project.height} mm`;
   $("#zoom-reset").textContent = `${Math.round(zoom * 100)}%`;
@@ -414,7 +415,7 @@ function render() {
   const c = cutGeometry(visibleItems(project)),
     outside = !withinBoard();
   $("#checks").innerHTML =
-    `<div class="check-row"><span>閉じた輪郭</span><b>${c.closed}</b></div><div class="check-row ${c.untouched ? "warning" : "success"}"><span>切り残しなし</span><b>${c.untouched}</b></div><div class="check-row ${c.unbridgedIslands ? "warning" : "success"}"><span>内外が未接続の島</span><b>${c.unbridgedIslands}</b></div><div class="check-row"><span>ブリッジ</span><b>${project.items.filter((i) => i.type === "bridge").length}</b></div>${c.vanished ? `<div class="check-row warning"><span>完全に隠れた輪郭</span><b>${c.vanished}</b></div>` : ""}<div class="check-summary ${outside || c.vanished ? "warning" : ""}">${c.vanished ? "! ブリッジ幅を縮めて輪郭を残してください" : outside ? "! 加工エリア外にカット線があります" : c.unbridgedIslands ? "! 内側の島に自動ブリッジを適用してください" : c.untouched ? "! 脱落させたくない輪郭にブリッジを追加" : c.closed ? "✓ 全閉輪郭に切り残しあり · 強度は要確認" : "図形や文字を追加してください"}</div>`;
+    `<div class="check-row"><span>閉じた輪郭</span><b>${c.closed}</b></div><div class="check-row ${c.untouched ? "warning" : "success"}"><span>切り残しなし</span><b>${c.untouched}</b></div><div class="check-row ${c.unbridgedIslands ? "warning" : "success"}"><span>内外が未接続の島</span><b>${c.unbridgedIslands}</b></div><div class="check-row"><span>ブリッジ</span><b>${project.items.filter((i) => i.type === "bridge").length}</b></div>${c.vanished ? `<div class="check-row warning"><span>完全に隠れた輪郭</span><b>${c.vanished}</b></div>` : ""}<div class="check-summary ${outside || c.vanished ? "warning" : ""}">${c.vanished ? "! ブリッジ幅を縮めて輪郭を残してください" : outside ? "! 加工エリア外にカット線があります" : c.unbridgedIslands ? "! 内側の島に自動ブリッジを適用してください" : c.untouched ? "! 脱落させたくない輪郭にブリッジを追加" : c.closed ? "✓ ブリッジ処理済み · 加工プレビューを確認" : "図形や文字を追加してください"}</div>`;
   if (loading)
     document.querySelectorAll("button,input,select,textarea").forEach((el) => {
       el.dataset.loadingDisabled = String(el.disabled);
@@ -674,7 +675,17 @@ function applyAutoBridges() {
     notify("自動ブリッジを適用するアイテムを選択してください。");
     return;
   }
-  const added = automaticBridges(visibleItems(project), 1.5, ids);
+  const obsolete = project.items
+    .filter(
+      (i) =>
+        ids.includes(i.targetId) && i.bridgeMode && i.bridgeMode !== "stencil",
+    )
+    .map((i) => i.id);
+  const added = automaticBridges(
+    visibleItems(project).filter((i) => !obsolete.includes(i.id)),
+    1.5,
+    ids,
+  );
   if (!added.length) {
     notify("選択アイテムに切り残しを追加する閉輪郭はありません。");
     return;
@@ -684,6 +695,7 @@ function applyAutoBridges() {
     return;
   }
   checkpoint();
+  project.items = project.items.filter((i) => !obsolete.includes(i.id));
   project.items.push(...added.map((i) => ({ ...i, id: uid() })));
   preview = true;
   commit();
@@ -976,7 +988,18 @@ $("#canvas-scroll").addEventListener(
   (e) => {
     e.preventDefault();
     if (loading || drag) return;
-    setZoom(wheelZoom(zoom, e.deltaY, e.deltaMode, e.ctrlKey), e);
+    if (e.ctrlKey || e.metaKey)
+      setZoom(wheelZoom(zoom, e.deltaY, e.deltaMode, true), e);
+    else {
+      const unit =
+        e.deltaMode === 1
+          ? 16
+          : e.deltaMode === 2
+            ? $("#canvas-scroll").clientHeight
+            : 1;
+      $("#canvas-scroll").scrollLeft += e.deltaX * unit;
+      $("#canvas-scroll").scrollTop += e.deltaY * unit;
+    }
   },
   { passive: false },
 );
