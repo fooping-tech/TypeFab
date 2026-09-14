@@ -46,6 +46,9 @@ import {
   coons,
   warpContours,
   isFlat,
+  WARPABLE,
+  shapeSource,
+  applyWarp,
 } from "./warp.js";
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 let typography;
@@ -222,8 +225,13 @@ function textGlyphs(item) {
     shapingFonts.get(item.font),
   );
 }
-// Glyph outline before the warp, cached because envelope edits reuse it.
+// Outline before the warp. Text is laid out again (cached because envelope
+// edits reuse it); shapes rebuild from their dimensions or stored source.
 function unwarpedLayout(item) {
+  if (item.type !== "text") {
+    const contours = shapeSource(item);
+    return { contours, box: bounds(contours) };
+  }
   const key = JSON.stringify([
     item.font,
     item.text,
@@ -246,6 +254,9 @@ function withWarp(item, warp, base = unwarpedLayout(item)) {
     contours: warpContours(base.contours, base.box, warp.envelope),
   };
 }
+const canWarp = (item) =>
+  WARPABLE.includes(item?.type) &&
+  (item.type !== "outline" || item.contours.length > 0);
 const warpItem = () => {
   const item = selectedItem();
   return warpId && item?.id === warpId && item.warp ? item : null;
@@ -373,9 +384,9 @@ $("#app").innerHTML = `
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
-<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.7</span></span></footer>
+<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.8</span></span></footer>
 <input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,application/json">
-<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、「ワープ」でアウトラインそのものを変形できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
+<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
 <div id="context-menu" class="context-menu" role="menu" aria-label="編集メニュー" hidden></div>
 <div id="text-editor" class="text-editor" hidden><textarea id="canvas-text" aria-label="文字を編集" maxlength="500" rows="2"></textarea><small>入力はすぐに反映 · Esc / ${shortcut("Enter")} で確定</small></div>`;
 
@@ -428,7 +439,13 @@ function presetIcon(id) {
 function warpPanel(i) {
   const w = i.warp,
     bendable = WARP_PRESETS.some(([id]) => id === w.preset);
-  return `<section class="warp-panel"><div class="object-type">TEXT WARP / エンベロープ</div><h3>${esc(i.name)}</h3><h4>プリセット <span>${esc(warpLabel(w))}</span></h4><div class="warp-presets">${WARP_PRESETS.map(([id, en, ja]) => `<button data-warp-preset="${id}" class="${w.preset === id ? "active" : ""}" aria-pressed="${w.preset === id}" title="${ja}">${presetIcon(id)}<span>${en}</span></button>`).join("")}</div><label class="full-label">曲がり <output id="warp-bend-value">${Math.round(w.bend * 100)}%</output><input id="warp-bend" type="range" min="-100" max="100" step="1" value="${Math.round(w.bend * 100)}" ${bendable ? "" : "disabled"}></label><p class="note">${bendable ? "エンベロープの角・ハンドルをドラッグして形を調整できます。" : w.preset === "custom" ? "カスタム形状です。プリセットを選ぶと置き換わります。" : "プリセットを選ぶか、エンベロープの角・ハンドルをドラッグしてください。"}角をドラッグすると隣のハンドルも動きます（Alt/Optionで角だけ）。</p><div class="warp-actions"><button id="warp-reset">形をリセット</button><button id="warp-remove">ワープを解除</button></div><button id="warp-done" class="wide-button warp-done">完了</button><p class="note">元の文字とワープ設定を保持します。文字の編集・拡縮後も同じ変形が掛かります。SVGには変形後の輪郭をパスで書き出します。</p></section>`;
+  return `<section class="warp-panel"><div class="object-type">${i.type === "text" ? "TEXT WARP" : "WARP"} / エンベロープ</div><h3>${esc(i.name)}</h3><h4>プリセット <span>${esc(warpLabel(w))}</span></h4><div class="warp-presets">${WARP_PRESETS.map(([id, en, ja]) => `<button data-warp-preset="${id}" class="${w.preset === id ? "active" : ""}" aria-pressed="${w.preset === id}" title="${ja}">${presetIcon(id)}<span>${en}</span></button>`).join("")}</div><label class="full-label">曲がり <output id="warp-bend-value">${Math.round(w.bend * 100)}%</output><input id="warp-bend" type="range" min="-100" max="100" step="1" value="${Math.round(w.bend * 100)}" ${bendable ? "" : "disabled"}></label><p class="note">${bendable ? "エンベロープの角・ハンドルをドラッグして形を調整できます。" : w.preset === "custom" ? "カスタム形状です。プリセットを選ぶと置き換わります。" : "プリセットを選ぶか、エンベロープの角・ハンドルをドラッグしてください。"}角をドラッグすると隣のハンドルも動きます（Alt/Optionで角だけ）。</p><div class="warp-actions"><button id="warp-reset">形をリセット</button><button id="warp-remove">ワープを解除</button></div><button id="warp-done" class="wide-button warp-done">完了</button><p class="note">${
+    i.type === "text"
+      ? "元の文字とワープ設定を保持します。文字の編集・拡縮後も同じ変形が掛かります。"
+      : i.type === "outline"
+        ? "変形前の輪郭とワープ設定を保持します。拡縮後も同じ変形が掛かり、解除すると元の輪郭に戻ります。"
+        : "元の寸法とワープ設定を保持します。幅・高さ・フィレットを変えても同じ変形が掛かります。"
+  }SVGには変形後の輪郭をパスで書き出します。</p></section>`;
 }
 function renderProperties() {
   const i = selectedItem();
@@ -443,6 +460,9 @@ function renderProperties() {
   ${i.type === "text" ? `<section><h4>テキスト</h4><textarea id="text-content" maxlength="500" aria-label="文字内容">${esc(i.text)}</textarea><label class="full-label">フォント<select id="font-select">${[...fontLabels].map(([k, v]) => `<option value="${esc(k)}" ${i.font === k ? "selected" : ""}>${esc(v)}</option>`).join("")}${!fontLabels.has(i.font) ? `<option value="${esc(i.font)}" selected>追加フォント（再読込が必要）</option>` : ""}</select></label><div id="font-preview" class="font-preview" style="font-family:${i.font === "zen" ? "ZenPreview" : i.font === "shippori" ? "ShipporiPreview" : "sans-serif"}">日本語 Aa 123</div><button id="add-font" class="wide-button">＋ フォント追加 <small>TTF / OTF / WOFF</small></button><div class="fields">${field("size", "サイズ mm", i.size, 0.5, 1, 300)}${field("spacing", "字間 mm", i.spacing, 0.1, -100, 100)}${field("stretch", "長体・平体 %", (i.stretch ?? 1) * 100, 1, 5, 2000)}</div><label class="check vertical-check"><input type="checkbox" id="vertical" ${i.vertical ? "checked" : ""}> 縦書き（右から左）</label><p class="note">四隅のハンドルで拡縮すると、サイズと長体・平体が変わります。キャンバスでダブルクリックすると文字を編集できます。</p></section><section><h4>ワープ</h4><button id="enter-warp" class="wide-button">⌒ ワープ（エンベロープ変形）</button><p class="note">${i.warp ? `現在: ${esc(warpLabel(i.warp))} · ` : ""}文字のアウトラインそのものを曲線のエンベロープで変形します。</p></section>` : ""}
   ${["bridge", "rect", "circle", "line"].includes(i.type) ? `<section><h4>${i.type === "bridge" ? "切り残し領域" : "寸法"} <span>mm</span></h4><div class="fields">${field("w", "幅", i.w, 0.1, i.type === "line" ? 0 : 0.1)}${field("h", "高さ", i.h, 0.1, i.type === "line" ? 0 : 0.1)}${i.type === "rect" ? field("radius", "フィレット R", i.radius ?? 0, 0.1, 0, 1000) : ""}</div>${i.type === "rect" ? '<p class="note">4つの角を半径Rで丸めます。最大は短辺の半分です。</p>' : ""}${i.type === "bridge" ? '<p class="note">オレンジ色の領域に重なったカット線を除去します。</p>' : ""}</section>` : ""}`
     : '<section class="no-selection"><span>↖</span><h3>オブジェクトを選択</h3><p>キャンバスや左の一覧から選択して、文字・位置・寸法を編集できます。</p></section>';
+  if (i && i.type !== "text" && canWarp(i))
+    $("#properties").innerHTML +=
+      `<section><h4>ワープ</h4><button id="enter-warp" class="wide-button">⌒ ワープ（エンベロープ変形）</button><p class="note">${i.warp ? `現在: ${esc(warpLabel(i.warp))} · ` : ""}輪郭そのものを曲線のエンベロープで変形します。</p></section>`;
   const chosen = selectedItems();
   if (chosen.length > 1)
     $("#properties").innerHTML =
@@ -565,7 +585,7 @@ function renderCanvas() {
   $("#canvas-mode").textContent = preview
     ? "加工プレビュー · 実際に出力されるカット線"
     : warpId
-      ? "ワープ編集中 · 文字のアウトラインを変形"
+      ? "ワープ編集中 · アウトラインそのものを変形"
       : "スケッチ編集中";
   $("#hint").textContent = preview
     ? "赤い線をカットします。自動ブリッジは帯の側面を含む切り抜き輪郭です。"
@@ -622,7 +642,7 @@ function render({ properties = true } = {}) {
   $("#ungroup").disabled = !selectedItems().some(ungroupKind);
   $("#group").disabled = selectedItems().filter((i) => !i.targetId).length < 2;
   $("#warp").disabled =
-    selectedItems().length !== 1 || selectedItem()?.type !== "text";
+    selectedItems().length !== 1 || !canWarp(selectedItem());
   $("#warp").classList.toggle("active", Boolean(warpId));
   $("#delete").disabled = $("#duplicate").disabled = !selectedItem();
   const c = cutGeometry(visibleItems(project)),
@@ -659,7 +679,7 @@ function updateSelected(key, value) {
     } else if (["rect", "circle", "line"].includes(next.type)) {
       if (next.radius)
         next.radius = Math.min(next.radius, next.w / 2, next.h / 2);
-      next.contours = shapeContours(next.type, next.w, next.h, next.radius);
+      next.contours = applyWarp(next, shapeSource(next));
     }
     checkpoint();
     replaceItem(old, next);
@@ -1036,8 +1056,9 @@ function outlineSelected() {
   const i = selectedItem();
   if (i?.type !== "text" || !isEditable(project, i)) return;
   checkpoint();
+  // A warped text stays re-editable as a path: its unwarped glyphs become the source.
+  if (i.warp) i.warp = { ...i.warp, source: unwarpedLayout(i).contours };
   i.type = "outline";
-  delete i.warp;
   commit();
   notify("固定アウトラインに変換しました。四隅で拡縮できます。");
 }
@@ -1231,8 +1252,8 @@ function applyBoolean(operation) {
 // warp parameters stay on the item so it can be edited again.
 function enterWarp() {
   const item = selectedItem();
-  if (selectedItems().length !== 1 || item?.type !== "text") {
-    notify("ワープする文字を1つ選択してください。");
+  if (selectedItems().length !== 1 || !canWarp(item)) {
+    notify("ワープする文字・長方形・楕円・固定パスを1つ選択してください。");
     return;
   }
   try {
@@ -1243,7 +1264,21 @@ function enterWarp() {
   }
   // A flat envelope changes nothing, so entering needs no undo step.
   if (!item.warp)
-    item.warp = { preset: "none", bend: 0.5, envelope: flatEnvelope() };
+    item.warp = {
+      preset: "none",
+      bend: 0.5,
+      envelope: flatEnvelope(),
+      // A fixed path has nothing to rebuild from, so it keeps its outline.
+      ...(item.type === "outline" && {
+        source: structuredClone(item.contours),
+      }),
+    };
+  const { box } = unwarpedLayout(item);
+  if (!(box.w > 0.001 && box.h > 0.001)) {
+    if (isFlat(item.warp.envelope)) delete item.warp;
+    notify("幅と高さのある形だけワープできます。");
+    return;
+  }
   warpId = item.id;
   preview = false;
   tool = "select";
@@ -1254,7 +1289,10 @@ function enterWarp() {
 }
 function exitWarp() {
   const item = warpItem();
-  if (item && isFlat(item.warp.envelope)) delete item.warp;
+  if (item && isFlat(item.warp.envelope)) {
+    item.contours = unwarpedLayout(item).contours;
+    delete item.warp;
+  }
   warpId = null;
   render();
   persist();
@@ -1268,6 +1306,7 @@ function applyWarpPreset(name) {
   replaceItem(
     item,
     withWarp(item, {
+      ...item.warp,
       preset: name,
       bend,
       envelope: presetEnvelope(name, bend, box.w / (box.h || 1)),
@@ -1868,7 +1907,7 @@ function menuEntries(onObject) {
     ],
     "-",
     ["edit-text", "テキストを編集", "", one?.type === "text"],
-    ["warp", "ワープ…", "", one?.type === "text"],
+    ["warp", "ワープ…", "", canWarp(one)],
     ["outline", "アウトライン化", "", one?.type === "text"],
     ["fillet", "フィレット…", "", one?.type === "rect"],
     [

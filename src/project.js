@@ -1,5 +1,5 @@
 import { ensureLayers } from "./layers.js";
-import { WARP_PRESETS } from "./warp.js";
+import { WARP_PRESETS, WARPABLE } from "./warp.js";
 const validWarp = (w) =>
   w &&
   ["none", "custom", ...WARP_PRESETS.map(([id]) => id)].includes(w.preset) &&
@@ -76,7 +76,15 @@ export function validateProject(p) {
       (!Number.isFinite(i.stretch) || i.stretch < 0.05 || i.stretch > 20)
     )
       throw Error("長体・平体の倍率が不正です。");
-    if (i.warp !== undefined && (i.type !== "text" || !validWarp(i.warp)))
+    if (
+      i.warp !== undefined &&
+      (!WARPABLE.includes(i.type) ||
+        !validWarp(i.warp) ||
+        // Fixed paths keep their unwarped outline; other shapes rebuild it.
+        (i.type === "outline"
+          ? !Array.isArray(i.warp.source)
+          : i.warp.source !== undefined))
+    )
       throw Error("ワープ設定が不正です。");
     if (
       i.radius !== undefined &&
@@ -112,7 +120,7 @@ export function validateProject(p) {
       throw Error("文字設定が不正です。");
     if (i.type !== "bridge") {
       if (!Array.isArray(i.contours)) throw Error("輪郭がありません。");
-      for (const c of i.contours) {
+      for (const c of [...i.contours, ...(i.warp?.source ?? [])]) {
         if (!Array.isArray(c) || c.length < 2) throw Error("輪郭が不正です。");
         points += c.length;
         if (points > 300000) throw Error("輪郭データが大きすぎます。");

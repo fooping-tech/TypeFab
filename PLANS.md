@@ -172,3 +172,17 @@
 - Test harness note: one earlier run hit a stale server on port 4173 (not this build); all suites were rerun against the current build.
 - Not implemented: warping non-text shapes, mesh envelopes with interior points, per-corner Alt-handle breaking beyond corners.
 - Commit `49d9bd4` pushed directly to `main` and deployed: https://github.com/fooping-tech/TypeFab/actions/runs/34797224212 — success. Public URL HTTP 200; all three browser suites (31 + 39 + 41 checks) passed against https://fooping-tech.github.io/TypeFab/ with 0 console errors/warnings.
+
+## Warp for rectangles, ellipses and fixed paths (requested 2026-09-14)
+- Warp mode, presets, handle drags, bend slider, undo/redo and re-editing work for rect, circle and outline items as for text.
+- Rect/ellipse keep w/h/radius and rebuild the unwarped shape from them, so dimension and fillet edits keep the warp. Outlines store the unwarped contours in `warp.source` for lossless re-editing and removal. Outlining warped text keeps an editable warp via `warp.source`.
+- Corner resize of warped items scales linearly on the warped bounds (anchor fixed). Final contours stay plain paths for export, booleans and bridges. Lines are excluded (no 2D envelope box).
+- Validate geometry, resize, JSON (`warp.source` only on outlines), real browser flows; push to `main` and verify Pages.
+
+### Implemented and validated (2026-09-14)
+- `WARPABLE = text, rect, circle, outline`. `shapeSource(item)` rebuilds rect/ellipse outlines from w/h/radius and returns `warp.source` for outlines; `applyWarp` places the envelope on that unwarped box. Text uses the same `applyWarp` after layout.
+- Warp mode, presets, bend slider, handle/corner drags, reset/remove, undo/redo and re-entry work for all four types (toolbar, inspector section and context menu). Entering Warp on an outline stores its contours in `warp.source`; presets keep the source. Removing a warp or finishing with a flat envelope restores the unwarped contours exactly. Outlining warped text now keeps an editable warp with the unwarped glyphs as source.
+- Rect/ellipse width, height and fillet edits rebuild the shape and re-apply the warp. `itemBounds` of warped items is the warped outline; corner resize of warped items uses the linear rebuild (rect/ellipse scale w/h, outline scales its source), keeping the opposite corner fixed.
+- JSON: warp allowed only on warpable types; outlines require `warp.source` (validated like contours and counted in the point limit), other types must not have one. Lines are rejected and the Warp button is disabled for them.
+- `npm test`: 77 passed (7 new: shape sources, dimension/fillet rebuild, warped rect/ellipse/path resize with fixed corner and locked ratio, export/booleans/bridges/parts/JSON for warped shapes, source validation, lines excluded). Production build passed.
+- Real Chromium (production preview): new suite 30 checks — rectangle Warp/Bulge/drag/undo in Warp mode, width and fillet keep the warp, warped resize keeps the corner, ellipse via context menu, union path Arc Up/drag/Enter/re-entry, remove restores the exact original path and undo brings it back, warped text → アウトライン化 keeps WARP and can be re-warped/removed, line excluded, SVG plain paths, reload; previous suites 31 + 39 + 41 still pass; console 0 errors/warnings. Screenshots inspected.

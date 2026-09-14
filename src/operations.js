@@ -1,5 +1,6 @@
 import ClipperLib from "clipper-lib";
 import { bounds, worldContours, transform, shapeContours } from "./geometry.js";
+import { shapeSource, applyWarp } from "./warp.js";
 const SCALE = 10000;
 const close = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) < 1e-7;
 export function booleanContours(items, operation) {
@@ -55,12 +56,15 @@ export function booleanContours(items, operation) {
       return [...pts, { ...pts[0] }];
     });
 }
+// Warped shapes are framed by their actual outline, not their dimensions.
 export function itemBounds(item) {
-  return item.type === "bridge"
-    ? { x: -item.w / 2, y: -item.h / 2, w: item.w, h: item.h }
-    : ["rect", "circle"].includes(item.type)
-      ? { x: 0, y: 0, w: item.w, h: item.h }
-      : bounds(item.contours);
+  return item.warp
+    ? bounds(item.contours)
+    : item.type === "bridge"
+      ? { x: -item.w / 2, y: -item.h / 2, w: item.w, h: item.h }
+      : ["rect", "circle"].includes(item.type)
+        ? { x: 0, y: 0, w: item.w, h: item.h }
+        : bounds(item.contours);
 }
 export function canResize(item) {
   return (
@@ -93,8 +97,8 @@ export function resizeFromHandle(
     w = b.w * scale;
     h = b.h * scale;
   }
-  if (item.type === "text")
-    return resizeText(item, b, hx, hy, ax, ay, w, h, locked, layout);
+  if (item.type === "text" || item.warp)
+    return resizeLinear(item, b, hx, hy, ax, ay, w, h, locked, layout);
   const x = hx ? ax : ax - w,
     y = hy ? ay : ay - h;
   const next = structuredClone(item);
@@ -120,28 +124,41 @@ export function resizeFromHandle(
   }
   return next;
 }
-// Text keeps its settings: the vertical factor scales font size and spacing,
-// the rest of the horizontal factor becomes the stored horizontal scale. The
-// layout is linear in these, so the outline scales about the local origin.
-function resizeText(item, b, hx, hy, ax, ay, w, h, locked, layout) {
-  if (!layout) throw Error("文字の拡縮にはフォントが必要です。");
-  const stretch = item.stretch ?? 1;
-  const ky = Math.max(1, Math.min(300, item.size * (h / b.h))) / item.size,
-    kx = locked
-      ? ky
-      : (Math.max(0.05, Math.min(20, stretch * (w / b.w / ky))) / stretch) * ky;
-  w = b.w * kx;
-  h = b.h * ky;
-  const x = hx ? ax : ax - w,
-    y = hy ? ay : ay - h;
-  const next = {
-    ...structuredClone(item),
-    size: item.size * ky,
-    spacing: Math.max(-100, Math.min(100, item.spacing * ky)),
-    stretch: stretch * (kx / ky),
-    ...transform({ x: x - b.x * kx, y: y - b.y * ky }, item),
-  };
-  next.contours = layout(next);
+// Text and warped shapes keep their settings and are rebuilt: a text's
+// vertical factor scales font size and spacing and the rest of the horizontal
+// factor becomes its stored horizontal scale; a warped rectangle or ellipse
+// scales its dimensions; a warped path scales its unwarped source. The
+// envelope is relative to the unwarped box, so the final outline scales by
+// the same factors about the local origin and the opposite corner stays put.
+function resizeLinear(item, b, hx, hy, ax, ay, w, h, locked, layout) {
+  const next = structuredClone(item),
+    clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  let kx = w / b.w,
+    ky = h / b.h;
+  if (item.type === "text") {
+    if (!layout) throw Error("文字の拡縮にはフォントが必要です。");
+    const stretch = item.stretch ?? 1;
+    ky = clamp(item.size * ky, 1, 300) / item.size;
+    kx = locked ? ky : (clamp(stretch * (kx / ky), 0.05, 20) / stretch) * ky;
+    next.size = item.size * ky;
+    next.spacing = clamp(item.spacing * ky, -100, 100);
+    next.stretch = stretch * (kx / ky);
+  } else if (["rect", "circle"].includes(item.type)) {
+    kx = clamp(item.w * kx, 0.1, 2000) / item.w;
+    ky = clamp(item.h * ky, 0.1, 2000) / item.h;
+    next.w = item.w * kx;
+    next.h = item.h * ky;
+    if (item.radius)
+      next.radius = Math.min(item.radius, next.w / 2, next.h / 2);
+  } else
+    next.warp.source = item.warp.source.map((c) =>
+      c.map((p) => ({ x: p.x * kx, y: p.y * ky })),
+    );
+  const x = hx ? ax : ax - b.w * kx,
+    y = hy ? ay : ay - b.h * ky;
+  Object.assign(next, transform({ x: x - b.x * kx, y: y - b.y * ky }, item));
+  next.contours =
+    item.type === "text" ? layout(next) : applyWarp(next, shapeSource(next));
   return next;
 }
 // Scoped tabs follow their owner. Their physical width stays fixed when the owner is resized.

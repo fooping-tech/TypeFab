@@ -1,6 +1,6 @@
 import * as hb from "harfbuzzjs";
-import { flatten, bounds } from "./geometry.js";
-import { warpContours } from "./warp.js";
+import { flatten } from "./geometry.js";
+import { applyWarp } from "./warp.js";
 export function makeShapingFont(bytes) {
   const blob = new hb.Blob(bytes),
     face = new hb.Face(blob),
@@ -27,10 +27,10 @@ export function verticalGlyphs(shaping, text) {
 }
 // Final text outline: laid-out glyphs, then the warp envelope if there is one.
 export function layoutText(item, font, shaping) {
-  const flat = layoutGlyphs(item, font, shaping).flatMap((g) => g.contours);
-  return item.warp
-    ? warpContours(flat, bounds(flat), item.warp.envelope)
-    : flat;
+  return applyWarp(
+    item,
+    layoutGlyphs(item, font, shaping).flatMap((g) => g.contours),
+  );
 }
 // Horizontal scale (長体・平体) is applied to the glyph curves before flattening,
 // so the 0.02 mm tolerance holds at any scale.

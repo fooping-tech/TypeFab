@@ -1,4 +1,4 @@
-import { TOLERANCE } from "./geometry.js";
+import { TOLERANCE, shapeContours, bounds } from "./geometry.js";
 // A warp envelope is 12 points running clockwise around the text's unwarped
 // bounds, in units of that box (0..1): corners 0 TL, 3 TR, 6 BR, 9 BL, and two
 // Bézier handles between each pair. Each side is an independent cubic curve.
@@ -167,4 +167,19 @@ export function warpContours(contours, box, envelope) {
       segment(c[i - 1], c[i], out.at(-1), map(c[i]), out, 0);
     return out;
   });
+}
+// Items that can carry a warp. A line has no area to put an envelope on.
+export const WARPABLE = ["text", "rect", "circle", "outline"];
+// Unwarped outline of a shape: rectangles and ellipses are rebuilt from their
+// dimensions, fixed paths keep theirs in warp.source. (Text needs its font;
+// see layoutText.)
+export function shapeSource(item) {
+  if (["rect", "circle", "line"].includes(item.type))
+    return shapeContours(item.type, item.w, item.h, item.radius);
+  return item.warp?.source ?? item.contours;
+}
+export function applyWarp(item, source) {
+  return item.warp
+    ? warpContours(source, bounds(source), item.warp.envelope)
+    : source;
 }
