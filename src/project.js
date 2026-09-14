@@ -1,4 +1,20 @@
 import { ensureLayers } from "./layers.js";
+import { WARP_PRESETS } from "./warp.js";
+const validWarp = (w) =>
+  w &&
+  ["none", "custom", ...WARP_PRESETS.map(([id]) => id)].includes(w.preset) &&
+  Number.isFinite(w.bend) &&
+  Math.abs(w.bend) <= 1 &&
+  Array.isArray(w.envelope) &&
+  w.envelope.length === 12 &&
+  w.envelope.every(
+    (p) =>
+      p &&
+      Number.isFinite(p.x) &&
+      Number.isFinite(p.y) &&
+      Math.abs(p.x) <= 100 &&
+      Math.abs(p.y) <= 100,
+  );
 export function validateProject(p) {
   if (
     !p ||
@@ -55,6 +71,13 @@ export function validateProject(p) {
         !/^[a-zA-Z0-9_-]{1,80}$/.test(i.groupId))
     )
       throw Error("グループ形式が不正です。");
+    if (
+      i.stretch !== undefined &&
+      (!Number.isFinite(i.stretch) || i.stretch < 0.05 || i.stretch > 20)
+    )
+      throw Error("長体・平体の倍率が不正です。");
+    if (i.warp !== undefined && (i.type !== "text" || !validWarp(i.warp)))
+      throw Error("ワープ設定が不正です。");
     if (
       i.radius !== undefined &&
       (i.type !== "rect" ||

@@ -1,5 +1,6 @@
 import * as hb from "harfbuzzjs";
-import { flatten } from "./geometry.js";
+import { flatten, bounds } from "./geometry.js";
+import { warpContours } from "./warp.js";
 export function makeShapingFont(bytes) {
   const blob = new hb.Blob(bytes),
     face = new hb.Face(blob),
@@ -24,8 +25,23 @@ export function verticalGlyphs(shaping, text) {
     ...positions[n],
   }));
 }
+// Final text outline: laid-out glyphs, then the warp envelope if there is one.
 export function layoutText(item, font, shaping) {
-  return layoutGlyphs(item, font, shaping).flatMap((g) => g.contours);
+  const flat = layoutGlyphs(item, font, shaping).flatMap((g) => g.contours);
+  return item.warp
+    ? warpContours(flat, bounds(flat), item.warp.envelope)
+    : flat;
+}
+// Horizontal scale (長体・平体) is applied to the glyph curves before flattening,
+// so the 0.02 mm tolerance holds at any scale.
+function stretched(commands, k) {
+  if (k === 1) return commands;
+  return commands.map((c) => ({
+    ...c,
+    x: c.x * k,
+    ...(c.x1 !== undefined && { x1: c.x1 * k }),
+    ...(c.x2 !== undefined && { x2: c.x2 * k }),
+  }));
 }
 // Per glyph cluster: its source text, contours, and the pen offset at which a
 // one-character text item with the same settings reproduces the glyph exactly.
@@ -43,7 +59,8 @@ export function layoutGlyphs(item, font, shaping) {
   if (missing.length)
     throw Error(`このフォントにない文字: ${missing.join(" ")}`);
   const all = [];
-  const size = item.size;
+  const size = item.size,
+    k = item.stretch ?? 1;
   if (item.vertical) {
     if (!shaping) throw Error("縦書きエンジンの読み込みが完了していません。");
     const scale = size / font.unitsPerEm;
@@ -58,8 +75,11 @@ export function layoutGlyphs(item, font, shaping) {
       for (const g of shaped) {
         const glyph = font.glyphs.get(g.id),
           contours = flatten(
-            glyph.getPath(x + g.xOffset * scale, y - g.yOffset * scale, size)
-              .commands,
+            stretched(
+              glyph.getPath(x + g.xOffset * scale, y - g.yOffset * scale, size)
+                .commands,
+              k,
+            ),
           );
         // Glyphs shaped from the same characters stay together as one character.
         if (previous?.cluster === g.cluster)
@@ -70,7 +90,7 @@ export function layoutGlyphs(item, font, shaping) {
             cluster: g.cluster,
             text: line.slice(g.cluster, end),
             contours,
-            origin: { x: x - size / 2, y },
+            origin: { x: (x - size / 2) * k, y },
           };
           all.push(previous);
         }
@@ -91,8 +111,8 @@ export function layoutGlyphs(item, font, shaping) {
       const glyph = font.charToGlyph(char);
       all.push({
         text: char,
-        contours: flatten(glyph.getPath(x, y, size).commands),
-        origin: { x, y: y - size },
+        contours: flatten(stretched(glyph.getPath(x, y, size).commands, k)),
+        origin: { x: x * k, y: y - size },
       });
       x +=
         ((glyph.advanceWidth || font.unitsPerEm) / font.unitsPerEm) * size +

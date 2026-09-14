@@ -65,16 +65,18 @@ export function itemBounds(item) {
 export function canResize(item) {
   return (
     item &&
-    ["rect", "circle", "outline", "bridge"].includes(item.type) &&
+    ["rect", "circle", "outline", "bridge", "text"].includes(item.type) &&
     itemBounds(item).w > 0.001 &&
     itemBounds(item).h > 0.001
   );
 }
+// layout(item) rebuilds a text item's outline; only text resizing needs it.
 export function resizeFromHandle(
   item,
   corner,
   worldPoint,
   locked = item.ratioLocked,
+  layout = null,
 ) {
   const b = itemBounds(item),
     [hx, hy] = corner,
@@ -91,6 +93,8 @@ export function resizeFromHandle(
     w = b.w * scale;
     h = b.h * scale;
   }
+  if (item.type === "text")
+    return resizeText(item, b, hx, hy, ax, ay, w, h, locked, layout);
   const x = hx ? ax : ax - w,
     y = hy ? ay : ay - h;
   const next = structuredClone(item);
@@ -114,6 +118,30 @@ export function resizeFromHandle(
         })),
       );
   }
+  return next;
+}
+// Text keeps its settings: the vertical factor scales font size and spacing,
+// the rest of the horizontal factor becomes the stored horizontal scale. The
+// layout is linear in these, so the outline scales about the local origin.
+function resizeText(item, b, hx, hy, ax, ay, w, h, locked, layout) {
+  if (!layout) throw Error("文字の拡縮にはフォントが必要です。");
+  const stretch = item.stretch ?? 1;
+  const ky = Math.max(1, Math.min(300, item.size * (h / b.h))) / item.size,
+    kx = locked
+      ? ky
+      : (Math.max(0.05, Math.min(20, stretch * (w / b.w / ky))) / stretch) * ky;
+  w = b.w * kx;
+  h = b.h * ky;
+  const x = hx ? ax : ax - w,
+    y = hy ? ay : ay - h;
+  const next = {
+    ...structuredClone(item),
+    size: item.size * ky,
+    spacing: Math.max(-100, Math.min(100, item.spacing * ky)),
+    stretch: stretch * (kx / ky),
+    ...transform({ x: x - b.x * kx, y: y - b.y * ky }, item),
+  };
+  next.contours = layout(next);
   return next;
 }
 // Scoped tabs follow their owner. Their physical width stays fixed when the owner is resized.

@@ -5,6 +5,7 @@ import {
   worldContours,
   crossesContour,
 } from "./geometry.js";
+import { warpContours } from "./warp.js";
 const SCALE = 10000;
 const isClosed = (c) =>
   c.length > 3 && Math.hypot(c[0].x - c.at(-1).x, c[0].y - c.at(-1).y) < 1e-7;
@@ -27,7 +28,8 @@ export function splitCharacters(item, glyphs) {
 // Each connected filled region (an outer contour with its holes) becomes a
 // fixed outline. Islands inside a hole, such as the centre of 回, are parts too.
 export function splitParts(item) {
-  const { id, text, font, size, spacing, vertical, ...rest } = item,
+  const { id, text, font, size, spacing, vertical, stretch, warp, ...rest } =
+      item,
     closed = item.contours.filter(isClosed);
   const groups = [
     ...(closed.length ? filledRegions(closed) : []),
@@ -172,3 +174,18 @@ const groupsOf = (project, ids) =>
       .filter((i) => ids.includes(i.id) && i.groupId)
       .map((i) => i.groupId),
   );
+// Characters of warped text become fixed outlines that keep their warped
+// shape: each glyph goes through the envelope placed on the whole text.
+export function splitWarpedCharacters(item, glyphs) {
+  const { id, text, font, size, spacing, vertical, stretch, warp, ...rest } =
+      item,
+    box = bounds(glyphs.flatMap((g) => g.contours));
+  return glyphs
+    .filter((g) => g.contours.length)
+    .map((g) => ({
+      ...rest,
+      type: "outline",
+      name: g.text,
+      contours: warpContours(g.contours, box, warp.envelope),
+    }));
+}

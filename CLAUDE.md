@@ -38,6 +38,7 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | `src/typography.js` | 文字組版（`layoutGlyphs` は1文字ごとの輪郭と位置）、HarfBuzzによる縦書き（vert/vrt2） |
 | `src/grouping.js` | グループ（`groupId`）の作成・解除、1文字ずつの文字アイテム、部位ごとの固定パス、対象付きブリッジの引き継ぎ |
 | `src/interaction.js` | 範囲選択の判定、ブラウザのShift範囲選択、レイヤー間移動の検証、ホイール／ピンチのズーム計算 |
+| `src/warp.js` | Text Warp：12点のエンベロープ（4辺のベジェ）、Coonsパッチ、プリセット、許容誤差内の細分化 |
 | `src/edit.js` | 重ね順（最前面へ／前面へ／背面へ／最背面へ）、複製・貼り付け用のコピー |
 | `src/project.js` | プロジェクトJSONの入力検証、v1→v2移行 |
 | `public/fonts/` | 同梱書体（Zen Kaku Gothic New / しっぽり明朝）とOFLライセンス |
@@ -51,6 +52,7 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 - フォント・入力テキスト・プロジェクトを外部に送信しない。
 - 「切り残しなし」などの検査は材料強度や連結性を保証するものではない。そう読める表現をUIやドキュメントに書かない。
 - 形状処理を変えたらテストを追加し、両方の同梱書体で確認する。
+- アイテムの `contours` は常に最終形状（ワープ・長体・フィレット適用後）にする。SVG出力・図形演算・ブリッジはこれを使う。変形をCSS/SVGの `transform` だけで表現しない。
 
 ## 公開手順（GitHub Pages）
 

@@ -8,6 +8,8 @@ import {
   exportSVG,
   shapeContours,
   automaticBridges,
+  bounds,
+  transform,
 } from "./geometry.js";
 import { validateProject } from "./project.js";
 import { ensureLayers, visibleItems, isEditable } from "./layers.js";
@@ -27,6 +29,7 @@ import {
 } from "./interaction.js";
 import {
   splitCharacters,
+  splitWarpedCharacters,
   splitParts,
   reassignBridges,
   groupItems,
@@ -35,6 +38,15 @@ import {
   normalizeGroups,
 } from "./grouping.js";
 import { arrangeItems, cloneItems } from "./edit.js";
+import {
+  WARP_PRESETS,
+  CORNERS,
+  flatEnvelope,
+  presetEnvelope,
+  coons,
+  warpContours,
+  isFlat,
+} from "./warp.js";
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 let typography;
 const shapingFonts = new Map();
@@ -79,8 +91,11 @@ let selected = null,
 const uid = () => crypto.randomUUID();
 let multi = [],
   activeLayer = "layer-default",
-  textEdit = null,
+  liveSession = null,
+  warpId = null,
+  warpBase = null,
   browserAnchor = null,
+  lastPress = null,
   clipboard = null,
   pasteCount = 0;
 const selectionIds = () => (multi.length ? multi : selected ? [selected] : []);
@@ -170,19 +185,26 @@ function commit() {
   render();
   persist();
 }
+// Undo/redo clear the selection, except that Warp mode stays on its text.
+function restore(snapshot) {
+  const keep = warpId;
+  project = JSON.parse(snapshot);
+  selectItem(null);
+  if (keep && project.items.some((i) => i.id === keep && i.warp)) {
+    multi = [keep];
+    selected = keep;
+  }
+  commit();
+}
 function undo() {
   if (!history.length) return;
   future.push(JSON.stringify(project));
-  project = JSON.parse(history.pop());
-  selectItem(null);
-  commit();
+  restore(history.pop());
 }
 function redo() {
   if (!future.length) return;
   history.push(JSON.stringify(project));
-  project = JSON.parse(future.pop());
-  selectItem(null);
-  commit();
+  restore(future.pop());
 }
 function textContours(item) {
   if (!typography) throw Error("フォントの準備が完了するまでお待ちください。");
@@ -200,6 +222,40 @@ function textGlyphs(item) {
     shapingFonts.get(item.font),
   );
 }
+// Glyph outline before the warp, cached because envelope edits reuse it.
+function unwarpedLayout(item) {
+  const key = JSON.stringify([
+    item.font,
+    item.text,
+    item.size,
+    item.spacing,
+    item.vertical,
+    item.stretch ?? 1,
+  ]);
+  if (warpBase?.key !== key) {
+    const contours = textContours({ ...item, warp: undefined });
+    warpBase = { key, contours, box: bounds(contours) };
+  }
+  return warpBase;
+}
+// Same result as layoutText with the warp, without laying the glyphs out again.
+function withWarp(item, warp, base = unwarpedLayout(item)) {
+  return {
+    ...item,
+    warp,
+    contours: warpContours(base.contours, base.box, warp.envelope),
+  };
+}
+const warpItem = () => {
+  const item = selectedItem();
+  return warpId && item?.id === warpId && item.warp ? item : null;
+};
+const warpLabel = (warp) =>
+  warp.preset === "custom"
+    ? "カスタム"
+    : warp.preset === "none"
+      ? "なし"
+      : `${WARP_PRESETS.find(([id]) => id === warp.preset)[1]} ${Math.round(warp.bend * 100)}%`;
 const visibleChars = (text) => [...text].filter((c) => /\S/u.test(c)).length;
 // What ungrouping does next: text → one item per character → parts.
 function ungroupKind(item) {
@@ -313,17 +369,18 @@ $("#app").innerHTML = `
   )
   .join(
     "",
-  )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button><button id="group" class="tool" title="選択をグループ化 (${shortcut("G")})"><span class="tool-icon">▣</span>グループ化</button><button id="ungroup" class="tool" title="グループを解除、または文字を1文字ずつ・部位ごとに分解 (${shortcut("G", true)})"><span class="tool-icon">⊞</span>グループ化解除</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
+  )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button><button id="group" class="tool" title="選択をグループ化 (${shortcut("G")})"><span class="tool-icon">▣</span>グループ化</button><button id="ungroup" class="tool" title="グループを解除、または文字を1文字ずつ・部位ごとに分解 (${shortcut("G", true)})"><span class="tool-icon">⊞</span>グループ化解除</button><button id="warp" class="tool" title="文字のアウトラインをエンベロープで変形（Text Warp）"><span class="tool-icon">⌒</span>ワープ</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
-<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.6</span></span></footer>
+<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.7</span></span></footer>
 <input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,application/json">
-<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
-<div id="context-menu" class="context-menu" role="menu" aria-label="編集メニュー" hidden></div>`;
+<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、「ワープ」でアウトラインそのものを変形できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
+<div id="context-menu" class="context-menu" role="menu" aria-label="編集メニュー" hidden></div>
+<div id="text-editor" class="text-editor" hidden><textarea id="canvas-text" aria-label="文字を編集" maxlength="500" rows="2"></textarea><small>入力はすぐに反映 · Esc / ${shortcut("Enter")} で確定</small></div>`;
 
 function layerRow(i) {
-  return `<button class="layer ${selectionIds().includes(i.id) ? "selected" : ""} ${i.type === "bridge" ? "bridge-layer" : ""}" draggable="${isEditable(project, i)}" data-layer="${i.id}" ${!isEditable(project, i) ? "disabled" : ""}><span class="layer-icon">${icons[i.type] || "⌘"}</span><span>${esc(i.name)}</span><small>${i.type === "bridge" ? "TAB" : i.type === "text" ? "TEXT" : "PATH"}</small></button>`;
+  return `<button class="layer ${selectionIds().includes(i.id) ? "selected" : ""} ${i.type === "bridge" ? "bridge-layer" : ""}" draggable="${isEditable(project, i)}" data-layer="${i.id}" ${!isEditable(project, i) ? "disabled" : ""}><span class="layer-icon">${i.warp ? "⌒" : icons[i.type] || "⌘"}</span><span>${esc(i.name)}</span><small>${i.type === "bridge" ? "TAB" : i.warp ? "WARP" : i.type === "text" ? "TEXT" : "PATH"}</small></button>`;
 }
 // Consecutive members of one group are shown under a group row.
 function layerRows(items) {
@@ -361,11 +418,29 @@ function renderLayers() {
 function field(key, label, value, step = 1, min = -2000, max = 2000) {
   return `<label>${label}<input data-prop="${key}" type="number" value="${Number(value.toFixed(3))}" step="${step}" min="${min}" max="${max}"></label>`;
 }
+function presetIcon(id) {
+  const e = presetEnvelope(id, 0.5, 3),
+    at = (p) => `${(4 + p.x * 36).toFixed(2)} ${(9 + p.y * 14).toFixed(2)}`,
+    outline = `M${at(e[0])} C${at(e[1])} ${at(e[2])} ${at(e[3])} C${at(e[4])} ${at(e[5])} ${at(e[6])} C${at(e[7])} ${at(e[8])} ${at(e[9])} C${at(e[10])} ${at(e[11])} ${at(e[0])} Z`,
+    middle = Array.from({ length: 13 }, (_, n) => at(coons(e, n / 12, 0.5)));
+  return `<svg viewBox="0 0 44 32" aria-hidden="true"><path d="${outline}" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="1.2"/><path d="M${middle.join(" L")}" fill="none" stroke="currentColor" stroke-width=".7" stroke-opacity=".6"/></svg>`;
+}
+function warpPanel(i) {
+  const w = i.warp,
+    bendable = WARP_PRESETS.some(([id]) => id === w.preset);
+  return `<section class="warp-panel"><div class="object-type">TEXT WARP / エンベロープ</div><h3>${esc(i.name)}</h3><h4>プリセット <span>${esc(warpLabel(w))}</span></h4><div class="warp-presets">${WARP_PRESETS.map(([id, en, ja]) => `<button data-warp-preset="${id}" class="${w.preset === id ? "active" : ""}" aria-pressed="${w.preset === id}" title="${ja}">${presetIcon(id)}<span>${en}</span></button>`).join("")}</div><label class="full-label">曲がり <output id="warp-bend-value">${Math.round(w.bend * 100)}%</output><input id="warp-bend" type="range" min="-100" max="100" step="1" value="${Math.round(w.bend * 100)}" ${bendable ? "" : "disabled"}></label><p class="note">${bendable ? "エンベロープの角・ハンドルをドラッグして形を調整できます。" : w.preset === "custom" ? "カスタム形状です。プリセットを選ぶと置き換わります。" : "プリセットを選ぶか、エンベロープの角・ハンドルをドラッグしてください。"}角をドラッグすると隣のハンドルも動きます（Alt/Optionで角だけ）。</p><div class="warp-actions"><button id="warp-reset">形をリセット</button><button id="warp-remove">ワープを解除</button></div><button id="warp-done" class="wide-button warp-done">完了</button><p class="note">元の文字とワープ設定を保持します。文字の編集・拡縮後も同じ変形が掛かります。SVGには変形後の輪郭をパスで書き出します。</p></section>`;
+}
 function renderProperties() {
   const i = selectedItem();
+  if (warpItem()) {
+    $("#properties").innerHTML = warpPanel(i);
+    $("#board-width").value = project.width;
+    $("#board-height").value = project.height;
+    return;
+  }
   $("#properties").innerHTML = i
     ? `<section><div class="object-type">${i.type === "bridge" ? "BRIDGE / 非カット" : i.type === "text" ? "TYPOGRAPHY" : "SKETCH / パス"}</div><h3>${esc(i.name)}</h3><h4>配置 <span>mm</span></h4><div class="fields">${field("x", "X", i.x, 0.5)}${field("y", "Y", i.y, 0.5)}${field("rotation", "回転 °", i.rotation, 1, -360, 360)}</div></section>
-  ${i.type === "text" ? `<section><h4>テキスト</h4><textarea id="text-content" maxlength="500" aria-label="文字内容">${esc(i.text)}</textarea><label class="full-label">フォント<select id="font-select">${[...fontLabels].map(([k, v]) => `<option value="${esc(k)}" ${i.font === k ? "selected" : ""}>${esc(v)}</option>`).join("")}${!fontLabels.has(i.font) ? `<option value="${esc(i.font)}" selected>追加フォント（再読込が必要）</option>` : ""}</select></label><div id="font-preview" class="font-preview" style="font-family:${i.font === "zen" ? "ZenPreview" : i.font === "shippori" ? "ShipporiPreview" : "sans-serif"}">日本語 Aa 123</div><button id="add-font" class="wide-button">＋ フォント追加 <small>TTF / OTF / WOFF</small></button><div class="fields">${field("size", "サイズ mm", i.size, 0.5, 1, 300)}${field("spacing", "字間 mm", i.spacing, 0.1, -100, 100)}</div><label class="check vertical-check"><input type="checkbox" id="vertical" ${i.vertical ? "checked" : ""}> 縦書き（右から左）</label></section>` : ""}
+  ${i.type === "text" ? `<section><h4>テキスト</h4><textarea id="text-content" maxlength="500" aria-label="文字内容">${esc(i.text)}</textarea><label class="full-label">フォント<select id="font-select">${[...fontLabels].map(([k, v]) => `<option value="${esc(k)}" ${i.font === k ? "selected" : ""}>${esc(v)}</option>`).join("")}${!fontLabels.has(i.font) ? `<option value="${esc(i.font)}" selected>追加フォント（再読込が必要）</option>` : ""}</select></label><div id="font-preview" class="font-preview" style="font-family:${i.font === "zen" ? "ZenPreview" : i.font === "shippori" ? "ShipporiPreview" : "sans-serif"}">日本語 Aa 123</div><button id="add-font" class="wide-button">＋ フォント追加 <small>TTF / OTF / WOFF</small></button><div class="fields">${field("size", "サイズ mm", i.size, 0.5, 1, 300)}${field("spacing", "字間 mm", i.spacing, 0.1, -100, 100)}${field("stretch", "長体・平体 %", (i.stretch ?? 1) * 100, 1, 5, 2000)}</div><label class="check vertical-check"><input type="checkbox" id="vertical" ${i.vertical ? "checked" : ""}> 縦書き（右から左）</label><p class="note">四隅のハンドルで拡縮すると、サイズと長体・平体が変わります。キャンバスでダブルクリックすると文字を編集できます。</p></section><section><h4>ワープ</h4><button id="enter-warp" class="wide-button">⌒ ワープ（エンベロープ変形）</button><p class="note">${i.warp ? `現在: ${esc(warpLabel(i.warp))} · ` : ""}文字のアウトラインそのものを曲線のエンベロープで変形します。</p></section>` : ""}
   ${["bridge", "rect", "circle", "line"].includes(i.type) ? `<section><h4>${i.type === "bridge" ? "切り残し領域" : "寸法"} <span>mm</span></h4><div class="fields">${field("w", "幅", i.w, 0.1, i.type === "line" ? 0 : 0.1)}${field("h", "高さ", i.h, 0.1, i.type === "line" ? 0 : 0.1)}${i.type === "rect" ? field("radius", "フィレット R", i.radius ?? 0, 0.1, 0, 1000) : ""}</div>${i.type === "rect" ? '<p class="note">4つの角を半径Rで丸めます。最大は短辺の半分です。</p>' : ""}${i.type === "bridge" ? '<p class="note">オレンジ色の領域に重なったカット線を除去します。</p>' : ""}</section>` : ""}`
     : '<section class="no-selection"><span>↖</span><h3>オブジェクトを選択</h3><p>キャンバスや左の一覧から選択して、文字・位置・寸法を編集できます。</p></section>';
   const chosen = selectedItems();
@@ -386,6 +461,48 @@ function renderProperties() {
   }
   $("#board-width").value = project.width;
   $("#board-height").value = project.height;
+}
+// Envelope editor: the four Bézier sides, a light mesh showing the patch,
+// corners (squares) and handles (dots). Sizes are in screen pixels.
+function warpOverlay(item, scale) {
+  const { box } = unwarpedLayout(item),
+    e = item.warp.envelope,
+    at = (p) => ({ x: box.x + p.x * box.w, y: box.y + p.y * box.h }),
+    xy = (p) => {
+      const q = at(p);
+      return `${Number(q.x.toFixed(4))} ${Number(q.y.toFixed(4))}`;
+    },
+    px = 1 / scale,
+    r = 4 * px;
+  const outline = `M${xy(e[0])} C${xy(e[1])} ${xy(e[2])} ${xy(e[3])} C${xy(e[4])} ${xy(e[5])} ${xy(e[6])} C${xy(e[7])} ${xy(e[8])} ${xy(e[9])} C${xy(e[10])} ${xy(e[11])} ${xy(e[0])} Z`,
+    mesh = [0.25, 0.5, 0.75].flatMap((t) => [
+      Array.from({ length: 17 }, (_, n) => at(coons(e, t, n / 16))),
+      Array.from({ length: 17 }, (_, n) => at(coons(e, n / 16, t))),
+    ]),
+    arms = [
+      [0, 1],
+      [0, 11],
+      [3, 2],
+      [3, 4],
+      [6, 5],
+      [6, 7],
+      [9, 8],
+      [9, 10],
+    ];
+  return `<g class="warp-envelope" transform="translate(${item.x} ${item.y}) rotate(${item.rotation})"><path d="${pathData(mesh)}" fill="none" stroke="#c27a45" stroke-opacity=".4" stroke-width="${px}" pointer-events="none"/><path d="${outline}" fill="none" stroke="#c27a45" stroke-width="${1.5 * px}" pointer-events="none"/>${arms
+    .map(([a, b]) => {
+      const p = at(e[a]),
+        q = at(e[b]);
+      return `<line x1="${p.x}" y1="${p.y}" x2="${q.x}" y2="${q.y}" stroke="#c27a45" stroke-width="${px}" pointer-events="none"/>`;
+    })
+    .join("")}${e
+    .map((point, n) => {
+      const p = at(point);
+      return CORNERS.includes(n)
+        ? `<rect data-warp-point="${n}" class="warp-point" aria-label="エンベロープの角" x="${p.x - r}" y="${p.y - r}" width="${2 * r}" height="${2 * r}" fill="white" stroke="#c27a45" stroke-width="${1.5 * px}"/>`
+        : `<circle data-warp-point="${n}" class="warp-point" aria-label="エンベロープのハンドル" cx="${p.x}" cy="${p.y}" r="${r * 0.85}" fill="#c27a45" stroke="white" stroke-width="${px}"/>`;
+    })
+    .join("")}</g>`;
 }
 function renderCanvas() {
   const svg = $("#canvas");
@@ -416,6 +533,10 @@ function renderCanvas() {
   let overlay = "";
   for (const i of selectedItems())
     if (!preview) {
+      if (i.id === warpId) {
+        overlay += warpOverlay(i, scale);
+        continue;
+      }
       const b = itemBounds(i),
         single = selectedItems().length === 1 && canResize(i),
         handle = 3 / scale;
@@ -443,12 +564,16 @@ function renderCanvas() {
       : "crosshair";
   $("#canvas-mode").textContent = preview
     ? "加工プレビュー · 実際に出力されるカット線"
-    : "スケッチ編集中";
+    : warpId
+      ? "ワープ編集中 · 文字のアウトラインを変形"
+      : "スケッチ編集中";
   $("#hint").textContent = preview
     ? "赤い線をカットします。自動ブリッジは帯の側面を含む切り抜き輪郭です。"
-    : tool === "select"
-      ? "空白からドラッグで範囲選択 · 右クリックで編集メニュー · 2本指スワイプで移動 · ピンチでズーム"
-      : `${labels[tool]}を配置する場所をクリック`;
+    : warpId
+      ? "角・ハンドルをドラッグ（Altで角だけ）· Esc / Enter で完了"
+      : tool === "select"
+        ? "空白からドラッグで範囲選択 · 右クリックで編集メニュー · 2本指スワイプで移動 · ピンチでズーム"
+        : `${labels[tool]}を配置する場所をクリック`;
   $("#board-label").textContent = `${project.width} × ${project.height} mm`;
   $("#zoom-reset").textContent = `${Math.round(zoom * 100)}%`;
 }
@@ -471,12 +596,17 @@ function render({ properties = true } = {}) {
   );
   multi = valid;
   selected = valid.at(-1) || null;
+  // Warp mode lasts while its text is the only selection.
+  if (warpId && !(multi.length === 1 && warpItem())) warpId = null;
   $("#project-name").textContent = project.name;
   renderLayers();
   if (properties) {
-    textEdit = null;
+    liveSession = null;
     renderProperties();
-  } else $("#properties h3").textContent = selectedItem()?.name ?? "";
+  } else {
+    const title = $("#properties h3");
+    if (title) title.textContent = selectedItem()?.name ?? "";
+  }
   renderCanvas();
   document
     .querySelectorAll("[data-tool]")
@@ -491,6 +621,9 @@ function render({ properties = true } = {}) {
   );
   $("#ungroup").disabled = !selectedItems().some(ungroupKind);
   $("#group").disabled = selectedItems().filter((i) => !i.targetId).length < 2;
+  $("#warp").disabled =
+    selectedItems().length !== 1 || selectedItem()?.type !== "text";
+  $("#warp").classList.toggle("active", Boolean(warpId));
   $("#delete").disabled = $("#duplicate").disabled = !selectedItem();
   const c = cutGeometry(visibleItems(project)),
     outside = !withinBoard();
@@ -506,7 +639,7 @@ function updateSelected(key, value) {
   const old = selectedItem();
   if (!isEditable(project, old)) return;
   try {
-    const next = { ...old, [key]: value };
+    const next = { ...old, [key]: key === "stretch" ? value / 100 : value };
     if (key === "radius" && value > Math.min(old.w, old.h) / 2) {
       next.radius = Math.min(old.w, old.h) / 2;
       notify(`フィレット半径は短辺の半分（${next.radius} mm）までです。`);
@@ -519,7 +652,7 @@ function updateSelected(key, value) {
     }
     if (
       next.type === "text" &&
-      ["text", "font", "size", "spacing", "vertical"].includes(key)
+      ["text", "font", "size", "spacing", "vertical", "stretch"].includes(key)
     ) {
       next.contours = textContours(next);
       next.name = next.text || "空の文字";
@@ -548,10 +681,34 @@ $("#properties").addEventListener("change", (e) => {
   } else if (el.id === "font-select") updateSelected("font", el.value);
   else if (el.id === "vertical") updateSelected("vertical", el.checked);
   else if (el.id === "ratio-lock") updateSelected("ratioLocked", el.checked);
+  else if (el.id === "warp-bend") liveSession = null;
   else if (el.id === "item-layer")
     moveSelectionToLayer(selectionIds(), el.value);
 });
-// Text edits apply on every input event. One undo step covers a typing session.
+// Continuous edits (typing, the bend slider) apply on every input event and
+// share one undo step. Scoped bridges follow from the session start, so
+// repeated updates do not accumulate drift.
+function liveUpdate(current, next, kind) {
+  if (liveSession?.id !== current.id || liveSession.kind !== kind) {
+    checkpoint();
+    liveSession = {
+      id: current.id,
+      kind,
+      before: structuredClone(current),
+      bridges: project.items
+        .filter((i) => i.targetId === current.id)
+        .map((b) => structuredClone(b)),
+    };
+  }
+  for (const bridge of project.items) {
+    const start = liveSession.bridges.find((b) => b.id === bridge.id);
+    if (start) Object.assign(bridge, structuredClone(start));
+  }
+  followBridges(project.items, liveSession.before, next);
+  project.items[project.items.indexOf(current)] = next;
+  render({ properties: false });
+  persist();
+}
 function liveText(value) {
   const current = selectedItem();
   if (current?.type !== "text" || !isEditable(project, current)) return;
@@ -562,32 +719,32 @@ function liveText(value) {
     notify(e.message);
     return;
   }
-  if (textEdit?.id !== current.id) {
-    checkpoint();
-    textEdit = {
-      id: current.id,
-      before: structuredClone(current),
-      bridges: project.items
-        .filter((i) => i.targetId === current.id)
-        .map((b) => structuredClone(b)),
-    };
-  }
-  // Scoped bridges follow from the session start, so keystrokes do not accumulate drift.
-  for (const bridge of project.items) {
-    const start = textEdit.bridges.find((b) => b.id === bridge.id);
-    if (start) Object.assign(bridge, structuredClone(start));
-  }
-  followBridges(project.items, textEdit.before, next);
-  project.items[project.items.indexOf(current)] = next;
-  render({ properties: false });
-  persist();
+  liveUpdate(current, next, "text");
+}
+function liveBend(percent) {
+  const item = warpItem();
+  if (!item || !WARP_PRESETS.some(([id]) => id === item.warp.preset)) return;
+  const { box } = unwarpedLayout(item),
+    bend = percent / 100;
+  liveUpdate(
+    item,
+    withWarp(item, {
+      ...item.warp,
+      bend,
+      envelope: presetEnvelope(item.warp.preset, bend, box.w / (box.h || 1)),
+    }),
+    "bend",
+  );
+  $("#warp-bend-value").textContent = `${percent}%`;
 }
 $("#properties").addEventListener("input", (e) => {
   if (e.target.id === "text-content") liveText(e.target.value);
+  if (e.target.id === "warp-bend") liveBend(e.target.valueAsNumber);
 });
 $("#properties").addEventListener("focusout", (e) => {
+  if (e.target.id === "warp-bend") liveSession = null;
   if (e.target.id !== "text-content") return;
-  textEdit = null;
+  liveSession = null;
   // Text the font cannot draw is not kept; show what the canvas shows.
   const current = selectedItem();
   if (current?.type === "text") e.target.value = current.text;
@@ -597,6 +754,12 @@ $("#properties").addEventListener("click", (e) => {
   if (e.target.closest("#item-auto-bridge")) applyAutoBridges();
   if (e.target.closest("#item-ungroup")) ungroup();
   if (e.target.closest("#item-group")) groupSelection();
+  if (e.target.closest("#enter-warp")) enterWarp();
+  const preset = e.target.closest("[data-warp-preset]");
+  if (preset) applyWarpPreset(preset.dataset.warpPreset);
+  if (e.target.closest("#warp-reset")) resetWarp();
+  if (e.target.closest("#warp-remove")) removeWarp();
+  if (e.target.closest("#warp-done")) exitWarp();
   const op = e.target.closest("[data-boolean]");
   if (op) applyBoolean(op.dataset.boolean);
 });
@@ -874,6 +1037,7 @@ function outlineSelected() {
   if (i?.type !== "text" || !isEditable(project, i)) return;
   checkpoint();
   i.type = "outline";
+  delete i.warp;
   commit();
   notify("固定アウトラインに変換しました。四隅で拡縮できます。");
 }
@@ -905,6 +1069,46 @@ function groupSelection() {
   }
 }
 $("#group").onclick = groupSelection;
+$("#warp").onclick = () => (warpId ? exitWarp() : enterWarp());
+// Double-clicking text opens a small editor under it; typing updates live.
+const editor = $("#text-editor"),
+  editorText = $("#canvas-text");
+function editText(id) {
+  const item = project.items.find((i) => i.id === id);
+  if (loading || item?.type !== "text" || !isEditable(project, item)) return;
+  if (warpId !== id) warpId = null;
+  selectItem(id);
+  preview = false;
+  tool = "select";
+  render();
+  const box = (
+    document.querySelector(`#objects [data-object="${id}"]`) ||
+    $("#canvas-scroll")
+  ).getBoundingClientRect();
+  editorText.value = item.text;
+  editor.hidden = false;
+  const size = editor.getBoundingClientRect(),
+    below = box.bottom + 8;
+  editor.style.left = `${Math.max(8, Math.min(box.left, innerWidth - size.width - 8))}px`;
+  editor.style.top = `${below + size.height > innerHeight - 8 ? Math.max(8, box.top - size.height - 8) : below}px`;
+  editorText.focus();
+  editorText.select();
+}
+function closeEditor() {
+  if (editor.hidden) return;
+  editor.hidden = true;
+  liveSession = null;
+  render();
+}
+editorText.addEventListener("input", () => liveText(editorText.value));
+editorText.addEventListener("keydown", (e) => {
+  if (e.isComposing) return;
+  if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) {
+    e.preventDefault();
+    closeEditor();
+  }
+});
+editorText.addEventListener("focusout", closeEditor);
 const arrangeLabels = {
   front: "最前面へ",
   forward: "前面へ",
@@ -1023,6 +1227,75 @@ function applyBoolean(operation) {
     notify(e.message);
   }
 }
+// Text Warp: the envelope deforms the real glyph outlines; the text, font and
+// warp parameters stay on the item so it can be edited again.
+function enterWarp() {
+  const item = selectedItem();
+  if (selectedItems().length !== 1 || item?.type !== "text") {
+    notify("ワープする文字を1つ選択してください。");
+    return;
+  }
+  try {
+    unwarpedLayout(item);
+  } catch (e) {
+    notify(e.message);
+    return;
+  }
+  // A flat envelope changes nothing, so entering needs no undo step.
+  if (!item.warp)
+    item.warp = { preset: "none", bend: 0.5, envelope: flatEnvelope() };
+  warpId = item.id;
+  preview = false;
+  tool = "select";
+  render();
+  notify(
+    "ワープ: プリセットを選ぶか、エンベロープの角・ハンドルをドラッグしてください。",
+  );
+}
+function exitWarp() {
+  const item = warpItem();
+  if (item && isFlat(item.warp.envelope)) delete item.warp;
+  warpId = null;
+  render();
+  persist();
+}
+function applyWarpPreset(name) {
+  const item = warpItem();
+  if (!item) return;
+  const { box } = unwarpedLayout(item),
+    bend = item.warp.bend || 0.5;
+  checkpoint();
+  replaceItem(
+    item,
+    withWarp(item, {
+      preset: name,
+      bend,
+      envelope: presetEnvelope(name, bend, box.w / (box.h || 1)),
+    }),
+  );
+  commit();
+}
+function resetWarp() {
+  const item = warpItem();
+  if (!item || isFlat(item.warp.envelope)) return;
+  checkpoint();
+  replaceItem(
+    item,
+    withWarp(item, { ...item.warp, preset: "none", envelope: flatEnvelope() }),
+  );
+  commit();
+}
+function removeWarp() {
+  const item = warpItem();
+  if (!item) return;
+  const next = { ...item, contours: unwarpedLayout(item).contours };
+  delete next.warp;
+  checkpoint();
+  replaceItem(item, next);
+  warpId = null;
+  commit();
+  notify("ワープを解除しました。元に戻す操作で復元できます。");
+}
 function ungroup() {
   // Groups are released first; ungrouping again splits text, then parts.
   const grouped = selectedItems().filter((i) => i.groupId);
@@ -1048,14 +1321,22 @@ function ungroup() {
     for (const item of selectedItems()) {
       const kind = ungroupKind(item);
       if (!kind) continue;
-      let pieces =
-        kind === "characters" ? splitCharacters(item, textGlyphs(item)) : [];
+      let done = kind,
+        pieces =
+          kind !== "characters"
+            ? []
+            : item.warp
+              ? splitWarpedCharacters(item, textGlyphs(item))
+              : splitCharacters(item, textGlyphs(item));
       // Several characters shaped into one glyph fall through to parts.
-      if (pieces.length < 2) pieces = splitParts(item);
+      if (pieces.length < 2) {
+        pieces = splitParts(item);
+        done = "parts";
+      }
       if (pieces.length > 1)
         replaced.push({
           item,
-          kind: pieces[0].type === "text" ? "characters" : "parts",
+          kind: done,
           pieces: pieces.map((p) => ({ ...p, id: uid() })),
         });
     }
@@ -1183,6 +1464,24 @@ $("#canvas").addEventListener("pointerdown", (e) => {
     addItem(tool, snap ? Math.round(p.x) : p.x, snap ? Math.round(p.y) : p.y);
     return;
   }
+  const warpPoint = e.target.closest("[data-warp-point]");
+  if (warpPoint && warpItem()) {
+    const item = warpItem();
+    drag = {
+      kind: "warp",
+      index: Number(warpPoint.dataset.warpPoint),
+      before: structuredClone(item),
+      bridges: project.items
+        .filter((i) => i.targetId === item.id)
+        .map((b) => structuredClone(b)),
+      base: unwarpedLayout(item),
+      start: p,
+      moved: false,
+    };
+    $("#canvas").setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
   const handle = e.target.closest("[data-resize]");
   if (handle && selectedItems().length === 1 && canResize(selectedItem())) {
     drag = {
@@ -1216,6 +1515,23 @@ $("#canvas").addEventListener("pointerdown", (e) => {
     };
     $("#canvas").setPointerCapture(e.pointerId);
     e.preventDefault();
+    return;
+  }
+  // Double press on text opens the editor. Each press redraws the objects,
+  // which resets the browser's own click count, so dblclick cannot be used.
+  const now = performance.now(),
+    last = lastPress;
+  lastPress = { id, time: now, x: e.clientX, y: e.clientY };
+  if (
+    last?.id === id &&
+    now - last.time < 450 &&
+    Math.hypot(e.clientX - last.x, e.clientY - last.y) < 6 &&
+    !e.shiftKey &&
+    project.items.find((i) => i.id === id)?.type === "text"
+  ) {
+    lastPress = null;
+    e.preventDefault();
+    editText(id);
     return;
   }
   if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -1259,19 +1575,57 @@ $("#canvas").addEventListener("pointermove", (e) => {
     checkpoint();
     drag.moved = true;
   }
-  if (drag.kind === "resize") {
+  if (drag.kind === "warp") {
+    // The pointer moves the point in the unwarped box's units; a corner
+    // carries its two handles unless Alt/Option is held.
+    const { before, base } = drag,
+      current = project.items.find((i) => i.id === before.id),
+      a = transform(drag.start, before, true),
+      b = transform(p, before, true),
+      dx = (b.x - a.x) / (base.box.w || 1),
+      dy = (b.y - a.y) / (base.box.h || 1),
+      n = drag.index,
+      envelope = before.warp.envelope.map((q) => ({ ...q })),
+      clamp = (v) => Math.max(-50, Math.min(50, v));
+    for (const k of CORNERS.includes(n) && !e.altKey
+      ? [n, (n + 1) % 12, (n + 11) % 12]
+      : [n])
+      envelope[k] = {
+        x: clamp(envelope[k].x + dx),
+        y: clamp(envelope[k].y + dy),
+      };
+    for (const bridge of project.items) {
+      const start = drag.bridges.find((s) => s.id === bridge.id);
+      if (start) Object.assign(bridge, structuredClone(start));
+    }
+    const next = withWarp(
+      current,
+      { ...before.warp, preset: "custom", envelope },
+      base,
+    );
+    followBridges(project.items, before, next);
+    project.items[project.items.indexOf(current)] = next;
+  } else if (drag.kind === "resize") {
     const before = drag.before,
       current = project.items.find((i) => i.id === before.id);
     const point = snap ? { x: Math.round(p.x), y: Math.round(p.y) } : p;
-    replaceItem(
-      current,
-      resizeFromHandle(
-        before,
-        drag.corner,
-        point,
-        before.ratioLocked || e.shiftKey,
-      ),
-    );
+    try {
+      replaceItem(
+        current,
+        resizeFromHandle(
+          before,
+          drag.corner,
+          point,
+          before.ratioLocked || e.shiftKey,
+          textContours,
+        ),
+      );
+    } catch (error) {
+      notify(error.message);
+      drag = null;
+      commit();
+      return;
+    }
   } else {
     const ids = drag.before.map((i) => i.id);
     for (const before of drag.before) {
@@ -1456,6 +1810,8 @@ const menuActions = {
   group: groupSelection,
   ungroup,
   outline: outlineSelected,
+  "edit-text": () => editText(selected),
+  warp: enterWarp,
   fillet: () => {
     const field = $('[data-prop="radius"]');
     field?.focus();
@@ -1511,6 +1867,8 @@ function menuEntries(onObject) {
       kinds.size,
     ],
     "-",
+    ["edit-text", "テキストを編集", "", one?.type === "text"],
+    ["warp", "ワープ…", "", one?.type === "text"],
     ["outline", "アウトライン化", "", one?.type === "text"],
     ["fillet", "フィレット…", "", one?.type === "rect"],
     [
@@ -1661,6 +2019,13 @@ window.addEventListener("keydown", (e) => {
     return;
   const mod = e.metaKey || e.ctrlKey,
     key = e.key.toLowerCase();
+  if (warpId && (e.key === "Escape" || e.key === "Enter")) {
+    e.preventDefault();
+    exitWarp();
+    return;
+  }
+  // Keep the text while its envelope is being edited.
+  if (warpId && (e.key === "Delete" || e.key === "Backspace")) return;
   if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
     e.preventDefault();
     openMenuForSelection();

@@ -1181,3 +1181,91 @@ dialog .primary {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.warp-presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+  margin-bottom: 14px;
+}
+.warp-presets button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 2px;
+  border: 1px solid #dbe3ea;
+  background: #f7f9fb;
+  color: #52697c;
+  font-size: 9px;
+}
+.warp-presets svg {
+  width: 38px;
+  height: 28px;
+}
+.warp-presets button.active {
+  border-color: #c27a45;
+  background: #fbf1e9;
+  color: #a4602f;
+}
+.warp-panel output {
+  float: right;
+  color: #a4602f;
+  font-variant-numeric: tabular-nums;
+}
+.warp-panel input[type="range"] {
+  width: 100%;
+  accent-color: #c27a45;
+  padding: 0;
+  margin: 8px 0 4px;
+}
+.warp-panel h4 span {
+  color: #a4602f;
+}
+.warp-actions {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0;
+}
+.warp-actions button {
+  flex: 1;
+  border: 1px solid #d3dee6;
+  background: #edf2f5;
+  font-size: 11px;
+}
+.wide-button.warp-done {
+  justify-content: center;
+  border: 1px solid #c27a45;
+  background: #c27a45;
+  color: white;
+  font-size: 12px;
+}
+.wide-button.warp-done:hover {
+  background: #ad6936;
+}
+.warp-point {
+  cursor: move;
+}
+.text-editor {
+  position: fixed;
+  z-index: 40;
+  width: min(420px, calc(100vw - 16px));
+  padding: 6px;
+  background: white;
+  border: 1px solid #8caec8;
+  border-radius: 7px;
+  box-shadow: 0 10px 28px #20304029;
+}
+.text-editor textarea {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  font-size: 15px;
+  border: 0;
+  outline: none;
+}
+.text-editor small {
+  display: block;
+  padding: 2px 4px 0;
+  font-size: 10px;
+  color: #8d9aa5;
+}
