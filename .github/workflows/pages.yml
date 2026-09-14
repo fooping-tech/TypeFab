@@ -21,7 +21,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # Optional: repository variable ORDER_API_URL = the deployed Worker URL.
+      # Without it the order page shows estimates only (no checkout).
       - run: npm run build
+        env:
+          VITE_ORDER_API_URL: ${{ vars.ORDER_API_URL }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

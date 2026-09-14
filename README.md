@@ -208,11 +208,86 @@ npm run build
 
 Vite + JavaScript + opentype.js + HarfBuzz WASM + Clipperの完全静的構成です。`src/geometry.js` が輪郭・ブリッジ・SVG出力、`src/project.js` がJSON入力検証、`src/main.js` が編集UIを担当します。`src/operations.js` は拡縮とブーリアン、`src/layers.js` はレイヤー、`src/typography.js` は文字組版、`src/grouping.js` はグループと文字・部位への分解、`src/edit.js` は重なり順とコピー、`src/warp.js` はワープ（エンベロープ変形）、`src/path.js` はパスのノード編集（SVG pathの読み書き、ベジェ曲線の近似、ノード操作）、`src/svgimport.js` はSVGファイルの読み込みです。将来別リポジトリ名へ移す場合は `vite.config.js` の `base` を変更してください。
 
+## 加工注文（EC）
+
+TypeFabで作ったSVG、または手元のSVGをそのままレーザー加工注文できる流れを実装しています（Issue #1）。**注文の受付には、下記のCloudflare WorkersとStripeの設定が必要です。設定していない公開サイトでは、注文ページは概算の表示のみで決済はできません。**
+
+```text
+デザイン → 「このデザインを加工注文する」 → SVG確認 → 材料・厚さ・数量・納期 → 料金 → 配送先 → Stripe Checkout → 決済 → PAID → 管理画面 → SVGダウンロード → PROCESSING → READY → 追跡番号 → SHIPPED
+```
+
+### 使い方（注文する側）
+
+1. エディタのヘッダーにある「このデザインを加工注文する」を押すと、書き出しと同じ検査（加工エリア外のカット線、ブリッジで消えた輪郭）を通したSVGを注文ページ（`/order/`）に渡します。保存と再アップロードは不要です。外部のSVGは注文ページにドロップ／選択して読み込めます。
+2. 注文ページはSVGを解析し、実寸（mm）、viewBox、パスのみか、総カット長、パス数、開いた線（open path）、重複線の可能性、文字（text）や未対応要素の有無を表示します。`script`・`foreignObject`・`iframe`・イベント属性・外部URL・外部エンティティを含むSVGは受け付けません。プレビューはこれらを取り除いたSVGを `<img>` で表示します。
+3. TypeFab内部では **1 SVGユーザー単位 = 1 mm** とし、書き出すSVGには `width="240mm" height="160mm" viewBox="0 0 240 160"` のように物理サイズを明示します。width/heightが px や単位なしで実寸が決まらないSVGは「実寸の幅 (mm)」の入力を求め、確定するまで注文できません。
+4. 材料（MDF / アクリル / その他＝要相談）、厚さ（材料ごと）、数量、通常／特急を選ぶと概算を表示します。料金は `src/pricing.js` の設定値（仮）で `基本料金 + 材料費 + 加工費 + 数量加算`、特急は加工料金×2（送料は2倍にしない）です。**最終金額はWorker側で必ず再計算**し、ブラウザから送られた金額は使いません。
+5. 数量が閾値（初期値10個、`BULK_THRESHOLD`）以上、または「その他」材料は事前問い合わせとし、「大量注文について問い合わせる」（`CONTACT_URL`）へ案内します。
+6. 配送先を入力し、確認画面の「Stripeで支払う」でStripe Checkoutへ移動します。決済後は注文ページに戻り、注文番号とステータスを表示します。決済完了はリダイレクトではなく **Stripe Webhook（`checkout.session.completed`）** で確定し、同じイベントを複数回受け取っても1回だけ処理します。
+
+### 管理画面
+
+`/admin/` でWorkerの `ADMIN_TOKEN` を入力すると注文一覧を表示します（未処理＝PAID・PROCESSING・READY、状態別、すべて）。各注文に注文日・決済日・通常／特急・発送期限（決済日＋リードタイム）を表示し、特急は赤い帯、期限超過は赤字です。「SVGを表示」「SVGをダウンロード」（R2から取得）、「加工開始」「加工完了」「発送済みにする」（追跡番号・配送会社を任意入力）、「完了にする」「キャンセル」で状態を変えます。状態遷移は `NEW → PAYMENT_PENDING → PAID → PROCESSING → READY → SHIPPED → COMPLETED`（各段階から `CANCELLED`）で、許可されない遷移はWorkerが拒否します。返金はStripeダッシュボードで行います。
+
+### アーキテクチャ
+
+| 役割 | 実装 |
+| --- | --- |
+| フロントエンド | GitHub Pages（`order/`・`admin/`・エディタの注文ボタン。`src/order.js`、`src/admin.js`、`src/order.css`） |
+| 料金・SVG解析 | `src/pricing.js`（カタログ・料金・リードタイム・状態遷移）、`src/svganalyze.js`（寸法・カット長・検査・サニタイズ）。フロントとWorkerで共用 |
+| Backend API | Cloudflare Workers（`worker/src/`）。`GET /api/config`、`POST /api/quote`、`POST /api/orders`、`POST /api/stripe/webhook`、`GET /api/orders/:id?token=`、`GET /api/admin/orders`、`GET /api/admin/orders/:id`、`GET /api/admin/orders/:id/svg`、`POST /api/admin/orders/:id/status` |
+| Database | Cloudflare D1（`worker/schema.sql`: `orders`、`stripe_events`、`order_events`）。SVG本体は保存しない |
+| SVG Storage | Cloudflare R2（キーは `orders/<注文ID>/<ハッシュ>.svg`。ファイル名はメタデータのみ） |
+| Payment | Stripe Checkout（JPY）＋ Webhook。秘密鍵はWorkerのSecretのみ |
+| Mail | 未実装（Resend等を後から `worker/src/app.js` の状態変更箇所に追加できる構造） |
+
+GitHub Pages側には秘密鍵や決済処理を置きません。
+
+### Cloudflare Workers のセットアップ
+
+```sh
+npm ci                 # ルート（Workerも src/ のモジュールを使います）
+cd worker && npm ci    # wrangler
+npx wrangler login
+```
+
+1. **D1**: `npx wrangler d1 create typefab-orders` を実行し、表示された `database_id` を `worker/wrangler.toml` に書きます。スキーマを適用します: `npm run db:remote`（ローカル開発は `npm run db:local`）。
+2. **R2**: `npx wrangler r2 bucket create typefab-order-svgs`（名前を変えた場合は `wrangler.toml` の `bucket_name` も変更）。
+3. **Stripe**: ダッシュボードで秘密鍵（`sk_live_…` / `sk_test_…`）を取得します。Webhookエンドポイントに `https://<worker>.workers.dev/api/stripe/webhook` を登録し、イベント `checkout.session.completed`、`checkout.session.async_payment_succeeded`、`checkout.session.async_payment_failed`、`checkout.session.expired` を選び、署名シークレット（`whsec_…`）を控えます。
+4. **Secrets**（`worker/` で実行）: `npx wrangler secret put STRIPE_SECRET_KEY`、`npx wrangler secret put STRIPE_WEBHOOK_SECRET`、`npx wrangler secret put ADMIN_TOKEN`（長いランダム文字列）。
+5. **環境変数**（`worker/wrangler.toml` の `[vars]`）: `SITE_URL`（決済後に戻る公開サイト）、`ALLOWED_ORIGINS`（APIを呼べるオリジン）、`BULK_THRESHOLD`、`NORMAL_LEAD_TIME_DAYS`、`EXPRESS_LEAD_TIME_DAYS`、`CONTACT_URL`。料金表は `src/pricing.js` の `CATALOG` を編集します。
+6. **デプロイ**: `cd worker && npm run deploy`。`https://<worker>.workers.dev/api/health` が `{"ok":true,"stripeConfigured":true}` を返せば準備完了です。
+
+### GitHub Pages 側の設定
+
+フロントエンドはビルド時に `VITE_ORDER_API_URL`（WorkerのURL、末尾スラッシュなし）を埋め込みます。GitHubリポジトリの **Settings → Secrets and variables → Actions → Variables** に `ORDER_API_URL` を追加すると、`.github/workflows/pages.yml` がそれをビルドに渡します。未設定なら注文ページは概算のみになります。ローカルは `.env.example` を `.env` にコピーして値を入れます。
+
+### ローカル開発
+
+```sh
+cp worker/.dev.vars.example worker/.dev.vars   # テスト用の鍵と管理者トークン、SITE_URL=http://127.0.0.1:4173/TypeFab/
+cd worker && npm run db:local && npm run dev      # http://127.0.0.1:8787（D1・R2はローカルエミュレーション）
+VITE_ORDER_API_URL=http://127.0.0.1:8787 npm run build && npm run preview
+```
+
+Stripeのテストモードでは `stripe listen --forward-to 127.0.0.1:8787/api/stripe/webhook` でWebhookを転送します。`.dev.vars` の `STRIPE_API_BASE` でStripe APIの向き先を差し替えられるため、モックサーバーでも一連の流れを確認できます。秘密情報（`.env`、`worker/.dev.vars`）はコミットしません。
+
+### 本番環境の構築手順（まとめ）
+
+1. 上記のD1・R2・Stripe・Secretsを設定し、`SITE_URL` と `ALLOWED_ORIGINS` を公開サイトに合わせてWorkerをデプロイする。
+2. Stripeダッシュボードで本番のWebhookを登録し、署名シークレットをSecretに設定する。
+3. GitHubのリポジトリ変数 `ORDER_API_URL` にWorkerのURLを設定し、`main` へpushしてPagesを再ビルドする。
+4. `/order/` でテスト注文（Stripeテストカード）→ `/admin/` で PAID の表示 → SVGダウンロード → 状態変更 → 追跡番号入力を確認する。
+
+### MVPで行わないこと
+
+配送会社API連携（追跡番号は手入力）、高精度な加工時間シミュレーション（`estimatedProcessingMinutes` は材料ごとの速度から算出した目安）、自動レーザー加工・機器制御、在庫管理、クーポン、会員、ポイント、AI見積もり、メール送信。
+
 ## ランディングページ
 
 https://fooping-tech.github.io/TypeFab/landing/ にプロダクト紹介ページがあります（`landing/index.html`、`src/landing.js`、`src/landing.css`）。画面写真は `public/landing/` にある実際のエディタのスクリーンショット、Before / After の図は `scripts/landing-glyphs.mjs` が同梱フォントと `src/geometry.js` から生成した実際の輪郭と自動ブリッジ（`src/landing-glyphs.js`）です。フォントを更新したら `node scripts/landing-glyphs.mjs` で再生成してください。
 
-現在は `/` がエディタ、`/landing/` が紹介ページです（Issue #2 の Phase 1）。将来 `/` を紹介ページ、`/app/` をエディタに切り替える場合は、`vite.config.js` の `rollupOptions.input` と `src/landing.js` の `EDITOR_URL` を変更します。加工注文の機能は未実装で、ページ上では Coming Soon と表示しています。
+現在は `/` がエディタ、`/landing/` が紹介ページです（Issue #2 の Phase 1）。将来 `/` を紹介ページ、`/app/` をエディタに切り替える場合は、`vite.config.js` の `rollupOptions.input` と `src/landing.js` の `EDITOR_URL` を変更します。加工注文の機能は実装済みですが、加工サービス側（Cloudflare Workers / Stripe）の設定が完了するまで公開サイトでは決済できないため、ページ上では Coming Soon と表示しています。
 
 ## GitHub Pages
 

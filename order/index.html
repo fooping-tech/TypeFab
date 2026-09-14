@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f5f7" />
+    <meta name="robots" content="noindex" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>TypeFab — 加工注文</title>
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand" href="../"><span class="brand-mark">t<span>f</span></span>TypeFab</a>
+      <h1>加工注文</h1>
+      <div class="right"><a href="../" id="back">← エディタに戻る</a></div>
+    </header>
+    <main class="page" id="app">
+      <div id="banner" class="banner hidden" role="status"></div>
+      <div id="alert" class="banner error hidden" role="alert"></div>
+      <section id="status-view" class="card hidden"></section>
+      <div class="columns" id="form-view">
+        <div>
+          <section class="card" id="svg-card">
+            <h2><span>01</span>SVG</h2>
+            <div class="drop" id="drop">
+              <label><input type="file" id="file" accept=".svg,image/svg+xml" />
+                <b>SVGファイルをここにドロップ</b>、または <u>クリックして選択</u><br /><small>TypeFabの「このデザインを加工注文する」から来た場合は、そのSVGが下に表示されます。</small></label>
+            </div>
+            <div class="file-line" id="file-line"></div>
+            <div class="preview" id="preview"><span class="empty">SVGがまだありません</span></div>
+            <ul class="checks" id="checks"></ul>
+            <div id="size-confirm" class="hidden">
+              <p class="note">このSVGは px または単位なしのため実寸が確定できません。実際に切り出したい幅を入力してください（高さは縦横比から決まります）。</p>
+              <div class="fields"><label>実寸の幅 (mm)<input type="number" id="confirm-width" min="1" step="0.1" /></label><div class="field"><span>&nbsp;</span><button id="confirm-apply">実寸を適用</button></div></div>
+            </div>
+            <div class="stat" id="stat"></div>
+          </section>
+        </div>
+        <div>
+          <section class="card">
+            <h2><span>02</span>加工内容</h2>
+            <div class="fields">
+              <label>材料<select id="material"></select></label>
+              <label>厚さ<select id="thickness"></select></label>
+              <label>数量<input type="number" id="quantity" min="1" step="1" value="1" /></label>
+            </div>
+            <div class="radios" id="delivery" style="margin-top:12px"></div>
+            <div id="bulk" class="banner hidden" style="margin-top:12px"></div>
+          </section>
+          <section class="card">
+            <h2><span>03</span>料金</h2>
+            <div class="quote" id="quote"></div>
+            <p class="note">表示は概算です。最終的な決済金額はサーバー側で再計算します。送料は特急でも2倍になりません。</p>
+          </section>
+          <section class="card">
+            <h2><span>04</span>配送先</h2>
+            <div class="fields">
+              <label>お名前<input id="name" autocomplete="name" maxlength="100" /></label>
+              <label>メールアドレス<input id="email" type="email" autocomplete="email" maxlength="254" /></label>
+              <label>郵便番号<input id="postal" inputmode="numeric" autocomplete="postal-code" placeholder="1000001" maxlength="8" /></label>
+              <label>都道府県<select id="prefecture"></select></label>
+              <label class="full">住所（市区町村・番地）<input id="address1" autocomplete="address-line1" maxlength="200" /></label>
+              <label class="full">建物名・部屋番号（任意）<input id="address2" autocomplete="address-line2" maxlength="200" /></label>
+              <label>電話番号（任意）<input id="phone" type="tel" autocomplete="tel" maxlength="30" /></label>
+            </div>
+            <div class="actions"><button class="primary" id="review">注文内容を確認する</button></div>
+          </section>
+        </div>
+      </div>
+      <section class="card hidden" id="confirm-view">
+        <h2><span>05</span>加工注文の確認</h2>
+        <dl class="summary" id="summary"></dl>
+        <p class="note">「Stripeで支払う」を押すと、Stripeの決済ページに移動します。決済完了後にこのページへ戻り、注文番号を表示します。決済完了はStripeからの通知（Webhook）で確定します。</p>
+        <div class="actions"><button id="edit">内容を修正する</button><button class="primary" id="pay">Stripeで支払う</button></div>
+      </section>
+    </main>
+    <script type="module" src="/src/order.js"></script>
+  </body>
+</html>

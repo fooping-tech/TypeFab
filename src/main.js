@@ -453,6 +453,34 @@ function withinBoard() {
         ),
     );
 }
+// Same checks as the export; the SVG is handed to the order page through
+// localStorage (same origin), so nothing needs to be saved and re-uploaded.
+function orderDesign() {
+  try {
+    const svg = cutSVG();
+    localStorage.setItem(
+      "typefab-order",
+      JSON.stringify({ svg, fileName: "typefab.svg", at: Date.now() }),
+    );
+    saveNow();
+    location.assign(`${import.meta.env.BASE_URL}order/`);
+  } catch (e) {
+    notify(e.message);
+  }
+}
+// Export-ready SVG or an error explaining why it cannot be cut.
+function cutSVG() {
+  if (!withinBoard())
+    throw Error(
+      "加工エリアの外にカット線があります。位置または加工エリアを調整してください。",
+    );
+  const result = cutGeometry(visibleItems(project));
+  if (result.vanished)
+    throw Error(
+      `${result.vanished} 個の輪郭がブリッジで完全に隠れています。ブリッジを小さくしてください。`,
+    );
+  return exportSVG(project);
+}
 function exportFile() {
   try {
     if (!withinBoard())
@@ -474,7 +502,7 @@ function exportFile() {
 }
 
 $("#app").innerHTML = `
-<header><a class="brand" href="./"><span class="brand-mark">t<span>f</span></span>TypeFab<span class="beta">BETA</span></a><div class="document-title"><span id="project-name"></span><small id="save-status">ローカルプロジェクト</small></div><div class="header-actions"><button id="new-project" title="新規プロジェクト">新規</button><button id="open-project" title="TypeFabプロジェクト（.json）を開く、またはSVGの図形を読み込む（キャンバスへのドロップも可）">開く</button><button id="save-project">保存</button><button id="export" class="primary">↗ SVGを書き出す</button></div></header>
+<header><a class="brand" href="./"><span class="brand-mark">t<span>f</span></span>TypeFab<span class="beta">BETA</span></a><div class="document-title"><span id="project-name"></span><small id="save-status">ローカルプロジェクト</small></div><div class="header-actions"><button id="new-project" title="新規プロジェクト">新規</button><button id="open-project" title="TypeFabプロジェクト（.json）を開く、またはSVGの図形を読み込む（キャンバスへのドロップも可）">開く</button><button id="save-project">保存</button><button id="export" class="primary">↗ SVGを書き出す</button><button id="order" title="現在のデザインのSVGをそのまま加工注文ページへ渡します">⚒ このデザインを加工注文する</button></div></header>
 <div class="workspace-tabs"><span class="workspace-title">DESIGN WORKSPACE</span><span class="tab active">スケッチ</span><span class="subtle">文字から、ものづくりへ。</span><button id="help-button">? 使い方</button></div>
 <nav class="toolbar" aria-label="スケッチツール"><div class="tool-group">${Object.entries(
   labels,
@@ -1786,6 +1814,7 @@ function ungroup() {
 }
 $("#ungroup").onclick = ungroup;
 $("#export").onclick = exportFile;
+$("#order").onclick = orderDesign;
 $("#save-project").onclick = () =>
   notify(
     `${saveFile("typefab-project.json", JSON.stringify(project, null, 2), "application/json")} をダウンロードしました。`,

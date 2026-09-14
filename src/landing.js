@@ -6,6 +6,7 @@ import { GLYPHS } from "./landing-glyphs.js";
 // this constant. Static hrefs in the HTML point to "../" as a no-JS fallback.
 const EDITOR_URL = import.meta.env.BASE_URL;
 document.querySelectorAll("a[data-editor]").forEach((a) => (a.href = EDITOR_URL));
+document.querySelectorAll("a[data-order]").forEach((a) => (a.href = `${EDITOR_URL}order/`));
 
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const svgNS = "http://www.w3.org/2000/svg";

@@ -2,3 +2,8 @@ node_modules/
 dist/
 output/
 .playwright-cli/
+.env
+.env.local
+worker/.dev.vars
+worker/.wrangler/
+worker/node_modules/

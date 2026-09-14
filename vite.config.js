@@ -8,7 +8,12 @@ export default defineConfig({
     rollupOptions: {
       // Multi-page: "/" is the editor, "/landing/" the landing page (Phase 1
       // of issue #2). Phase 2 swaps them to "/" (landing) and "/app/" (editor).
-      input: { editor: page("index.html"), landing: page("landing/index.html") },
+      input: {
+        editor: page("index.html"),
+        landing: page("landing/index.html"),
+        order: page("order/index.html"),
+        admin: page("admin/index.html"),
+      },
     },
   },
   optimizeDeps: { exclude: ["harfbuzzjs"] },

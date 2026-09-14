@@ -1,0 +1,6 @@
+# Copy to worker/.dev.vars for `wrangler dev`. Never commit the real file.
+STRIPE_SECRET_KEY=sk_test_xxx
+STRIPE_WEBHOOK_SECRET=whsec_xxx
+ADMIN_TOKEN=change-me-to-a-long-random-string
+# Optional: point Stripe API calls at a mock during local tests
+# STRIPE_API_BASE=http://127.0.0.1:4242
