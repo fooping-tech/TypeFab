@@ -1269,3 +1269,36 @@ dialog .primary {
   font-size: 10px;
   color: #8d9aa5;
 }
+.path-node,
+.path-handle {
+  cursor: move;
+}
+.path-stats {
+  font-size: 11px;
+  color: #52697c;
+  margin: 4px 0 12px;
+}
+.node-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+  margin-bottom: 14px;
+}
+.node-actions button {
+  border: 1px solid #d3dee6;
+  background: #edf2f5;
+  font-size: 11px;
+  padding: 7px 4px;
+}
+.path-d small {
+  display: block;
+  font-size: 9px;
+  color: #8d9aa5;
+  margin: 2px 0 4px;
+}
+.path-d textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  min-height: 70px;
+  max-height: 180px;
+}

@@ -39,6 +39,24 @@ import {
 } from "./grouping.js";
 import { arrangeItems, cloneItems } from "./edit.js";
 import {
+  pathFromCommands,
+  pathFromContours,
+  pathContours,
+  shapePath,
+  toPathData,
+  parsePathData,
+  nodeKeys,
+  nodeAt,
+  parseKey,
+  moveNodes,
+  moveHandle,
+  setNodeType,
+  insertNode,
+  deleteNodes,
+  nearestSegment,
+  visibleHandles,
+} from "./path.js";
+import {
   WARP_PRESETS,
   CORNERS,
   flatEnvelope,
@@ -96,6 +114,7 @@ let multi = [],
   activeLayer = "layer-default",
   liveSession = null,
   warpId = null,
+  pathEdit = null,
   warpBase = null,
   browserAnchor = null,
   lastPress = null,
@@ -190,12 +209,24 @@ function commit() {
 }
 // Undo/redo clear the selection, except that Warp mode stays on its text.
 function restore(snapshot) {
-  const keep = warpId;
+  const keep = warpId,
+    keepPath = pathEdit?.id;
   project = JSON.parse(snapshot);
   selectItem(null);
   if (keep && project.items.some((i) => i.id === keep && i.warp)) {
     multi = [keep];
     selected = keep;
+  }
+  // Path Edit Mode continues on the restored shape, with nothing selected.
+  const pathTarget = project.items.find((i) => i.id === keepPath);
+  if (pathTarget && PATHABLE.includes(pathTarget.type)) {
+    multi = [keepPath];
+    selected = keepPath;
+    pathEdit = {
+      id: keepPath,
+      path: workingPath(pathTarget),
+      selection: new Set(),
+    };
   }
   commit();
 }
@@ -253,6 +284,51 @@ function withWarp(item, warp, base = unwarpedLayout(item)) {
     warp,
     contours: warpContours(base.contours, base.box, warp.envelope),
   };
+}
+// Path Edit Mode edits Bézier nodes. Fixed paths keep their nodes in
+// item.path; rectangles and ellipses start from exact paths, warped shapes and
+// plain polyline outlines from fitted curves. Nothing changes until an edit,
+// which turns the item into a fixed path whose contours are the flattened path.
+const PATHABLE = ["outline", "rect", "circle"];
+const pathItem = () => {
+  const item = selectedItem();
+  return pathEdit && item?.id === pathEdit.id ? item : null;
+};
+function workingPath(item) {
+  if (item.warp) return pathFromContours(item.contours);
+  if (item.path) return structuredClone(item.path);
+  if (["rect", "circle"].includes(item.type))
+    return shapePath(item.type, item.w, item.h, item.radius);
+  return pathFromContours(item.contours);
+}
+function toPathItem(item, path) {
+  const {
+    w,
+    h,
+    radius,
+    warp,
+    text,
+    font,
+    size,
+    spacing,
+    vertical,
+    stretch,
+    ...rest
+  } = item;
+  return { ...rest, type: "outline", path, contours: pathContours(path) };
+}
+// Each press redraws the canvas, which resets the browser's own click count,
+// so double presses are detected here (same target, <450 ms, <6 px).
+function doublePress(e, id) {
+  const now = performance.now(),
+    last = lastPress;
+  lastPress = { id, time: now, x: e.clientX, y: e.clientY };
+  const twice =
+    last?.id === id &&
+    now - last.time < 450 &&
+    Math.hypot(e.clientX - last.x, e.clientY - last.y) < 6;
+  if (twice) lastPress = null;
+  return twice;
 }
 const canWarp = (item) =>
   WARPABLE.includes(item?.type) &&
@@ -380,13 +456,13 @@ $("#app").innerHTML = `
   )
   .join(
     "",
-  )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button><button id="group" class="tool" title="選択をグループ化 (${shortcut("G")})"><span class="tool-icon">▣</span>グループ化</button><button id="ungroup" class="tool" title="グループを解除、または文字を1文字ずつ・部位ごとに分解 (${shortcut("G", true)})"><span class="tool-icon">⊞</span>グループ化解除</button><button id="warp" class="tool" title="文字のアウトラインをエンベロープで変形（Text Warp）"><span class="tool-icon">⌒</span>ワープ</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
+  )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button><button id="group" class="tool" title="選択をグループ化 (${shortcut("G")})"><span class="tool-icon">▣</span>グループ化</button><button id="ungroup" class="tool" title="グループを解除、または文字を1文字ずつ・部位ごとに分解 (${shortcut("G", true)})"><span class="tool-icon">⊞</span>グループ化解除</button><button id="warp" class="tool" title="文字のアウトラインをエンベロープで変形（Text Warp）"><span class="tool-icon">⌒</span>ワープ</button><button id="edit-path" class="tool" title="パスのノードを直接編集（ダブルクリックでも開始）"><span class="tool-icon">✎</span>パス編集</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
-<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.8</span></span></footer>
+<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.9</span></span></footer>
 <input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,application/json">
-<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
+<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
 <div id="context-menu" class="context-menu" role="menu" aria-label="編集メニュー" hidden></div>
 <div id="text-editor" class="text-editor" hidden><textarea id="canvas-text" aria-label="文字を編集" maxlength="500" rows="2"></textarea><small>入力はすぐに反映 · Esc / ${shortcut("Enter")} で確定</small></div>`;
 
@@ -447,8 +523,45 @@ function warpPanel(i) {
         : "元の寸法とワープ設定を保持します。幅・高さ・フィレットを変えても同じ変形が掛かります。"
   }SVGには変形後の輪郭をパスで書き出します。</p></section>`;
 }
+function pathPanel(i) {
+  const path = pathEdit.path,
+    keys = [...pathEdit.selection],
+    one = keys.length === 1 ? nodeAt(path, keys[0]) : null,
+    world = one && transform(one, i),
+    kind = one
+      ? one.smooth
+        ? "スムーズ"
+        : one.in || one.out
+          ? "コーナー（ハンドル独立）"
+          : "コーナー（直線）"
+      : "",
+    pending = !(i.type === "outline" && i.path && !i.warp);
+  return `<section class="path-panel"><div class="object-type">PATH EDIT / ノード編集</div><h3>${esc(i.name)}</h3><p class="path-stats">ノード ${nodeKeys(path).length} 個 · 選択 ${keys.length} 個${one ? ` · ${kind}` : ""}</p><div class="node-actions">${[
+    ["smooth", "スムーズ"],
+    ["corner", "コーナー"],
+    ["line", "直線化"],
+    ["insert", "追加"],
+    ["delete", "削除"],
+    ["all", "すべて選択"],
+  ]
+    .map(
+      ([action, label]) =>
+        `<button data-node-action="${action}" ${action === "all" || keys.length ? "" : "disabled"}>${label}</button>`,
+    )
+    .join("")}</div>${
+    one
+      ? `<h4>選択ノード <span>mm</span></h4><div class="fields"><label>X<input data-node-prop="x" type="number" step="0.1" value="${Number(world.x.toFixed(3))}"></label><label>Y<input data-node-prop="y" type="number" step="0.1" value="${Number(world.y.toFixed(3))}"></label></div>`
+      : ""
+  }<label class="full-label path-d">SVG path d <small>オブジェクト座標 mm · M L H V C S Q T Z</small><textarea id="path-d" spellcheck="false" rows="5" aria-label="SVG path d">${esc(toPathData(path))}</textarea></label>${pending ? `<p class="note">${i.warp ? "ワープした形" : i.type === "rect" ? "長方形" : i.type === "circle" ? "楕円" : "この輪郭"}は最初の編集で編集用パスに変換されます。</p>` : ""}<button id="path-done" class="wide-button warp-done">完了</button><p class="note">クリックで選択、Shift+クリックで追加、空白からドラッグで範囲選択。アンカー・ハンドルをドラッグして変形します（Alt+ハンドルでコーナー化）。パス上をダブルクリックでノード追加、Deleteで削除、Escで終了。</p></section>`;
+}
 function renderProperties() {
   const i = selectedItem();
+  if (pathItem()) {
+    $("#properties").innerHTML = pathPanel(i);
+    $("#board-width").value = project.width;
+    $("#board-height").value = project.height;
+    return;
+  }
   if (warpItem()) {
     $("#properties").innerHTML = warpPanel(i);
     $("#board-width").value = project.width;
@@ -457,12 +570,12 @@ function renderProperties() {
   }
   $("#properties").innerHTML = i
     ? `<section><div class="object-type">${i.type === "bridge" ? "BRIDGE / 非カット" : i.type === "text" ? "TYPOGRAPHY" : "SKETCH / パス"}</div><h3>${esc(i.name)}</h3><h4>配置 <span>mm</span></h4><div class="fields">${field("x", "X", i.x, 0.5)}${field("y", "Y", i.y, 0.5)}${field("rotation", "回転 °", i.rotation, 1, -360, 360)}</div></section>
-  ${i.type === "text" ? `<section><h4>テキスト</h4><textarea id="text-content" maxlength="500" aria-label="文字内容">${esc(i.text)}</textarea><label class="full-label">フォント<select id="font-select">${[...fontLabels].map(([k, v]) => `<option value="${esc(k)}" ${i.font === k ? "selected" : ""}>${esc(v)}</option>`).join("")}${!fontLabels.has(i.font) ? `<option value="${esc(i.font)}" selected>追加フォント（再読込が必要）</option>` : ""}</select></label><div id="font-preview" class="font-preview" style="font-family:${i.font === "zen" ? "ZenPreview" : i.font === "shippori" ? "ShipporiPreview" : "sans-serif"}">日本語 Aa 123</div><button id="add-font" class="wide-button">＋ フォント追加 <small>TTF / OTF / WOFF</small></button><div class="fields">${field("size", "サイズ mm", i.size, 0.5, 1, 300)}${field("spacing", "字間 mm", i.spacing, 0.1, -100, 100)}${field("stretch", "長体・平体 %", (i.stretch ?? 1) * 100, 1, 5, 2000)}</div><label class="check vertical-check"><input type="checkbox" id="vertical" ${i.vertical ? "checked" : ""}> 縦書き（右から左）</label><p class="note">四隅のハンドルで拡縮すると、サイズと長体・平体が変わります。キャンバスでダブルクリックすると文字を編集できます。</p></section><section><h4>ワープ</h4><button id="enter-warp" class="wide-button">⌒ ワープ（エンベロープ変形）</button><p class="note">${i.warp ? `現在: ${esc(warpLabel(i.warp))} · ` : ""}文字のアウトラインそのものを曲線のエンベロープで変形します。</p></section>` : ""}
+  ${i.type === "text" ? `<section><h4>テキスト</h4><textarea id="text-content" maxlength="500" aria-label="文字内容">${esc(i.text)}</textarea><label class="full-label">フォント<select id="font-select">${[...fontLabels].map(([k, v]) => `<option value="${esc(k)}" ${i.font === k ? "selected" : ""}>${esc(v)}</option>`).join("")}${!fontLabels.has(i.font) ? `<option value="${esc(i.font)}" selected>追加フォント（再読込が必要）</option>` : ""}</select></label><div id="font-preview" class="font-preview" style="font-family:${i.font === "zen" ? "ZenPreview" : i.font === "shippori" ? "ShipporiPreview" : "sans-serif"}">日本語 Aa 123</div><button id="add-font" class="wide-button">＋ フォント追加 <small>TTF / OTF / WOFF</small></button><div class="fields">${field("size", "サイズ mm", i.size, 0.5, 1, 300)}${field("spacing", "字間 mm", i.spacing, 0.1, -100, 100)}${field("stretch", "長体・平体 %", (i.stretch ?? 1) * 100, 1, 5, 2000)}</div><label class="check vertical-check"><input type="checkbox" id="vertical" ${i.vertical ? "checked" : ""}> 縦書き（右から左）</label><p class="note">四隅のハンドルで拡縮すると、サイズと長体・平体が変わります。キャンバスでダブルクリックすると文字を編集できます。</p></section><section><h4>ワープ・パス</h4><button id="enter-warp" class="wide-button">⌒ ワープ（エンベロープ変形）</button><p class="note">${i.warp ? `現在: ${esc(warpLabel(i.warp))} · ` : ""}文字のアウトラインそのものを曲線のエンベロープで変形します。</p><button id="outline-edit" class="wide-button">✎ アウトライン化してパス編集</button><p class="note">文字の輪郭をベジェ曲線のパスに変換し、ノードを直接編集します。</p></section>` : ""}
   ${["bridge", "rect", "circle", "line"].includes(i.type) ? `<section><h4>${i.type === "bridge" ? "切り残し領域" : "寸法"} <span>mm</span></h4><div class="fields">${field("w", "幅", i.w, 0.1, i.type === "line" ? 0 : 0.1)}${field("h", "高さ", i.h, 0.1, i.type === "line" ? 0 : 0.1)}${i.type === "rect" ? field("radius", "フィレット R", i.radius ?? 0, 0.1, 0, 1000) : ""}</div>${i.type === "rect" ? '<p class="note">4つの角を半径Rで丸めます。最大は短辺の半分です。</p>' : ""}${i.type === "bridge" ? '<p class="note">オレンジ色の領域に重なったカット線を除去します。</p>' : ""}</section>` : ""}`
     : '<section class="no-selection"><span>↖</span><h3>オブジェクトを選択</h3><p>キャンバスや左の一覧から選択して、文字・位置・寸法を編集できます。</p></section>';
   if (i && i.type !== "text" && canWarp(i))
     $("#properties").innerHTML +=
-      `<section><h4>ワープ</h4><button id="enter-warp" class="wide-button">⌒ ワープ（エンベロープ変形）</button><p class="note">${i.warp ? `現在: ${esc(warpLabel(i.warp))} · ` : ""}輪郭そのものを曲線のエンベロープで変形します。</p></section>`;
+      `<section><h4>パス・ワープ</h4><button id="enter-path" class="wide-button">✎ パスを編集（ノード）</button><p class="note">ダブルクリックでも開始できます。${i.path ? "" : "最初の編集で編集用パスに変換されます。"}</p><button id="enter-warp" class="wide-button">⌒ ワープ（エンベロープ変形）</button><p class="note">${i.warp ? `現在: ${esc(warpLabel(i.warp))} · ` : ""}輪郭そのものを曲線のエンベロープで変形します。</p></section>`;
   const chosen = selectedItems();
   if (chosen.length > 1)
     $("#properties").innerHTML =
@@ -524,6 +637,31 @@ function warpOverlay(item, scale) {
     })
     .join("")}</g>`;
 }
+// Node editor overlay: the path, handles of the selected nodes (and of the
+// segments touching them) as lines with round tips, and square anchors;
+// selected anchors are filled. Sizes are in screen pixels.
+function pathOverlay(item, scale) {
+  const path = pathEdit.path,
+    selection = pathEdit.selection,
+    px = 1 / scale,
+    r = 3.5 * px,
+    f = (v) => Number(v.toFixed(4));
+  const handles = visibleHandles(path, selection)
+    .map(({ key, side }) => {
+      const node = nodeAt(path, key),
+        h = node[side];
+      return `<line x1="${f(node.x)}" y1="${f(node.y)}" x2="${f(h.x)}" y2="${f(h.y)}" stroke="#1f7ac0" stroke-width="${px}" pointer-events="none"/><circle data-handle="${key}:${side}" class="path-handle" aria-label="ハンドル" cx="${f(h.x)}" cy="${f(h.y)}" r="${r * 0.9}" fill="white" stroke="#1f7ac0" stroke-width="${1.2 * px}"/>`;
+    })
+    .join("");
+  const anchors = nodeKeys(path)
+    .map((key) => {
+      const n = nodeAt(path, key),
+        on = selection.has(key);
+      return `<rect data-node="${key}" class="path-node${on ? " selected" : ""}" aria-label="アンカーポイント" x="${f(n.x - r)}" y="${f(n.y - r)}" width="${2 * r}" height="${2 * r}" fill="${on ? "#1f7ac0" : "white"}" stroke="#1f7ac0" stroke-width="${1.2 * px}"/>`;
+    })
+    .join("");
+  return `<g class="path-edit" transform="translate(${item.x} ${item.y}) rotate(${item.rotation})"><path d="${toPathData(path)}" fill="none" stroke="#1f7ac0" stroke-width="${1.2 * px}" pointer-events="none"/>${handles}${anchors}</g>`;
+}
 function renderCanvas() {
   const svg = $("#canvas");
   svg.setAttribute("viewBox", `0 0 ${project.width} ${project.height}`);
@@ -557,6 +695,10 @@ function renderCanvas() {
         overlay += warpOverlay(i, scale);
         continue;
       }
+      if (i.id === pathEdit?.id) {
+        overlay += pathOverlay(i, scale);
+        continue;
+      }
       const b = itemBounds(i),
         single = selectedItems().length === 1 && canResize(i),
         handle = 3 / scale;
@@ -586,14 +728,18 @@ function renderCanvas() {
     ? "加工プレビュー · 実際に出力されるカット線"
     : warpId
       ? "ワープ編集中 · アウトラインそのものを変形"
-      : "スケッチ編集中";
+      : pathEdit
+        ? "パス編集中 · ノードを直接変形"
+        : "スケッチ編集中";
   $("#hint").textContent = preview
     ? "赤い線をカットします。自動ブリッジは帯の側面を含む切り抜き輪郭です。"
     : warpId
       ? "角・ハンドルをドラッグ（Altで角だけ）· Esc / Enter で完了"
-      : tool === "select"
-        ? "空白からドラッグで範囲選択 · 右クリックで編集メニュー · 2本指スワイプで移動 · ピンチでズーム"
-        : `${labels[tool]}を配置する場所をクリック`;
+      : pathEdit
+        ? "ノード・ハンドルをドラッグ · Shiftで追加選択 · パス上をダブルクリックで追加 · Deleteで削除 · Escで終了"
+        : tool === "select"
+          ? "空白からドラッグで範囲選択 · 右クリックで編集メニュー · 2本指スワイプで移動 · ピンチでズーム"
+          : `${labels[tool]}を配置する場所をクリック`;
   $("#board-label").textContent = `${project.width} × ${project.height} mm`;
   $("#zoom-reset").textContent = `${Math.round(zoom * 100)}%`;
 }
@@ -618,6 +764,8 @@ function render({ properties = true } = {}) {
   selected = valid.at(-1) || null;
   // Warp mode lasts while its text is the only selection.
   if (warpId && !(multi.length === 1 && warpItem())) warpId = null;
+  if (pathEdit && !(multi.length === 1 && selected === pathEdit.id))
+    pathEdit = null;
   $("#project-name").textContent = project.name;
   renderLayers();
   if (properties) {
@@ -644,6 +792,11 @@ function render({ properties = true } = {}) {
   $("#warp").disabled =
     selectedItems().length !== 1 || !canWarp(selectedItem());
   $("#warp").classList.toggle("active", Boolean(warpId));
+  $("#edit-path").disabled =
+    !pathEdit &&
+    (selectedItems().length !== 1 ||
+      ![...PATHABLE, "text"].includes(selectedItem()?.type));
+  $("#edit-path").classList.toggle("active", Boolean(pathEdit));
   $("#delete").disabled = $("#duplicate").disabled = !selectedItem();
   const c = cutGeometry(visibleItems(project)),
     outside = !withinBoard();
@@ -702,7 +855,17 @@ $("#properties").addEventListener("change", (e) => {
   else if (el.id === "vertical") updateSelected("vertical", el.checked);
   else if (el.id === "ratio-lock") updateSelected("ratioLocked", el.checked);
   else if (el.id === "warp-bend") liveSession = null;
-  else if (el.id === "item-layer")
+  else if (el.dataset.nodeProp)
+    moveSelectedNodeTo(el.dataset.nodeProp, el.valueAsNumber);
+  else if (el.id === "path-d") {
+    try {
+      pathEdit.selection = new Set();
+      applyPath(parsePathData(el.value), "SVG path d を反映しました。");
+    } catch (error) {
+      notify(error.message);
+      renderProperties();
+    }
+  } else if (el.id === "item-layer")
     moveSelectionToLayer(selectionIds(), el.value);
 });
 // Continuous edits (typing, the bend slider) apply on every input event and
@@ -775,6 +938,12 @@ $("#properties").addEventListener("click", (e) => {
   if (e.target.closest("#item-ungroup")) ungroup();
   if (e.target.closest("#item-group")) groupSelection();
   if (e.target.closest("#enter-warp")) enterWarp();
+  if (e.target.closest("#enter-path")) enterPathEdit(selected);
+  if (e.target.closest("#outline-edit") && outlineSelected())
+    enterPathEdit(selected);
+  const nodeButton = e.target.closest("[data-node-action]");
+  if (nodeButton) nodeAction(nodeButton.dataset.nodeAction);
+  if (e.target.closest("#path-done")) exitPathEdit();
   const preset = e.target.closest("[data-warp-preset]");
   if (preset) applyWarpPreset(preset.dataset.warpPreset);
   if (e.target.closest("#warp-reset")) resetWarp();
@@ -1052,15 +1221,32 @@ function paste() {
   commit();
   notify(`${ids.length} アイテムを貼り付けました。`);
 }
+// Text becomes a fixed path made of the glyphs' own Bézier curves, so the
+// outline is unchanged and every node can be edited. A warped text keeps its
+// warp with the unwarped glyph path as source.
 function outlineSelected() {
   const i = selectedItem();
-  if (i?.type !== "text" || !isEditable(project, i)) return;
+  if (i?.type !== "text" || !isEditable(project, i)) return false;
+  let path = null;
+  try {
+    path = pathFromCommands(textGlyphs(i).flatMap((g) => g.commands));
+  } catch {
+    // Without the font the drawn outline is kept as it is.
+  }
   checkpoint();
-  // A warped text stays re-editable as a path: its unwarped glyphs become the source.
-  if (i.warp) i.warp = { ...i.warp, source: unwarpedLayout(i).contours };
+  if (i.warp) {
+    if (path) i.warp = { ...i.warp, source: pathContours(path) };
+    else delete i.warp;
+  } else if (path) i.contours = pathContours(path);
+  if (path) i.path = path;
+  for (const key of ["text", "font", "size", "spacing", "vertical", "stretch"])
+    delete i[key];
   i.type = "outline";
   commit();
-  notify("固定アウトラインに変換しました。四隅で拡縮できます。");
+  notify(
+    "アウトライン化しました。ダブルクリックでノードを編集、四隅で拡縮できます。",
+  );
+  return true;
 }
 $("#outline").onclick = outlineSelected;
 function groupSelection() {
@@ -1091,6 +1277,12 @@ function groupSelection() {
 }
 $("#group").onclick = groupSelection;
 $("#warp").onclick = () => (warpId ? exitWarp() : enterWarp());
+$("#edit-path").onclick = () => {
+  if (pathEdit) exitPathEdit();
+  else if (selectedItem()?.type === "text") {
+    if (outlineSelected()) enterPathEdit(selected);
+  } else enterPathEdit(selected);
+};
 // Double-clicking text opens a small editor under it; typing updates live.
 const editor = $("#text-editor"),
   editorText = $("#canvas-text");
@@ -1248,6 +1440,116 @@ function applyBoolean(operation) {
     notify(e.message);
   }
 }
+function enterPathEdit(id) {
+  const item = project.items.find((i) => i.id === id);
+  if (!item || !PATHABLE.includes(item.type) || !isEditable(project, item)) {
+    notify(
+      "パス編集できるのはアウトライン化した文字・固定パス・長方形・楕円です。",
+    );
+    return;
+  }
+  const path = workingPath(item);
+  if (!nodeKeys(path).length) {
+    notify("編集できる輪郭がありません。");
+    return;
+  }
+  warpId = null;
+  selectItem(id);
+  preview = false;
+  tool = "select";
+  pathEdit = { id, path, selection: new Set() };
+  render();
+  notify(
+    "パス編集: ノードをクリックして選択し、ドラッグで変形します。Escで終了。",
+  );
+}
+function exitPathEdit() {
+  pathEdit = null;
+  render();
+}
+// Every node operation replaces the item by a fixed path built from the edit.
+function applyPath(path, message) {
+  const item = pathItem();
+  if (!item) return;
+  checkpoint();
+  replaceItem(item, toPathItem(item, path));
+  pathEdit.path = path;
+  pathEdit.selection = new Set(
+    [...pathEdit.selection].filter((key) => nodeAt(path, key)),
+  );
+  commit();
+  if (message) notify(message);
+}
+function nodeAction(action) {
+  if (!pathItem()) return;
+  const keys = [...pathEdit.selection];
+  if (action === "all") {
+    pathEdit.selection = new Set(nodeKeys(pathEdit.path));
+    render();
+    return;
+  }
+  if (!keys.length) {
+    notify(
+      "ノードを選択してください（クリック・Shift+クリック・範囲ドラッグ）。",
+    );
+    return;
+  }
+  try {
+    if (["smooth", "corner", "line"].includes(action))
+      applyPath(
+        setNodeType(pathEdit.path, keys, action),
+        {
+          smooth: "スムーズノードにしました。ハンドルは連動します。",
+          corner: "コーナーノードにしました。ハンドルは独立して動きます。",
+          line: "ハンドルを削除して直線にしました。",
+        }[action],
+      );
+    else if (action === "delete") {
+      const path = deleteNodes(pathEdit.path, keys);
+      pathEdit.selection = new Set();
+      applyPath(path, `${keys.length} 個のノードを削除しました。`);
+    } else if (action === "insert") {
+      // Add a node in the middle of the segment after each selected node,
+      // from the last one back so earlier indices stay valid.
+      let path = pathEdit.path;
+      const added = [];
+      for (const [s, n] of keys
+        .map(parseKey)
+        .sort((a, b) => b[0] - a[0] || b[1] - a[1])) {
+        const sp = path[s];
+        if (!sp.closed && n >= sp.nodes.length - 1) continue;
+        path = insertNode(path, s, n, 0.5).path;
+        for (const a of added) if (a[0] === s && a[1] > n) a[1]++;
+        added.push([s, n + 1]);
+      }
+      if (!added.length)
+        throw Error("選択したノードの後ろに区間がありません。");
+      pathEdit.selection = new Set(added.map(([s, n]) => `${s}:${n}`));
+      applyPath(path, `${added.length} 個のノードを追加しました。`);
+    }
+  } catch (error) {
+    notify(error.message);
+  }
+}
+function moveSelectedNodeTo(axis, value) {
+  const item = pathItem(),
+    [key] = pathEdit.selection;
+  if (!item || !key || !Number.isFinite(value)) return;
+  const node = nodeAt(pathEdit.path, key),
+    world = transform(node, item);
+  world[axis] = value;
+  const local = transform(world, item, true);
+  applyPath(
+    moveNodes(pathEdit.path, [key], local.x - node.x, local.y - node.y),
+  );
+}
+function nudgeNodes(dx, dy) {
+  const item = pathItem(),
+    local = transform({ x: item.x + dx, y: item.y + dy }, item, true);
+  applyPath(
+    moveNodes(pathEdit.path, [...pathEdit.selection], local.x, local.y),
+  );
+}
 // Text Warp: the envelope deforms the real glyph outlines; the text, font and
 // warp parameters stay on the item so it can be edited again.
 function enterWarp() {
@@ -1280,6 +1582,7 @@ function enterWarp() {
     return;
   }
   warpId = item.id;
+  pathEdit = null;
   preview = false;
   tool = "select";
   render();
@@ -1489,6 +1792,58 @@ function canvasPoint(e) {
   const matrix = $("#canvas").getScreenCTM();
   return new DOMPoint(e.clientX, e.clientY).matrixTransform(matrix.inverse());
 }
+// Pointer presses in Path Edit Mode. Returns false to fall through to normal
+// selection (a press on another object leaves the mode).
+function pathPointerDown(e, p) {
+  const item = pathItem(),
+    handle = e.target.closest("[data-handle]"),
+    node = e.target.closest("[data-node]"),
+    edit = {
+      before: structuredClone(item),
+      bridges: project.items
+        .filter((i) => i.targetId === item.id)
+        .map((b) => structuredClone(b)),
+      startPath: structuredClone(pathEdit.path),
+      start: p,
+      moved: false,
+    };
+  if (handle) {
+    const [s, n, side] = handle.dataset.handle.split(":");
+    drag = { kind: "handle", key: `${s}:${n}`, side, ...edit };
+  } else if (node) {
+    const key = node.dataset.node,
+      selection = pathEdit.selection;
+    if (e.shiftKey)
+      selection.has(key) ? selection.delete(key) : selection.add(key);
+    else if (!selection.has(key)) pathEdit.selection = new Set([key]);
+    render();
+    e.preventDefault();
+    if (!pathEdit.selection.has(key)) return true;
+    drag = { kind: "nodes", keys: [...pathEdit.selection], ...edit };
+  } else {
+    const hit = e.target.closest("[data-object]")?.dataset.object;
+    if (hit && hit !== item.id) {
+      pathEdit = null;
+      return false;
+    }
+    const near = nearestSegment(pathEdit.path, transform(p, item, true)),
+      mmPerPx = 1 / $("#canvas").getScreenCTM().a;
+    // A double click on the outline adds a node there (on release, so a
+    // quick click-then-drag still draws a selection rectangle).
+    const twice = doublePress(e, `path:${item.id}`);
+    drag = {
+      kind: "node-marquee",
+      start: p,
+      end: p,
+      base: e.shiftKey ? [...pathEdit.selection] : [],
+      insert: twice && near.distance < 8 * mmPerPx ? near : null,
+      moved: false,
+    };
+  }
+  $("#canvas").setPointerCapture(e.pointerId);
+  e.preventDefault();
+  return true;
+}
 $("#canvas").addEventListener("pointerdown", (e) => {
   if (loading || e.button !== 0 || preview) return;
   // On a Mac, Ctrl+click is a right click and opens the menu instead.
@@ -1503,6 +1858,7 @@ $("#canvas").addEventListener("pointerdown", (e) => {
     addItem(tool, snap ? Math.round(p.x) : p.x, snap ? Math.round(p.y) : p.y);
     return;
   }
+  if (pathItem() && pathPointerDown(e, p)) return;
   const warpPoint = e.target.closest("[data-warp-point]");
   if (warpPoint && warpItem()) {
     const item = warpItem();
@@ -1556,23 +1912,9 @@ $("#canvas").addEventListener("pointerdown", (e) => {
     e.preventDefault();
     return;
   }
-  // Double press on text opens the editor. Each press redraws the objects,
-  // which resets the browser's own click count, so dblclick cannot be used.
-  const now = performance.now(),
-    last = lastPress;
-  lastPress = { id, time: now, x: e.clientX, y: e.clientY };
-  if (
-    last?.id === id &&
-    now - last.time < 450 &&
-    Math.hypot(e.clientX - last.x, e.clientY - last.y) < 6 &&
-    !e.shiftKey &&
-    project.items.find((i) => i.id === id)?.type === "text"
-  ) {
-    lastPress = null;
-    e.preventDefault();
-    editText(id);
-    return;
-  }
+  // A double click (released without moving) opens the text editor on text
+  // and Path Edit Mode on paths and shapes; a click-then-drag still moves.
+  const twice = doublePress(e, id) && !e.shiftKey;
   if (e.shiftKey || e.ctrlKey || e.metaKey) {
     selectGroupOf(id, true);
     render();
@@ -1583,6 +1925,7 @@ $("#canvas").addEventListener("pointerdown", (e) => {
   if (chosen.length) {
     drag = {
       kind: "move",
+      double: twice ? id : null,
       before: chosen.map((i) => structuredClone(i)),
       start: p,
       moved: false,
@@ -1599,7 +1942,7 @@ $("#canvas").addEventListener("pointermove", (e) => {
       drag.moved = true;
     return;
   }
-  if (drag.kind === "marquee") {
+  if (drag.kind === "marquee" || drag.kind === "node-marquee") {
     drag.end = p;
     drag.moved = Math.hypot(p.x - drag.start.x, p.y - drag.start.y) > 0.5;
     const r = selectionRect(drag.start, p);
@@ -1610,11 +1953,31 @@ $("#canvas").addEventListener("pointermove", (e) => {
     return;
   }
   if (!drag.moved) {
-    if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) < 0.3) return;
+    // At most 0.3 mm or 3 screen pixels, so zoomed-in edits start promptly.
+    const threshold = Math.min(0.3, 3 / $("#canvas").getScreenCTM().a);
+    if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) < threshold) return;
     checkpoint();
     drag.moved = true;
   }
-  if (drag.kind === "warp") {
+  if (drag.kind === "nodes" || drag.kind === "handle") {
+    // Rebuilt from the drag start each frame; one undo step for the drag.
+    const { before } = drag,
+      current = project.items.find((i) => i.id === before.id),
+      b = transform(p, before, true);
+    let path;
+    if (drag.kind === "nodes") {
+      const a = transform(drag.start, before, true);
+      path = moveNodes(drag.startPath, drag.keys, b.x - a.x, b.y - a.y);
+    } else path = moveHandle(drag.startPath, drag.key, drag.side, b, e.altKey);
+    for (const bridge of project.items) {
+      const start = drag.bridges.find((s) => s.id === bridge.id);
+      if (start) Object.assign(bridge, structuredClone(start));
+    }
+    const next = toPathItem(before, path);
+    followBridges(project.items, before, next);
+    project.items[project.items.indexOf(current)] = next;
+    pathEdit.path = path;
+  } else if (drag.kind === "warp") {
     // The pointer moves the point in the unwarped box's units; a corner
     // carries its two handles unless Alt/Option is held.
     const { before, base } = drag,
@@ -1695,6 +2058,36 @@ for (const event of ["pointerup", "pointercancel"])
         render();
       }
       $("#marquee").setAttribute("hidden", "");
+    } else if (drag?.kind === "node-marquee" && drag.insert && !drag.moved) {
+      if (event === "pointerup" && pathItem()) {
+        const { path, key } = insertNode(
+          pathEdit.path,
+          drag.insert.s,
+          drag.insert.i,
+          drag.insert.t,
+        );
+        pathEdit.selection = new Set([key]);
+        applyPath(path, "ノードを追加しました。");
+      }
+    } else if (drag?.kind === "node-marquee") {
+      const item = pathItem();
+      if (event === "pointerup" && item) {
+        const r = selectionRect(drag.start, drag.end),
+          hits = drag.moved
+            ? nodeKeys(pathEdit.path).filter((key) => {
+                const w = transform(nodeAt(pathEdit.path, key), item);
+                return (
+                  w.x >= r.x &&
+                  w.x <= r.x + r.w &&
+                  w.y >= r.y &&
+                  w.y <= r.y + r.h
+                );
+              })
+            : [];
+        pathEdit.selection = new Set([...drag.base, ...hits]);
+        render();
+      }
+      $("#marquee").setAttribute("hidden", "");
     } else if (drag?.kind === "place") {
       if (event === "pointerup" && !drag.moved)
         addItem(
@@ -1703,6 +2096,13 @@ for (const event of ["pointerup", "pointercancel"])
           snap ? Math.round(drag.start.y) : drag.start.y,
         );
     } else if (drag?.moved) commit();
+    else if (drag?.double && event === "pointerup") {
+      const id = drag.double,
+        type = project.items.find((i) => i.id === id)?.type;
+      drag = null;
+      if (type === "text") editText(id);
+      else if (PATHABLE.includes(type)) enterPathEdit(id);
+    }
     drag = null;
   });
 function setZoom(v, anchor) {
@@ -1850,6 +2250,15 @@ const menuActions = {
   ungroup,
   outline: outlineSelected,
   "edit-text": () => editText(selected),
+  "edit-path": () => enterPathEdit(selected),
+  "outline-edit": () => outlineSelected() && enterPathEdit(selected),
+  "node-smooth": () => nodeAction("smooth"),
+  "node-corner": () => nodeAction("corner"),
+  "node-line": () => nodeAction("line"),
+  "node-insert": () => nodeAction("insert"),
+  "node-delete": () => nodeAction("delete"),
+  "node-all": () => nodeAction("all"),
+  "path-done": exitPathEdit,
   warp: enterWarp,
   fillet: () => {
     const field = $('[data-prop="radius"]');
@@ -1872,6 +2281,20 @@ const menuActions = {
   preview: togglePreview,
 };
 function menuEntries(onObject) {
+  if (onObject === "path") {
+    const any = pathEdit.selection.size > 0;
+    return [
+      ["node-smooth", "スムーズ", "", any],
+      ["node-corner", "コーナー", "", any],
+      ["node-line", "直線化", "", any],
+      "-",
+      ["node-insert", "ノードを追加", "", any],
+      ["node-delete", "ノードを削除", "Delete", any],
+      "-",
+      ["node-all", "すべてのノードを選択", shortcut("A"), true],
+      ["path-done", "パス編集を終了", "Esc", true],
+    ];
+  }
   if (!onObject)
     return [
       ["undo", "元に戻す", shortcut("Z"), history.length],
@@ -1907,6 +2330,8 @@ function menuEntries(onObject) {
     ],
     "-",
     ["edit-text", "テキストを編集", "", one?.type === "text"],
+    ["edit-path", "パスを編集", "", PATHABLE.includes(one?.type)],
+    ["outline-edit", "アウトライン化してパス編集", "", one?.type === "text"],
     ["warp", "ワープ…", "", canWarp(one)],
     ["outline", "アウトライン化", "", one?.type === "text"],
     ["fillet", "フィレット…", "", one?.type === "rect"],
@@ -1937,11 +2362,14 @@ function menuEntries(onObject) {
 }
 function openMenu(x, y, onObject) {
   const chosen = selectedItems(),
-    title = !onObject
-      ? "キャンバス"
-      : chosen.length === 1
-        ? chosen[0].name
-        : `${chosen.length} アイテム`;
+    title =
+      onObject === "path"
+        ? `パス編集 · ノード ${pathEdit.selection.size} 個選択`
+        : !onObject
+          ? "キャンバス"
+          : chosen.length === 1
+            ? chosen[0].name
+            : `${chosen.length} アイテム`;
   menu.innerHTML =
     `<div class="menu-title">${esc(title)}</div>` +
     menuEntries(onObject)
@@ -2019,6 +2447,15 @@ $("#canvas").addEventListener("contextmenu", (e) => {
   const id = e.target.closest("[data-object]")?.dataset.object,
     item = id && project.items.find((i) => i.id === id),
     onObject = Boolean(item && isEditable(project, item));
+  // In Path Edit Mode the menu edits nodes; a right-clicked node is selected.
+  if (pathItem() && (!id || id === pathEdit.id)) {
+    const node = e.target.closest("[data-node]")?.dataset.node;
+    if (node && !pathEdit.selection.has(node))
+      pathEdit.selection = new Set([node]);
+    render();
+    openMenu(e.clientX, e.clientY, "path");
+    return;
+  }
   if (onObject && !selectionIds().includes(id)) selectGroupOf(id);
   tool = "select";
   render();
@@ -2058,6 +2495,35 @@ window.addEventListener("keydown", (e) => {
     return;
   const mod = e.metaKey || e.ctrlKey,
     key = e.key.toLowerCase();
+  if (pathItem()) {
+    if (e.key === "Escape" || e.key === "Enter") {
+      e.preventDefault();
+      exitPathEdit();
+      return;
+    }
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      nodeAction("delete");
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      nodeAction("all");
+      return;
+    }
+    const step = e.shiftKey ? 1 : 0.1,
+      arrows = {
+        ArrowLeft: [-step, 0],
+        ArrowRight: [step, 0],
+        ArrowUp: [0, -step],
+        ArrowDown: [0, step],
+      };
+    if (arrows[e.key] && pathEdit.selection.size) {
+      e.preventDefault();
+      nudgeNodes(...arrows[e.key]);
+      return;
+    }
+  }
   if (warpId && (e.key === "Escape" || e.key === "Enter")) {
     e.preventDefault();
     exitWarp();

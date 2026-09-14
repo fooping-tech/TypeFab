@@ -43,7 +43,8 @@ function stretched(commands, k) {
     ...(c.x2 !== undefined && { x2: c.x2 * k }),
   }));
 }
-// Per glyph cluster: its source text, contours, and the pen offset at which a
+// Per glyph cluster: its source text, contours, glyph commands (for editable
+// Bézier outlines), and the pen offset at which a
 // one-character text item with the same settings reproduces the glyph exactly.
 export function layoutGlyphs(item, font, shaping) {
   if (!font) throw Error("この文字のフォントを追加し、選び直してください。");
@@ -74,22 +75,23 @@ export function layoutGlyphs(item, font, shaping) {
       let previous = null;
       for (const g of shaped) {
         const glyph = font.glyphs.get(g.id),
-          contours = flatten(
-            stretched(
-              glyph.getPath(x + g.xOffset * scale, y - g.yOffset * scale, size)
-                .commands,
-              k,
-            ),
-          );
+          commands = stretched(
+            glyph.getPath(x + g.xOffset * scale, y - g.yOffset * scale, size)
+              .commands,
+            k,
+          ),
+          contours = flatten(commands);
         // Glyphs shaped from the same characters stay together as one character.
-        if (previous?.cluster === g.cluster)
+        if (previous?.cluster === g.cluster) {
           previous.contours.push(...contours);
-        else {
+          previous.commands.push(...commands);
+        } else {
           const end = clusters[clusters.indexOf(g.cluster) + 1] ?? line.length;
           previous = {
             cluster: g.cluster,
             text: line.slice(g.cluster, end),
             contours,
+            commands,
             origin: { x: (x - size / 2) * k, y },
           };
           all.push(previous);
@@ -108,10 +110,12 @@ export function layoutGlyphs(item, font, shaping) {
         y += size * 1.4;
         continue;
       }
-      const glyph = font.charToGlyph(char);
+      const glyph = font.charToGlyph(char),
+        commands = stretched(glyph.getPath(x, y, size).commands, k);
       all.push({
         text: char,
-        contours: flatten(stretched(glyph.getPath(x, y, size).commands, k)),
+        contours: flatten(commands),
+        commands,
         origin: { x: x * k, y: y - size },
       });
       x +=

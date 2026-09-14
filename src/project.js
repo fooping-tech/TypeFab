@@ -15,6 +15,30 @@ const validWarp = (w) =>
       Math.abs(p.x) <= 100 &&
       Math.abs(p.y) <= 100,
   );
+const validPoint = (q) =>
+  q &&
+  Number.isFinite(q.x) &&
+  Number.isFinite(q.y) &&
+  Math.abs(q.x) <= 10000 &&
+  Math.abs(q.y) <= 10000;
+// Editable Bézier path of a fixed outline (see path.js).
+const validPath = (path) =>
+  Array.isArray(path) &&
+  path.length > 0 &&
+  path.every(
+    (s) =>
+      s &&
+      typeof s.closed === "boolean" &&
+      Array.isArray(s.nodes) &&
+      s.nodes.length >= 1 &&
+      s.nodes.every(
+        (n) =>
+          validPoint(n) &&
+          (n.in === undefined || validPoint(n.in)) &&
+          (n.out === undefined || validPoint(n.out)) &&
+          (n.smooth === undefined || typeof n.smooth === "boolean"),
+      ),
+  );
 export function validateProject(p) {
   if (
     !p ||
@@ -86,6 +110,11 @@ export function validateProject(p) {
           : i.warp.source !== undefined))
     )
       throw Error("ワープ設定が不正です。");
+    if (i.path !== undefined) {
+      if (i.type !== "outline" || !validPath(i.path))
+        throw Error("編集用パスが不正です。");
+      points += 3 * i.path.reduce((n, s) => n + s.nodes.length, 0);
+    }
     if (
       i.radius !== undefined &&
       (i.type !== "rect" ||

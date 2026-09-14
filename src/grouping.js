@@ -28,8 +28,18 @@ export function splitCharacters(item, glyphs) {
 // Each connected filled region (an outer contour with its holes) becomes a
 // fixed outline. Islands inside a hole, such as the centre of 回, are parts too.
 export function splitParts(item) {
-  const { id, text, font, size, spacing, vertical, stretch, warp, ...rest } =
-      item,
+  const {
+      id,
+      text,
+      font,
+      size,
+      spacing,
+      vertical,
+      stretch,
+      warp,
+      path,
+      ...rest
+    } = item,
     closed = item.contours.filter(isClosed);
   const groups = [
     ...(closed.length ? filledRegions(closed) : []),

@@ -1,6 +1,7 @@
 import ClipperLib from "clipper-lib";
 import { bounds, worldContours, transform, shapeContours } from "./geometry.js";
 import { shapeSource, applyWarp } from "./warp.js";
+import { transformPath, pathContours } from "./path.js";
 const SCALE = 10000;
 const close = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) < 1e-7;
 export function booleanContours(items, operation) {
@@ -114,6 +115,13 @@ export function resizeFromHandle(
       next.h = h;
       if (item.radius) next.radius = Math.min(item.radius, w / 2, h / 2);
       next.contours = shapeContours(item.type, w, h, next.radius);
+    } else if (item.path) {
+      // An editable path scales its nodes and handles, then is flattened anew.
+      next.path = transformPath(item.path, (p) => ({
+        x: ((p.x - b.x) * w) / b.w,
+        y: ((p.y - b.y) * h) / b.h,
+      }));
+      next.contours = pathContours(next.path);
     } else
       next.contours = item.contours.map((c) =>
         c.map((p) => ({
@@ -150,10 +158,17 @@ function resizeLinear(item, b, hx, hy, ax, ay, w, h, locked, layout) {
     next.h = item.h * ky;
     if (item.radius)
       next.radius = Math.min(item.radius, next.w / 2, next.h / 2);
-  } else
+  } else {
     next.warp.source = item.warp.source.map((c) =>
       c.map((p) => ({ x: p.x * kx, y: p.y * ky })),
     );
+    // The unwarped editable path scales with its source.
+    if (item.path)
+      next.path = transformPath(item.path, (p) => ({
+        x: p.x * kx,
+        y: p.y * ky,
+      }));
+  }
   const x = hx ? ax : ax - b.w * kx,
     y = hy ? ay : ay - b.h * ky;
   Object.assign(next, transform({ x: x - b.x * kx, y: y - b.y * ky }, item));
