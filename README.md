@@ -208,6 +208,12 @@ npm run build
 
 Vite + JavaScript + opentype.js + HarfBuzz WASM + Clipperの完全静的構成です。`src/geometry.js` が輪郭・ブリッジ・SVG出力、`src/project.js` がJSON入力検証、`src/main.js` が編集UIを担当します。`src/operations.js` は拡縮とブーリアン、`src/layers.js` はレイヤー、`src/typography.js` は文字組版、`src/grouping.js` はグループと文字・部位への分解、`src/edit.js` は重なり順とコピー、`src/warp.js` はワープ（エンベロープ変形）、`src/path.js` はパスのノード編集（SVG pathの読み書き、ベジェ曲線の近似、ノード操作）、`src/svgimport.js` はSVGファイルの読み込みです。将来別リポジトリ名へ移す場合は `vite.config.js` の `base` を変更してください。
 
+## ランディングページ
+
+https://fooping-tech.github.io/TypeFab/landing/ にプロダクト紹介ページがあります（`landing/index.html`、`src/landing.js`、`src/landing.css`）。画面写真は `public/landing/` にある実際のエディタのスクリーンショット、Before / After の図は `scripts/landing-glyphs.mjs` が同梱フォントと `src/geometry.js` から生成した実際の輪郭と自動ブリッジ（`src/landing-glyphs.js`）です。フォントを更新したら `node scripts/landing-glyphs.mjs` で再生成してください。
+
+現在は `/` がエディタ、`/landing/` が紹介ページです（Issue #2 の Phase 1）。将来 `/` を紹介ページ、`/app/` をエディタに切り替える場合は、`vite.config.js` の `rollupOptions.input` と `src/landing.js` の `EDITOR_URL` を変更します。加工注文の機能は未実装で、ページ上では Coming Soon と表示しています。
+
 ## GitHub Pages
 
 Settings → Pages → Build and deployment → Sourceを **GitHub Actions** に設定します。`main` へのpushで `.github/workflows/pages.yml` がテスト・ビルドを実行し、Pagesへ公開します。ビルドが失敗した場合はデプロイしません。
