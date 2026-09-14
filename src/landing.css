@@ -234,6 +234,17 @@ button:focus-visible {
   color: var(--text);
 }
 
+.welcome-back {
+  background: #1f2a33;
+  border-bottom: 1px solid var(--line-2);
+  color: var(--muted);
+  font-size: 13.5px;
+  padding: 9px 0;
+}
+.welcome-back a {
+  color: var(--orange);
+}
+
 /* Hero */
 .hero {
   padding: clamp(56px, 9vw, 110px) 0 40px;

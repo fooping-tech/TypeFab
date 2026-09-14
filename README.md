@@ -2,7 +2,7 @@
 
 **文字を、かたちに。** GitHub Pagesで動く、日本語対応のレーザー加工向けタイポグラフィSVGエディタ。
 
-公開サイト: **https://fooping-tech.github.io/TypeFab/**
+公開サイト: **https://fooping-tech.github.io/TypeFab/**（紹介ページ）／ エディタ: **https://fooping-tech.github.io/TypeFab/app/**
 
 ## はじめて使う
 
@@ -204,7 +204,7 @@ npm test
 npm run build
 ```
 
-ローカル: http://127.0.0.1:5173/TypeFab/
+ローカル: http://127.0.0.1:5173/TypeFab/ （紹介ページ）、http://127.0.0.1:5173/TypeFab/app/ （エディタ）
 
 Vite + JavaScript + opentype.js + HarfBuzz WASM + Clipperの完全静的構成です。`src/geometry.js` が輪郭・ブリッジ・SVG出力、`src/project.js` がJSON入力検証、`src/main.js` が編集UIを担当します。`src/operations.js` は拡縮とブーリアン、`src/layers.js` はレイヤー、`src/typography.js` は文字組版、`src/grouping.js` はグループと文字・部位への分解、`src/edit.js` は重なり順とコピー、`src/warp.js` はワープ（エンベロープ変形）、`src/path.js` はパスのノード編集（SVG pathの読み書き、ベジェ曲線の近似、ノード操作）、`src/svgimport.js` はSVGファイルの読み込みです。将来別リポジトリ名へ移す場合は `vite.config.js` の `base` を変更してください。
 
@@ -285,9 +285,9 @@ Stripeのテストモードでは `stripe listen --forward-to 127.0.0.1:8787/api
 
 ## ランディングページ
 
-https://fooping-tech.github.io/TypeFab/landing/ にプロダクト紹介ページがあります（`landing/index.html`、`src/landing.js`、`src/landing.css`）。画面写真は `public/landing/` にある実際のエディタのスクリーンショット、Before / After の図は `scripts/landing-glyphs.mjs` が同梱フォントと `src/geometry.js` から生成した実際の輪郭と自動ブリッジ（`src/landing-glyphs.js`）です。フォントを更新したら `node scripts/landing-glyphs.mjs` で再生成してください。
+https://fooping-tech.github.io/TypeFab/ はプロダクト紹介ページ（`index.html`、`src/landing.js`、`src/landing.css`）、エディタは https://fooping-tech.github.io/TypeFab/app/ （`app/index.html`）です。画面写真は `public/landing/` にある実際のエディタのスクリーンショット、Before / After の図は `scripts/landing-glyphs.mjs` が同梱フォントと `src/geometry.js` から生成した実際の輪郭と自動ブリッジ（`src/landing-glyphs.js`）です。フォントを更新したら `node scripts/landing-glyphs.mjs` で再生成してください。
 
-現在は `/` がエディタ、`/landing/` が紹介ページです（Issue #2 の Phase 1）。将来 `/` を紹介ページ、`/app/` をエディタに切り替える場合は、`vite.config.js` の `rollupOptions.input` と `src/landing.js` の `EDITOR_URL` を変更します。加工注文の機能は実装済みですが、加工サービス側（Cloudflare Workers / Stripe）の設定が完了するまで公開サイトでは決済できないため、ページ上では Coming Soon と表示しています。
+以前の `/TypeFab/` はエディタでしたが、Issue #2 の Phase 2 で `/` を紹介ページ、`/app/` をエディタに切り替えました。ブラウザの自動保存はオリジン単位なので、以前のURLで編集していたデザインは `/app/` でそのまま復元されます。編集中のデータがあるブラウザで紹介ページを開くと、`/app/` への案内を表示します。ページの配置は `vite.config.js` の `rollupOptions.input` と `src/landing.js` の `EDITOR_URL` で決まります。加工注文の機能は実装済みですが、加工サービス側（Cloudflare Workers / Stripe）の設定が完了するまで公開サイトでは決済できないため、ページ上では Coming Soon と表示しています。
 
 ## GitHub Pages
 

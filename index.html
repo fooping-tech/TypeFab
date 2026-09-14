@@ -1,1 +1,253 @@
-<!doctype html><html lang="ja"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="theme-color" content="#f4f5f7"/><link rel="icon" type="image/svg+xml" href="/favicon.svg"/><title>TypeFab — 文字を、かたちに。</title></head><body><div id="app"></div><script type="module" src="/src/main.js"></script></body></html>
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d1216" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>TypeFab — Laser-Cut Typography &amp; SVG Editor</title>
+    <meta name="description" content="Create laser-cut-ready typography and SVG designs directly in your browser. Add bridges, edit vectors, preview cutting paths, and export production-ready SVG files." />
+    <link rel="canonical" href="https://fooping-tech.github.io/TypeFab/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="TypeFab" />
+    <meta property="og:title" content="TypeFab — Laser-Cut Typography & SVG Editor" />
+    <meta property="og:description" content="Create laser-cut-ready typography and SVG designs directly in your browser. Add bridges, edit vectors, preview cutting paths, and export production-ready SVG files." />
+    <meta property="og:url" content="https://fooping-tech.github.io/TypeFab/" />
+    <meta property="og:image" content="https://fooping-tech.github.io/TypeFab/landing/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="ja_JP" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="TypeFab — Laser-Cut Typography & SVG Editor" />
+    <meta name="twitter:description" content="Create laser-cut-ready typography and SVG designs directly in your browser. Add bridges, edit vectors, preview cutting paths, and export production-ready SVG files." />
+    <meta name="twitter:image" content="https://fooping-tech.github.io/TypeFab/landing/og.png" />
+  </head>
+  <body class="landing">
+    <a class="skip" href="#hero">本文へ</a>
+    <header class="nav" id="top">
+      <div class="wrap nav-inner">
+        <a class="brand" href="./" aria-label="TypeFab">
+          <svg viewBox="0 0 40 40" width="30" height="30" aria-hidden="true"><rect width="40" height="40" rx="9" fill="#263b4d"/><path d="M16 8h5l-1 7h7l-1 4h-7l-2 13h-5l2-13h-4l1-4h4z" fill="#fff"/><path d="M30 8h4l-1 4h-3l-1 4h4l-1 4h-4l-2 12h-5l3-17q1-7 6-7" fill="#efa562"/></svg>
+          <span>TypeFab</span>
+        </a>
+        <nav class="nav-links" aria-label="ページ内">
+          <a href="./app/" data-editor>Editor</a>
+          <a href="#features">Features</a>
+          <a href="#workflow">How it works</a>
+          <a href="https://github.com/fooping-tech/TypeFab" rel="noopener">GitHub</a>
+        </nav>
+        <a class="button primary small" href="./app/" data-editor>TypeFabを開く</a>
+      </div>
+    </header>
+
+    <div class="welcome-back" id="welcome-back" hidden>
+      <div class="wrap">このブラウザにはTypeFabで編集中のデザインが保存されています。エディタは <a href="./app/" data-editor>/app/</a> に移動しました（データはそのまま使えます）。</div>
+    </div>
+    <main>
+      <section class="hero" id="hero">
+        <div class="wrap">
+          <p class="eyebrow">LASER-CUT TYPOGRAPHY · BROWSER-BASED · FREE</p>
+          <h1>Turn words into laser-cuttable designs.</h1>
+          <p class="lede">
+            <strong>文字を、切れるデザインへ。</strong>
+            入力した文字を、レーザー加工可能なSVGへ。日本語フォント、レイアウト、ブリッジ、ベクター編集まで、ブラウザだけで完結します。
+          </p>
+          <div class="cta-row">
+            <a class="button primary" href="./app/" data-editor>TypeFabを開く <span aria-hidden="true">→</span></a>
+            <a class="button ghost" href="https://github.com/fooping-tech/TypeFab" rel="noopener">View on GitHub</a>
+          </div>
+          <p class="hero-note">インストール不要。フォント・テキスト・プロジェクトは外部に送信しません。</p>
+        </div>
+        <div class="wrap wide">
+          <figure class="window hero-window">
+            <div class="window-bar"><span></span><span></span><span></span><em>fooping-tech.github.io/TypeFab/app/</em></div>
+            <img src="/landing/hero.webp" width="2880" height="1800" alt="TypeFabのエディタ画面。「つくる、を自由に。」という文字に自動ブリッジが付き、右側のプロパティでフォントとサイズを編集している" fetchpriority="high" decoding="async" />
+          </figure>
+          <figcaption class="caption">実際のTypeFabの画面（Chromium・1440 px）。文字「自」「由」「る」の閉じた部分に、自動ブリッジ（オレンジ）が追加されています。</figcaption>
+        </div>
+      </section>
+
+      <section class="section" id="before-after">
+        <div class="wrap">
+          <p class="eyebrow">BEFORE / AFTER</p>
+          <h2>Typography is not automatically laser-cuttable.</h2>
+          <p class="lede">
+            普通のフォントをそのままレーザーカットすると、O・A・P・R・B・8・0 や日本語の「日」「あ」のような閉じた部分の内側が脱落します。
+            TypeFabは、ふつうの文字を <strong>加工できる形状</strong> に変えます。
+          </p>
+          <div class="glyph-picker" role="tablist" aria-label="サンプル文字" id="glyph-picker"></div>
+          <ol class="steps" id="steps">
+            <li class="step"><div class="step-head"><span>01</span> NORMAL FONT</div><div class="step-art" data-step="font"></div><p>フォントのままの文字。内側の「島」は外側とつながっていません。</p></li>
+            <li class="step"><div class="step-head"><span>02</span> OUTLINE</div><div class="step-art" data-step="outline"></div><p>輪郭をカット線にします。切り抜くと、島は板から落ちます。</p></li>
+            <li class="step"><div class="step-head"><span>03</span> BRIDGE ADDED</div><div class="step-art" data-step="bridge"></div><p>島と外側をつなぐ非カット帯（ブリッジ）を自動で追加します。幅は調整できます。</p></li>
+            <li class="step"><div class="step-head"><span>04</span> LASER-CUT READY</div><div class="step-art" data-step="cut"></div><p>実際に出力されるカット線。帯の側面も含めた閉じた輪郭で、島が一体になります。</p></li>
+          </ol>
+          <p class="fine">上の図は同梱フォント（Zen Kaku Gothic New / しっぽり明朝）から <code>src/geometry.js</code> が生成した実際の輪郭と自動ブリッジ（幅 1.5 mm）です。</p>
+          <p class="lede center">TypeFab turns ordinary type into manufacturable geometry.</p>
+        </div>
+      </section>
+
+      <section class="section" id="features">
+        <div class="wrap">
+          <p class="eyebrow">PRODUCT</p>
+          <h2>Everything from type to cut path, in one window.</h2>
+          <div class="showcase">
+            <div class="tabs" role="tablist" aria-label="機能">
+              <button role="tab" aria-selected="true" data-tab="text">Text</button>
+              <button role="tab" aria-selected="false" data-tab="fonts">Japanese Fonts</button>
+              <button role="tab" aria-selected="false" data-tab="layout">Layout</button>
+              <button role="tab" aria-selected="false" data-tab="vector">Vector Editing</button>
+              <button role="tab" aria-selected="false" data-tab="bridge">Bridge</button>
+              <button role="tab" aria-selected="false" data-tab="shapes">Shapes</button>
+              <button role="tab" aria-selected="false" data-tab="export">SVG Export</button>
+            </div>
+            <div class="panels">
+              <article class="panel" role="tabpanel" data-panel="text">
+                <figure class="shot"><img src="/landing/hero.webp" width="2880" height="1800" alt="文字を入力して編集しているTypeFabの画面" loading="lazy" decoding="async" /></figure>
+                <div class="panel-text"><h3>文字を打つだけ</h3><p>テキストを入力すると、その場で輪郭になります。ダブルクリックでキャンバス上の編集、サイズ・字間・長体・平体、縦書き（OpenType vert/vrt2）に対応。</p></div>
+              </article>
+              <article class="panel" role="tabpanel" data-panel="fonts" hidden>
+                <figure class="shot portrait"><img src="/landing/inspector.webp" width="1040" height="2672" alt="フォント選択と文字設定のプロパティパネル" loading="lazy" decoding="async" /></figure>
+                <div class="panel-text"><h3>日本語フォントを同梱</h3><p>Zen Kaku Gothic New と しっぽり明朝 を同梱（SIL OFL）。手元の TTF / OTF / WOFF も追加できます。フォントは端末の外に送信しません。</p></div>
+              </article>
+              <article class="panel" role="tabpanel" data-panel="layout" hidden>
+                <figure class="shot"><img src="/landing/warp.webp" width="3820" height="2672" alt="文字にArc Upのワープを掛けているキャンバス" loading="lazy" decoding="async" /></figure>
+                <div class="panel-text"><h3>レイアウトと変形</h3><p>mm単位の加工エリアにドラッグで配置。回転ハンドル、四隅の拡縮、レイヤー、グループ、整列。エンベロープ変形（ワープ）で文字の輪郭そのものを曲げられます。</p></div>
+              </article>
+              <article class="panel" role="tabpanel" data-panel="vector" hidden>
+                <figure class="shot"><img src="/landing/path.webp" width="1440" height="520" alt="MAKE IT YOURSの各文字にアンカーポイントとハンドルが表示されたパス編集モード" loading="lazy" decoding="async" /></figure>
+                <div class="panel-text"><h3>ベクター編集</h3><p>文字をアウトライン化すると、フォントのベジェ曲線そのままのパスになります。アンカーとハンドルを直接動かし、追加・削除・スムーズ／コーナー切り替え、SVG path d の直接編集も。</p></div>
+              </article>
+              <article class="panel" role="tabpanel" data-panel="bridge" hidden>
+                <figure class="shot"><img src="/landing/bridge-sketch.webp" width="1440" height="520" alt="る・自・由の閉じた部分にオレンジ色のブリッジが付いた状態" loading="lazy" decoding="async" /></figure>
+                <div class="panel-text"><h3>ブリッジ</h3><p>「選択にブリッジ」で穴を検出し、島と外側をつなぐ帯を自動追加。手動ブリッジは任意の位置・角度で置けます。幅・高さ・回転を後から調整できます。</p></div>
+              </article>
+              <article class="panel" role="tabpanel" data-panel="shapes" hidden>
+                <figure class="shot strip"><img src="/landing/toolbar.webp" width="2880" height="166" alt="選択・文字・長方形・楕円・線分・ブリッジ・アウトライン化・ワープ・パス編集のツールバー" loading="lazy" decoding="async" /></figure>
+                <div class="panel-text"><h3>図形と図形演算</h3><p>長方形（フィレット付き）、楕円、線分。結合・切り抜き・交差・XOR で文字と図形を組み合わせ、1つのカット形状にします。SVGファイルの読み込みにも対応。</p></div>
+              </article>
+              <article class="panel" role="tabpanel" data-panel="export" hidden>
+                <figure class="shot"><img src="/landing/preview.webp" width="3820" height="2672" alt="加工プレビューで赤いカット線を表示したキャンバス" loading="lazy" decoding="async" /></figure>
+                <div class="panel-text"><h3>SVG書き出し</h3><p>加工プレビューの赤線がそのまま出力されます。mm単位・viewBox付き・パスのみ。text / mask / clipPath / image を含まないので、加工ソフトでそのまま読めます。</p></div>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="workflow">
+        <div class="wrap">
+          <p class="eyebrow">HOW IT WORKS</p>
+          <h2>Six steps from an idea to a cut.</h2>
+          <ol class="workflow">
+            <li><span class="num">01</span><h3>TYPE</h3><p>文字を入力する</p></li>
+            <li><span class="num">02</span><h3>DESIGN</h3><p>フォントを選び、レイアウトを整える</p></li>
+            <li><span class="num">03</span><h3>BRIDGE</h3><p>閉じた形をレーザーカットできる形にする</p></li>
+            <li><span class="num">04</span><h3>PREVIEW</h3><p>最終的なカット線を確認する</p></li>
+            <li><span class="num">05</span><h3>EXPORT</h3><p>クリーンなSVGを書き出す</p></li>
+            <li class="soon"><span class="num">06</span><h3>ORDER <span class="badge">Coming Soon</span></h3><p>そのまま加工を依頼する（注文ページは実装済み。加工サービスの提供開始まで利用できません）</p></li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="section bridge-section" id="bridge">
+        <div class="wrap">
+          <p class="eyebrow">BRIDGE</p>
+          <h2>Built for things that actually get cut.</h2>
+          <p class="lede">きれいなSVGでも、切ったあとに部品が落ちては意味がありません。TypeFabでは、必要な場所にブリッジを追加し、その幅と位置を自分で制御できます。</p>
+          <div class="bridge-diagram" id="bridge-diagram"></div>
+          <div class="two-col">
+            <figure class="shot"><img src="/landing/bridge-sketch.webp" width="1440" height="520" alt="スケッチ画面。閉じた部分にブリッジ（オレンジの帯）が付いている" loading="lazy" decoding="async" /><figcaption>スケッチ：ブリッジ（オレンジ）は実際にカット線から除かれる領域です。</figcaption></figure>
+            <figure class="shot"><img src="/landing/bridge-cut.webp" width="1440" height="520" alt="加工プレビュー。赤いカット線がブリッジの位置で途切れ、帯の側面を含む輪郭になっている" loading="lazy" decoding="async" /><figcaption>加工プレビュー：赤線がSVGに出力されるカット線です。</figcaption></figure>
+          </div>
+          <p class="fine">「切り残しなし」の検査は、閉じた輪郭にブリッジの隙間があるかを確認するものです。材料の連結性や物理的な強度を保証するものではありません。材料・厚さに応じて幅を調整し、テスト加工してください。</p>
+        </div>
+      </section>
+
+      <section class="section" id="vector">
+        <div class="wrap">
+          <p class="eyebrow">VECTOR EDITING</p>
+          <h2>Edit the geometry, not just the text.</h2>
+          <div class="two-col align">
+            <ul class="feature-list">
+              <li><b>アンカーポイント</b> クリック・Shift・範囲選択、ドラッグで移動、矢印キーで 0.1 mm</li>
+              <li><b>ベジェハンドル</b> スムーズは連動、コーナーは独立。Alt で切り離し</li>
+              <li><b>移動・回転・拡縮</b> ドラッグ、回転ハンドル（Shiftで15°）、四隅のハンドル、数値入力</li>
+              <li><b>パス編集</b> ノードの追加・削除、直線化、SVG path d の直接編集（M L H V C S Q T A Z）</li>
+              <li><b>ワープ</b> 4辺のベジェによるエンベロープ変形。Arc・Arch・Wave・Flag・Perspective など</li>
+              <li><b>図形演算</b> 結合・切り抜き・交差・XOR。結果は編集できるパス</li>
+            </ul>
+            <div class="stack">
+              <figure class="shot"><img src="/landing/path.webp" width="1440" height="520" alt="パス編集モードのアンカーとハンドル" loading="lazy" decoding="async" /></figure>
+              <figure class="shot"><img src="/landing/warp.webp" width="3820" height="2672" alt="ワープのエンベロープと文字の変形" loading="lazy" decoding="async" /></figure>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="makers">
+        <div class="wrap">
+          <p class="eyebrow">MADE FOR MAKERS</p>
+          <h2>For people who cut things.</h2>
+          <p class="lede">画面の中で終わらず、板になって手に取れるもののために。</p>
+          <table class="joblist" aria-label="想定する利用者と用途">
+            <thead><tr><th>WHO</th><th>WHAT YOU CUT</th><th>MATERIAL</th></tr></thead>
+            <tbody>
+              <tr><td>レーザーカッターを持つ人</td><td>サインプレート、名札、キーホルダー</td><td>MDF 2.5–3 mm</td></tr>
+              <tr><td>メイカー</td><td>ロゴ入りの箱、ステンシル、装飾パーツ</td><td>合板、アクリル</td></tr>
+              <tr><td>FabLab</td><td>来場者の名前を切り出すワークショップ</td><td>MDF、紙</td></tr>
+              <tr><td>デザイナー</td><td>展示用の切り文字、モックアップ</td><td>アクリル 3 mm</td></tr>
+              <tr><td>学校・教育</td><td>日本語タイポグラフィの教材、表札づくり</td><td>MDF 2.5 mm</td></tr>
+              <tr><td>ワークショップ主催者</td><td>参加者ごとの文字入りキット</td><td>MDF、革</td></tr>
+              <tr><td>小さな加工事業者</td><td>注文に応じた文字パーツの量産データ</td><td>用途に応じて</td></tr>
+            </tbody>
+          </table>
+          <p class="fine">材料と厚さは例です。実際の加工条件は加工機・材料に合わせてテストしてください。</p>
+        </div>
+      </section>
+
+      <section class="section" id="physical">
+        <div class="wrap">
+          <p class="eyebrow">FROM BROWSER TO PHYSICAL OBJECT</p>
+          <h2>Design it. We cut it. <span class="badge">Coming Soon</span></h2>
+          <ol class="pipeline">
+            <li>DESIGN</li><li>SVG</li><li class="soon">ORDER</li><li class="soon">LASER CUT</li><li class="soon">SHIP</li>
+          </ol>
+          <p class="lede">TypeFabで作ったデザインをそのまま加工注文し、切り出した板を受け取れる流れを準備しています。エディタの「このデザインを加工注文する」から注文ページ（SVGの確認・材料・厚さ・数量・納期・料金・Stripe決済）へ進めますが、<strong>加工サービスの提供開始まで決済はできません。</strong>それまではSVGを書き出し、お手持ちの加工機や加工サービスで切り出してください。</p>
+          <div class="cta-row"><a class="button ghost" href="./order/" data-order>注文ページを見る（プレビュー）</a></div>
+        </div>
+      </section>
+
+      <section class="section" id="open-source">
+        <div class="wrap">
+          <p class="eyebrow">OPEN SOURCE</p>
+          <h2>Built in the open.</h2>
+          <p class="lede">TypeFabは、メイカーとデジタルファブリケーションのためのブラウザツールとして開発を続けています。ソースコードはGitHubで公開しています。Vite + JavaScript + opentype.js + HarfBuzz + Clipper の完全静的構成で、GitHub Pagesで動作します。</p>
+          <div class="cta-row">
+            <a class="button ghost" href="https://github.com/fooping-tech/TypeFab" rel="noopener">github.com/fooping-tech/TypeFab</a>
+            <a class="button ghost" href="https://github.com/fooping-tech/TypeFab/issues" rel="noopener">Issues</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section final" id="start">
+        <div class="wrap center">
+          <h2>Turn your next idea into something you can cut.</h2>
+          <div class="cta-row center">
+            <a class="button primary" href="./app/" data-editor>TypeFabを開く <span aria-hidden="true">→</span></a>
+            <a class="button ghost" href="https://github.com/fooping-tech/TypeFab" rel="noopener">View on GitHub</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="wrap foot-inner">
+        <span>TypeFab · 文字を、かたちに。</span>
+        <nav aria-label="フッター"><a href="./app/" data-editor>Editor</a><a href="https://github.com/fooping-tech/TypeFab" rel="noopener">GitHub</a><a href="https://github.com/fooping-tech/TypeFab/blob/main/README.md" rel="noopener">README</a></nav>
+        <small>同梱フォント Zen Kaku Gothic New / Shippori Mincho は SIL Open Font License 1.1。</small>
+      </div>
+    </footer>
+    <script type="module" src="/src/landing.js"></script>
+  </body>
+</html>

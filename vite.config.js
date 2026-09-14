@@ -6,11 +6,11 @@ export default defineConfig({
   build: {
     target: "esnext",
     rollupOptions: {
-      // Multi-page: "/" is the editor, "/landing/" the landing page (Phase 1
-      // of issue #2). Phase 2 swaps them to "/" (landing) and "/app/" (editor).
+      // Multi-page (issue #2 Phase 2): "/" is the landing page, "/app/" the
+      // editor, plus the order and admin pages.
       input: {
-        editor: page("index.html"),
-        landing: page("landing/index.html"),
+        landing: page("index.html"),
+        editor: page("app/index.html"),
         order: page("order/index.html"),
         admin: page("admin/index.html"),
       },

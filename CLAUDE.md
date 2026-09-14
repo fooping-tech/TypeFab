@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 TypeFab — GitHub Pagesで動く、日本語対応のレーザー加工向けタイポグラフィSVGエディタ。
-公開URL: https://fooping-tech.github.io/TypeFab/
+公開URL: https://fooping-tech.github.io/TypeFab/ （紹介ページ）、エディタは https://fooping-tech.github.io/TypeFab/app/ 、加工注文は `/order/`、注文管理は `/admin/`。
 
 ## 作業の進め方（必須）
 
@@ -17,7 +17,7 @@ Node.js 22以降。
 
 ```sh
 npm ci
-npm run dev      # http://127.0.0.1:5173/TypeFab/
+npm run dev      # http://127.0.0.1:5173/TypeFab/ （紹介ページ） · /TypeFab/app/ （エディタ）
 npm test         # node --test tests/*.test.js
 npm run build    # dist/ を生成
 npm run preview
@@ -31,7 +31,12 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 
 | ファイル | 役割 |
 | --- | --- |
-| `src/main.js` | 編集UI全体（ツールバー、キャンバス操作、プロパティ、Undo/Redo、自動保存） |
+| `index.html` / `app/index.html` / `order/index.html` / `admin/index.html` | Viteのマルチページ入口：紹介ページ・エディタ・加工注文・注文管理（`vite.config.js` の `rollupOptions.input`） |
+| `src/main.js` | 編集UI全体（ツールバー、キャンバス操作、プロパティ、Undo/Redo、自動保存、「このデザインを加工注文する」） |
+| `src/landing.js` / `src/landing.css` / `src/landing-glyphs.js` | 紹介ページ。`landing-glyphs.js` は `scripts/landing-glyphs.mjs` が同梱フォントと `geometry.js` から生成 |
+| `src/pricing.js` / `src/svganalyze.js` | 加工注文の料金カタログ・状態遷移、SVGの寸法・カット長・検査・サニタイズ（フロントと `worker/` で共用） |
+| `src/order.js` / `src/admin.js` / `src/order.css` | 加工注文ページと注文管理ページ |
+| `worker/` | Cloudflare Workers（D1・R2・Stripe Checkout・Webhook）。`npm test` はルートから `worker/src` を直接テストする |
 | `src/geometry.js` | 輪郭化、ブリッジ（線の途切れ／矩形差分）、加工チェック、SVG出力 |
 | `src/operations.js` | 拡縮ハンドル、ブーリアン演算（結合・切り抜き・交差・XOR） |
 | `src/layers.js` | レイヤー |

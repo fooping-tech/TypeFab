@@ -40,14 +40,15 @@ test("landing sample 日 matches a fresh run of the bridge pipeline on the bundl
 });
 
 test("landing page HTML has the required SEO metadata, CTA and Coming Soon labels", () => {
-  const html = fs.readFileSync("landing/index.html", "utf8");
+  const html = fs.readFileSync("index.html", "utf8");
   assert.match(html, /<title>TypeFab — Laser-Cut Typography &amp; SVG Editor<\/title>/);
   assert.match(html, /name="description" content="Create laser-cut-ready typography/);
   for (const p of ["og:title", "og:description", "og:image", "og:url", "twitter:card", "twitter:image"])
     assert.match(html, new RegExp(`(property|name)="${p}"`), p);
   assert.match(html, /href="\/favicon\.svg"/);
-  // Editor links fall back to "../" without JS and are rewritten by landing.js.
-  assert.ok((html.match(/href="\.\.\/" data-editor/g) || []).length >= 3);
+  // Editor links fall back to "./app/" without JS and are rewritten by landing.js.
+  assert.ok((html.match(/href="\.\/app\/" data-editor/g) || []).length >= 3);
+  assert.match(html, /rel="canonical" href="https:\/\/fooping-tech\.github\.io\/TypeFab\/"/);
   assert.match(html, /github\.com\/fooping-tech\/TypeFab/);
   // Unimplemented ordering is labelled, never shown as available.
   assert.ok(html.includes("ORDER <span class=\"badge\">Coming Soon</span>"));
@@ -62,6 +63,7 @@ test("Vite config builds both pages under the /TypeFab/ base", async () => {
   const config = (await import("../vite.config.js")).default;
   assert.equal(config.base, "/TypeFab/");
   const input = config.build.rollupOptions.input;
-  assert.ok(input.editor.endsWith("/index.html"));
-  assert.ok(input.landing.endsWith("/landing/index.html"));
+  assert.ok(input.editor.endsWith("/app/index.html"));
+  assert.ok(input.landing.endsWith("/TypeFab/index.html"));
+  assert.ok(input.order.endsWith("/order/index.html") && input.admin.endsWith("/admin/index.html"));
 });

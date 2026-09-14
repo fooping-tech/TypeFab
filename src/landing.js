@@ -1,12 +1,18 @@
 import "./landing.css";
 import { GLYPHS } from "./landing-glyphs.js";
 
-// Where the editor lives relative to the site base. Phase 1: the editor is the
-// site root ("/TypeFab/"). Phase 2 (LP at "/", editor at "/app/") only changes
-// this constant. Static hrefs in the HTML point to "../" as a no-JS fallback.
-const EDITOR_URL = import.meta.env.BASE_URL;
+// Where the editor lives relative to the site base (Phase 2 of issue #2: the
+// landing page is the site root, the editor is "/app/"). Static hrefs in the
+// HTML point to "./app/" as a no-JS fallback.
+const EDITOR_URL = `${import.meta.env.BASE_URL}app/`;
 document.querySelectorAll("a[data-editor]").forEach((a) => (a.href = EDITOR_URL));
-document.querySelectorAll("a[data-order]").forEach((a) => (a.href = `${EDITOR_URL}order/`));
+document.querySelectorAll("a[data-order]").forEach((a) => (a.href = `${import.meta.env.BASE_URL}order/`));
+
+// Compatibility notice for people who bookmarked "/TypeFab/" as the editor:
+// their autosaved project (origin-scoped localStorage) is still there.
+try {
+  if (localStorage.getItem("typefab-v1")) document.getElementById("welcome-back").hidden = false;
+} catch {}
 
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const svgNS = "http://www.w3.org/2000/svg";

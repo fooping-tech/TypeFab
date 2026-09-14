@@ -274,7 +274,7 @@ async function showStatus(orderId, token, result) {
       order
         ? `<dl class="summary"><dt>ステータス</dt><dd><span class="badge status-${esc(order.status)}">${esc(STATUS_LABEL[order.status] ?? order.status)}</span></dd><dt>SVG</dt><dd>${esc(order.fileName)}（${Number(order.widthMm).toFixed(1)} × ${Number(order.heightMm).toFixed(1)} mm）</dd><dt>内容</dt><dd>${esc(order.material)} ${esc(order.thicknessMm)} mm × ${esc(order.quantity)} · ${order.deliveryType === "EXPRESS" ? "特急" : "通常"}</dd><dt>合計</dt><dd>${yen(order.totalPrice)}</dd>${order.shipBy ? `<dt>発送予定</dt><dd>${new Date(order.shipBy).toLocaleDateString("ja-JP")} まで</dd>` : ""}${order.trackingNumber ? `<dt>追跡番号</dt><dd>${esc(order.trackingNumber)}${order.carrier ? `（${esc(order.carrier)}）` : ""}</dd>` : ""}</dl>`
         : ""
-    }<div class="actions"><a href="../"><button>エディタに戻る</button></a><a href="./"><button>別のSVGを注文する</button></a></div>`;
+    }<div class="actions"><a href="../app/"><button>エディタに戻る</button></a><a href="./"><button>別のSVGを注文する</button></a></div>`;
   };
   const fetchOrder = async () => {
     const res = await fetch(`${API}/api/orders/${encodeURIComponent(orderId)}?token=${encodeURIComponent(token)}`);
