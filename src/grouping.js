@@ -118,3 +118,57 @@ export function reassignBridges(items, ownerId, pieces, makeId) {
   }
   return copies;
 }
+// Groups are a shared groupId on flat items. Grouping flattens earlier groups,
+// puts the members (and their scoped bridges) on one layer and stacks them
+// together where the topmost member was. Scoped bridges follow their owner
+// instead of joining. Returns the member ids in stacking order.
+export function groupItems(project, ids, groupId, layerId) {
+  const members = project.items.filter(
+    (i) => ids.includes(i.id) && !i.targetId,
+  );
+  if (members.length < 2)
+    throw Error("グループ化するアイテムを2つ以上選択してください。");
+  const top = Math.max(...members.map((i) => project.items.indexOf(i))),
+    rest = project.items.filter((i) => !members.includes(i)),
+    below = project.items
+      .slice(0, top + 1)
+      .filter((i) => !members.includes(i)).length;
+  rest.splice(below, 0, ...members);
+  project.items = rest;
+  for (const item of project.items)
+    if (members.includes(item) || members.some((m) => m.id === item.targetId))
+      item.layerId = layerId;
+  for (const item of members) item.groupId = groupId;
+  return members.map((i) => i.id);
+}
+// Releases every group that any of the ids belongs to; returns released ids.
+export function ungroupItems(project, ids) {
+  const groups = groupsOf(project, ids),
+    released = project.items.filter((i) => groups.has(i.groupId));
+  for (const item of released) delete item.groupId;
+  return released.map((i) => i.id);
+}
+// The ids plus every member of the groups they belong to.
+export function expandGroups(project, ids) {
+  const groups = groupsOf(project, ids);
+  return [
+    ...new Set([
+      ...ids,
+      ...project.items.filter((i) => groups.has(i.groupId)).map((i) => i.id),
+    ]),
+  ];
+}
+// Deleting or combining members can leave a group of one; that is no group.
+export function normalizeGroups(project) {
+  const counts = new Map();
+  for (const i of project.items)
+    if (i.groupId) counts.set(i.groupId, (counts.get(i.groupId) || 0) + 1);
+  for (const i of project.items)
+    if (i.groupId && counts.get(i.groupId) < 2) delete i.groupId;
+}
+const groupsOf = (project, ids) =>
+  new Set(
+    project.items
+      .filter((i) => ids.includes(i.id) && i.groupId)
+      .map((i) => i.groupId),
+  );

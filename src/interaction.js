@@ -79,6 +79,24 @@ export function marqueeIds(project, a, b, base = []) {
     ),
   );
 }
+// Browser rows run top layer first, and within a layer the topmost item first.
+export function browserOrder(project) {
+  return [...project.layers]
+    .reverse()
+    .flatMap((l) => project.items.filter((i) => i.layerId === l.id).reverse());
+}
+// Shift-click in the browser: every editable row from the anchor to the target,
+// inclusive, ordered from the anchor so it stays the first selection.
+export function rangeIds(project, anchorId, targetId) {
+  const rows = browserOrder(project),
+    a = rows.findIndex((i) => i.id === anchorId),
+    b = rows.findIndex((i) => i.id === targetId);
+  if (b < 0) return [];
+  const range =
+    a < 0 ? [rows[b]] : rows.slice(Math.min(a, b), Math.max(a, b) + 1);
+  if (a > b) range.reverse();
+  return range.filter((i) => isEditable(project, i)).map((i) => i.id);
+}
 export function layerMovePlan(project, ids, layerId) {
   const layer = project.layers.find((l) => l.id === layerId);
   if (!layer?.visible || layer.locked)

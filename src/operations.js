@@ -104,7 +104,8 @@ export function resizeFromHandle(
     if (["rect", "circle"].includes(item.type)) {
       next.w = w;
       next.h = h;
-      next.contours = shapeContours(item.type, w, h);
+      if (item.radius) next.radius = Math.min(item.radius, w / 2, h / 2);
+      next.contours = shapeContours(item.type, w, h, next.radius);
     } else
       next.contours = item.contours.map((c) =>
         c.map((p) => ({

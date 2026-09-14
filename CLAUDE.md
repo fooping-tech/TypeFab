@@ -36,8 +36,9 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | `src/operations.js` | 拡縮ハンドル、ブーリアン演算（結合・切り抜き・交差・XOR） |
 | `src/layers.js` | レイヤー |
 | `src/typography.js` | 文字組版（`layoutGlyphs` は1文字ごとの輪郭と位置）、HarfBuzzによる縦書き（vert/vrt2） |
-| `src/grouping.js` | グループ化解除：1文字ずつの文字アイテム、部位ごとの固定パス、対象付きブリッジの引き継ぎ |
-| `src/interaction.js` | 範囲選択の判定、レイヤー間移動の検証、ホイール／ピンチのズーム計算 |
+| `src/grouping.js` | グループ（`groupId`）の作成・解除、1文字ずつの文字アイテム、部位ごとの固定パス、対象付きブリッジの引き継ぎ |
+| `src/interaction.js` | 範囲選択の判定、ブラウザのShift範囲選択、レイヤー間移動の検証、ホイール／ピンチのズーム計算 |
+| `src/edit.js` | 重ね順（最前面へ／前面へ／背面へ／最背面へ）、複製・貼り付け用のコピー |
 | `src/project.js` | プロジェクトJSONの入力検証、v1→v2移行 |
 | `public/fonts/` | 同梱書体（Zen Kaku Gothic New / しっぽり明朝）とOFLライセンス |
 | `tests/` | `node:test` による形状・編集・操作のテスト |

@@ -49,6 +49,20 @@ export function validateProject(p) {
       throw Error("所属レイヤーがありません。");
     if (i.ratioLocked !== undefined && typeof i.ratioLocked !== "boolean")
       throw Error("比率ロックが不正です。");
+    if (
+      i.groupId !== undefined &&
+      (typeof i.groupId !== "string" ||
+        !/^[a-zA-Z0-9_-]{1,80}$/.test(i.groupId))
+    )
+      throw Error("グループ形式が不正です。");
+    if (
+      i.radius !== undefined &&
+      (i.type !== "rect" ||
+        !Number.isFinite(i.radius) ||
+        i.radius < 0 ||
+        i.radius > 1000)
+    )
+      throw Error("フィレット半径が不正です。");
     for (const key of ["x", "y", "rotation"])
       if (!Number.isFinite(i[key]) || Math.abs(i[key]) > 10000)
         throw Error("座標が不正です。");

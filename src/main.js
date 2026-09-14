@@ -23,8 +23,19 @@ import {
   marqueeIds,
   layerMovePlan,
   wheelZoom,
+  rangeIds,
 } from "./interaction.js";
-import { splitCharacters, splitParts, reassignBridges } from "./grouping.js";
+import {
+  splitCharacters,
+  splitParts,
+  reassignBridges,
+  groupItems,
+  ungroupItems,
+  expandGroups,
+  normalizeGroups,
+} from "./grouping.js";
+import { arrangeItems, cloneItems } from "./edit.js";
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 let typography;
 const shapingFonts = new Map();
 const typographyReady = import("./typography.js").then((m) => (typography = m));
@@ -68,7 +79,10 @@ let selected = null,
 const uid = () => crypto.randomUUID();
 let multi = [],
   activeLayer = "layer-default",
-  textEdit = null;
+  textEdit = null,
+  browserAnchor = null,
+  clipboard = null,
+  pasteCount = 0;
 const selectionIds = () => (multi.length ? multi : selected ? [selected] : []);
 const selectedItems = () =>
   selectionIds()
@@ -91,6 +105,20 @@ function selectItem(id, additive = false) {
       ? [id]
       : [];
   selected = multi.at(-1) || null;
+}
+// Canvas picks select the whole group; browser rows can pick single members.
+function selectGroupOf(id, additive = false) {
+  const ids = expandGroups(project, [id]),
+    current = selectionIds();
+  multi = !additive
+    ? ids
+    : ids.every((x) => current.includes(x))
+      ? current.filter((x) => !ids.includes(x))
+      : [...new Set([...current, ...ids])];
+  // The clicked item stays the primary selection shown in the inspector.
+  if (multi.includes(id)) multi = [...multi.filter((x) => x !== id), id];
+  selected = multi.at(-1) || null;
+  browserAnchor = id;
 }
 function replaceItem(before, after) {
   followBridges(project.items, before, after);
@@ -175,11 +203,20 @@ function textGlyphs(item) {
 const visibleChars = (text) => [...text].filter((c) => /\S/u.test(c)).length;
 // What ungrouping does next: text → one item per character → parts.
 function ungroupKind(item) {
+  if (item?.groupId) return "group";
   if (item?.type === "text" && visibleChars(item.text) > 1) return "characters";
   if (["text", "outline"].includes(item?.type) && splitParts(item).length > 1)
     return "parts";
   return null;
 }
+const ungroupLabel = (kinds) =>
+  kinds.size > 1 || kinds.has("group")
+    ? "グループ化解除"
+    : kinds.has("characters")
+      ? "1文字ずつに分解"
+      : "部位ごとに分解";
+const shortcut = (key, shift = false) =>
+  isMac ? `${shift ? "⇧" : ""}⌘${key}` : `Ctrl+${shift ? "Shift+" : ""}${key}`;
 function addItem(type, x = 35, y = 45) {
   try {
     const layer = project.layers.find((l) => l.id === activeLayer);
@@ -276,14 +313,34 @@ $("#app").innerHTML = `
   )
   .join(
     "",
-  )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button><button id="ungroup" class="tool" title="文字を1文字ずつ、もう一度で部位ごとに分解 (Ctrl/⌘ Shift G)"><span class="tool-icon">⊞</span>グループ化解除</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
-<main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで複数選択</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
+  )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button><button id="group" class="tool" title="選択をグループ化 (${shortcut("G")})"><span class="tool-icon">▣</span>グループ化</button><button id="ungroup" class="tool" title="グループを解除、または文字を1文字ずつ・部位ごとに分解 (${shortcut("G", true)})"><span class="tool-icon">⊞</span>グループ化解除</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
+<main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
-<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.5</span></span></footer>
+<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.6</span></span></footer>
 <input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,application/json">
-<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。「グループ化解除」で文字を1文字ずつに、もう一度で部位ごとに分解できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>`;
+<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
+<div id="context-menu" class="context-menu" role="menu" aria-label="編集メニュー" hidden></div>`;
 
+function layerRow(i) {
+  return `<button class="layer ${selectionIds().includes(i.id) ? "selected" : ""} ${i.type === "bridge" ? "bridge-layer" : ""}" draggable="${isEditable(project, i)}" data-layer="${i.id}" ${!isEditable(project, i) ? "disabled" : ""}><span class="layer-icon">${icons[i.type] || "⌘"}</span><span>${esc(i.name)}</span><small>${i.type === "bridge" ? "TAB" : i.type === "text" ? "TEXT" : "PATH"}</small></button>`;
+}
+// Consecutive members of one group are shown under a group row.
+function layerRows(items) {
+  let html = "";
+  for (let n = 0; n < items.length;) {
+    const group = items[n].groupId;
+    if (!group) {
+      html += layerRow(items[n++]);
+      continue;
+    }
+    const run = [];
+    while (n < items.length && items[n].groupId === group) run.push(items[n++]);
+    const all = run.every((i) => selectionIds().includes(i.id));
+    html += `<div class="group-block"><button class="group-row ${all ? "selected" : ""}" data-group-row="${group}" ${run.some((i) => !isEditable(project, i)) ? "disabled" : ""}><span class="layer-icon">▣</span><span>グループ</span><small>${run.length} ITEMS</small></button>${run.map(layerRow).join("")}</div>`;
+  }
+  return html;
+}
 function renderLayers() {
   $("#layers").innerHTML = [...project.layers]
     .reverse()
@@ -296,14 +353,7 @@ function renderLayers() {
     <button data-layer-action="visible" data-id="${l.id}" title="${l.visible ? "非表示にする" : "表示する"}" aria-label="${esc(l.name)}の表示切替">${l.visible ? "◉" : "○"}</button>
     <button data-layer-action="locked" data-id="${l.id}" title="${l.locked ? "ロック解除" : "ロック"}" aria-label="${esc(l.name)}のロック切替">${l.locked ? "🔒" : "◇"}</button></div>
     <div class="layer-order"><button data-layer-action="up" data-id="${l.id}" ${project.layers.at(-1) === l ? "disabled" : ""} title="前面へ">↑</button><button data-layer-action="down" data-id="${l.id}" ${project.layers[0] === l ? "disabled" : ""} title="背面へ">↓</button><button data-layer-action="remove" data-id="${l.id}" ${project.layers.length === 1 || l.locked ? "disabled" : ""} title="レイヤー削除（中身は別レイヤーへ移動）">削除</button><small>${project.items.filter((i) => i.layerId === l.id).length} items</small></div>
-    ${project.items
-      .filter((i) => i.layerId === l.id)
-      .reverse()
-      .map(
-        (i) =>
-          `<button class="layer ${selectionIds().includes(i.id) ? "selected" : ""} ${i.type === "bridge" ? "bridge-layer" : ""}" draggable="${isEditable(project, i)}" data-layer="${i.id}" ${!isEditable(project, i) ? "disabled" : ""}><span class="layer-icon">${icons[i.type] || "⌘"}</span><span>${esc(i.name)}</span><small>${i.type === "bridge" ? "TAB" : i.type === "text" ? "TEXT" : "PATH"}</small></button>`,
-      )
-      .join("")}
+    ${layerRows(project.items.filter((i) => i.layerId === l.id).reverse())}
   </div>`,
     )
     .join("");
@@ -316,17 +366,18 @@ function renderProperties() {
   $("#properties").innerHTML = i
     ? `<section><div class="object-type">${i.type === "bridge" ? "BRIDGE / 非カット" : i.type === "text" ? "TYPOGRAPHY" : "SKETCH / パス"}</div><h3>${esc(i.name)}</h3><h4>配置 <span>mm</span></h4><div class="fields">${field("x", "X", i.x, 0.5)}${field("y", "Y", i.y, 0.5)}${field("rotation", "回転 °", i.rotation, 1, -360, 360)}</div></section>
   ${i.type === "text" ? `<section><h4>テキスト</h4><textarea id="text-content" maxlength="500" aria-label="文字内容">${esc(i.text)}</textarea><label class="full-label">フォント<select id="font-select">${[...fontLabels].map(([k, v]) => `<option value="${esc(k)}" ${i.font === k ? "selected" : ""}>${esc(v)}</option>`).join("")}${!fontLabels.has(i.font) ? `<option value="${esc(i.font)}" selected>追加フォント（再読込が必要）</option>` : ""}</select></label><div id="font-preview" class="font-preview" style="font-family:${i.font === "zen" ? "ZenPreview" : i.font === "shippori" ? "ShipporiPreview" : "sans-serif"}">日本語 Aa 123</div><button id="add-font" class="wide-button">＋ フォント追加 <small>TTF / OTF / WOFF</small></button><div class="fields">${field("size", "サイズ mm", i.size, 0.5, 1, 300)}${field("spacing", "字間 mm", i.spacing, 0.1, -100, 100)}</div><label class="check vertical-check"><input type="checkbox" id="vertical" ${i.vertical ? "checked" : ""}> 縦書き（右から左）</label></section>` : ""}
-  ${["bridge", "rect", "circle", "line"].includes(i.type) ? `<section><h4>${i.type === "bridge" ? "切り残し領域" : "寸法"} <span>mm</span></h4><div class="fields">${field("w", "幅", i.w, 0.1, i.type === "line" ? 0 : 0.1)}${field("h", "高さ", i.h, 0.1, i.type === "line" ? 0 : 0.1)}</div>${i.type === "bridge" ? '<p class="note">オレンジ色の領域に重なったカット線を除去します。</p>' : ""}</section>` : ""}`
+  ${["bridge", "rect", "circle", "line"].includes(i.type) ? `<section><h4>${i.type === "bridge" ? "切り残し領域" : "寸法"} <span>mm</span></h4><div class="fields">${field("w", "幅", i.w, 0.1, i.type === "line" ? 0 : 0.1)}${field("h", "高さ", i.h, 0.1, i.type === "line" ? 0 : 0.1)}${i.type === "rect" ? field("radius", "フィレット R", i.radius ?? 0, 0.1, 0, 1000) : ""}</div>${i.type === "rect" ? '<p class="note">4つの角を半径Rで丸めます。最大は短辺の半分です。</p>' : ""}${i.type === "bridge" ? '<p class="note">オレンジ色の領域に重なったカット線を除去します。</p>' : ""}</section>` : ""}`
     : '<section class="no-selection"><span>↖</span><h3>オブジェクトを選択</h3><p>キャンバスや左の一覧から選択して、文字・位置・寸法を編集できます。</p></section>';
   const chosen = selectedItems();
   if (chosen.length > 1)
     $("#properties").innerHTML =
       `<section><h3>${chosen.length} アイテムを選択</h3><p class="note">差分の土台: ${esc(chosen[0].name)}</p><div class="boolean-actions"><button data-boolean="union">結合 ∪</button><button data-boolean="difference">切り抜き −</button><button data-boolean="intersection">交差 ∩</button><button data-boolean="xor">排他的 XOR</button></div><p class="note">閉じた図形・文字の輪郭に適用します。結果は固定パスになります。</p></section>`;
   if (chosen.length) {
-    const kinds = new Set(chosen.map(ungroupKind).filter(Boolean));
-    if (kinds.size)
+    const kinds = new Set(chosen.map(ungroupKind).filter(Boolean)),
+      groupable = chosen.filter((c) => !c.targetId).length > 1;
+    if (kinds.size || groupable)
       $("#properties").innerHTML +=
-        `<section><button id="item-ungroup" class="wide-button">⊞ ${kinds.size > 1 ? "グループ化解除" : kinds.has("characters") ? "1文字ずつに分解" : "部位ごとに分解"}</button><p class="note">${kinds.has("characters") ? "文字ごとに移動・編集できます。もう一度で部位ごとに分解します。" : "つながった部位ごとの固定パスにします。"}</p></section>`;
+        `<section>${groupable ? '<button id="item-group" class="wide-button">▣ グループ化</button>' : ""}${kinds.size ? `<button id="item-ungroup" class="wide-button">⊞ ${ungroupLabel(kinds)}</button><p class="note">${kinds.has("group") ? "グループを解除します。もう一度で文字・部位に分解します。" : kinds.has("characters") ? "文字ごとに移動・編集できます。もう一度で部位ごとに分解します。" : "つながった部位ごとの固定パスにします。"}</p>` : ""}</section>`;
     if (chosen.length === 1 && canResize(i))
       $("#properties").innerHTML +=
         `<section><label class="check"><input id="ratio-lock" type="checkbox" ${i.ratioLocked ? "checked" : ""}> 縦横比を固定</label><p class="note">四隅のハンドルをドラッグして拡縮。Shiftでも比率を固定できます。</p></section>`;
@@ -396,7 +447,7 @@ function renderCanvas() {
   $("#hint").textContent = preview
     ? "赤い線をカットします。自動ブリッジは帯の側面を含む切り抜き輪郭です。"
     : tool === "select"
-      ? "空白からドラッグで範囲選択 · 2本指スワイプで移動 · ピンチでズーム"
+      ? "空白からドラッグで範囲選択 · 右クリックで編集メニュー · 2本指スワイプで移動 · ピンチでズーム"
       : `${labels[tool]}を配置する場所をクリック`;
   $("#board-label").textContent = `${project.width} × ${project.height} mm`;
   $("#zoom-reset").textContent = `${Math.round(zoom * 100)}%`;
@@ -409,6 +460,7 @@ function render({ properties = true } = {}) {
   });
   $("#app").setAttribute("aria-busy", String(loading));
   ensureLayers(project);
+  normalizeGroups(project);
   if (!project.layers.some((l) => l.id === activeLayer))
     activeLayer = project.layers[0].id;
   const valid = selectionIds().filter((id) =>
@@ -438,6 +490,7 @@ function render({ properties = true } = {}) {
     (i) => i.type !== "bridge",
   );
   $("#ungroup").disabled = !selectedItems().some(ungroupKind);
+  $("#group").disabled = selectedItems().filter((i) => !i.targetId).length < 2;
   $("#delete").disabled = $("#duplicate").disabled = !selectedItem();
   const c = cutGeometry(visibleItems(project)),
     outside = !withinBoard();
@@ -454,6 +507,10 @@ function updateSelected(key, value) {
   if (!isEditable(project, old)) return;
   try {
     const next = { ...old, [key]: value };
+    if (key === "radius" && value > Math.min(old.w, old.h) / 2) {
+      next.radius = Math.min(old.w, old.h) / 2;
+      notify(`フィレット半径は短辺の半分（${next.radius} mm）までです。`);
+    }
     if (old.ratioLocked && ["w", "h"].includes(key) && old.w > 0 && old.h > 0) {
       next[key === "w" ? "h" : "w"] =
         key === "w" ? (value * old.h) / old.w : (value * old.w) / old.h;
@@ -466,8 +523,11 @@ function updateSelected(key, value) {
     ) {
       next.contours = textContours(next);
       next.name = next.text || "空の文字";
-    } else if (["rect", "circle", "line"].includes(next.type))
-      next.contours = shapeContours(next.type, next.w, next.h);
+    } else if (["rect", "circle", "line"].includes(next.type)) {
+      if (next.radius)
+        next.radius = Math.min(next.radius, next.w / 2, next.h / 2);
+      next.contours = shapeContours(next.type, next.w, next.h, next.radius);
+    }
     checkpoint();
     replaceItem(old, next);
     commit();
@@ -536,10 +596,12 @@ $("#properties").addEventListener("click", (e) => {
   if (e.target.closest("#add-font")) $("#font-file").click();
   if (e.target.closest("#item-auto-bridge")) applyAutoBridges();
   if (e.target.closest("#item-ungroup")) ungroup();
+  if (e.target.closest("#item-group")) groupSelection();
   const op = e.target.closest("[data-boolean]");
   if (op) applyBoolean(op.dataset.boolean);
 });
 function moveSelectionToLayer(ids, layerId) {
+  ids = expandGroups(project, ids);
   try {
     const moved = layerMovePlan(project, ids, layerId);
     if (moved.every((i) => i.layerId === layerId)) return;
@@ -613,10 +675,37 @@ $("#layers").addEventListener("dragend", () => {
   layerDragIds = [];
   clearLayerDrop();
 });
+// Browser rows: click selects one row, ⌘/Ctrl toggles it, Shift selects the
+// range from the anchor (Ctrl/⌘ Shift adds the range to the selection).
+function selectRow(id, e) {
+  const toggle = e.metaKey || (e.ctrlKey && !isMac);
+  if (e.shiftKey) {
+    const anchor = selectionIds().includes(browserAnchor)
+        ? browserAnchor
+        : selected || id,
+      range = rangeIds(project, anchor, id);
+    multi = toggle ? [...new Set([...selectionIds(), ...range])] : range;
+    selected = multi.at(-1) || null;
+    return;
+  }
+  selectItem(id, toggle);
+  browserAnchor = id;
+}
 $("#layers").addEventListener("click", (e) => {
+  // On a Mac, Ctrl+click is a right click and opens the menu instead.
+  if (isMac && e.ctrlKey) return;
   const b = e.target.closest("[data-layer]");
   if (b) {
-    selectItem(b.dataset.layer, e.shiftKey || e.metaKey || e.ctrlKey);
+    selectRow(b.dataset.layer, e);
+    render();
+    return;
+  }
+  const groupRow = e.target.closest("[data-group-row]");
+  if (groupRow) {
+    const member = project.items.find(
+      (i) => i.groupId === groupRow.dataset.groupRow,
+    );
+    if (member) selectGroupOf(member.id, e.shiftKey || e.metaKey || e.ctrlKey);
     render();
     return;
   }
@@ -684,11 +773,7 @@ for (const b of document.querySelectorAll("[data-tool]"))
     render();
   };
 $("#add-text").onclick = () => addItem("text");
-$("#preview").onclick = () => {
-  preview = !preview;
-  tool = "select";
-  render();
-};
+$("#preview").onclick = togglePreview;
 $("#snap").onchange = (e) => (snap = e.target.checked);
 $("#undo").onclick = undo;
 $("#redo").onclick = redo;
@@ -703,38 +788,164 @@ function remove() {
   commit();
 }
 $("#delete").onclick = remove;
-$("#duplicate").onclick = () => {
+function addCopies(copies) {
+  if (project.items.length + copies.length > 2000) {
+    notify("オブジェクトが多すぎます。");
+    return false;
+  }
+  checkpoint();
+  project.items.push(...copies);
+  return true;
+}
+function duplicate() {
   const chosen = selectedItems();
   if (!chosen.length) return;
-  checkpoint();
-  const mapping = new Map(chosen.map((i) => [i.id, uid()]));
-  const originals = [
-    ...chosen,
-    ...project.items.filter(
-      (i) => mapping.has(i.targetId) && !mapping.has(i.id),
-    ),
-  ];
-  const copies = originals.map((i) => {
-    const copy = structuredClone(i);
-    copy.id = mapping.get(i.id) || uid();
-    copy.x += 5;
-    copy.y += 5;
-    if (mapping.has(i.targetId)) copy.targetId = mapping.get(i.targetId);
-    return copy;
-  });
-  project.items.push(...copies);
-  multi = chosen.map((i) => mapping.get(i.id));
+  const { copies, ids } = cloneItems(
+    project.items,
+    chosen.map((i) => i.id),
+    uid,
+  );
+  if (!addCopies(copies)) return;
+  multi = ids;
   selected = multi.at(-1);
   commit();
-};
-$("#outline").onclick = () => {
+}
+$("#duplicate").onclick = duplicate;
+// The clipboard lives in this page only; it holds the items with their scoped bridges.
+function copySelection() {
+  const ids = selectedItems().map((i) => i.id);
+  if (!ids.length) return false;
+  clipboard = {
+    ids,
+    items: structuredClone(
+      project.items.filter(
+        (i) => ids.includes(i.id) || ids.includes(i.targetId),
+      ),
+    ),
+  };
+  pasteCount = 0;
+  notify(`${ids.length} アイテムをコピーしました。`);
+  return true;
+}
+function cutSelection() {
+  if (!copySelection()) return;
+  remove();
+  // The first paste after a cut goes back to the same place.
+  pasteCount = -1;
+  notify(`${clipboard.ids.length} アイテムを切り取りました。`);
+}
+function paste() {
+  if (!clipboard) {
+    notify(
+      "貼り付けるアイテムがありません。コピーまたは切り取りしてください。",
+    );
+    return;
+  }
+  const layer = project.layers.find((l) => l.id === activeLayer);
+  if (!layer?.visible || layer.locked) {
+    notify("表示中のロックされていないレイヤーを選んでください。");
+    return;
+  }
+  pasteCount++;
+  const { copies, ids } = cloneItems(
+    clipboard.items,
+    clipboard.ids,
+    uid,
+    5 * pasteCount,
+    activeLayer,
+  );
+  // A copied bridge whose owner is gone becomes a regular bridge.
+  for (const copy of copies)
+    if (
+      copy.targetId &&
+      !copies.some((c) => c.id === copy.targetId) &&
+      !project.items.some((i) => i.id === copy.targetId)
+    )
+      delete copy.targetId;
+  if (!addCopies(copies)) return;
+  multi = ids;
+  selected = multi.at(-1);
+  preview = false;
+  commit();
+  notify(`${ids.length} アイテムを貼り付けました。`);
+}
+function outlineSelected() {
   const i = selectedItem();
   if (i?.type !== "text" || !isEditable(project, i)) return;
   checkpoint();
   i.type = "outline";
   commit();
   notify("固定アウトラインに変換しました。四隅で拡縮できます。");
+}
+$("#outline").onclick = outlineSelected;
+function groupSelection() {
+  try {
+    const chosen = selectedItems().filter((i) => !i.targetId);
+    if (chosen.length < 2)
+      throw Error("グループ化するアイテムを2つ以上選択してください。");
+    const primary = chosen.includes(selectedItem())
+      ? selectedItem()
+      : chosen.at(-1);
+    checkpoint();
+    multi = groupItems(
+      project,
+      chosen.map((i) => i.id),
+      uid(),
+      primary.layerId,
+    );
+    selected = primary.id;
+    multi = [...multi.filter((id) => id !== primary.id), primary.id];
+    preview = false;
+    commit();
+    notify(
+      `${multi.length} アイテムをグループ化しました。キャンバスでまとめて選択・移動できます。`,
+    );
+  } catch (e) {
+    notify(e.message);
+  }
+}
+$("#group").onclick = groupSelection;
+const arrangeLabels = {
+  front: "最前面へ",
+  forward: "前面へ",
+  backward: "背面へ",
+  back: "最背面へ",
 };
+function arrange(mode) {
+  const ids = selectedItems().map((i) => i.id);
+  if (!ids.length) return;
+  const next = arrangeItems(project.items, ids, mode);
+  if (next.every((item, n) => item === project.items[n])) {
+    notify("これ以上移動できません。");
+    return;
+  }
+  checkpoint();
+  project.items = next;
+  commit();
+  notify(`${arrangeLabels[mode]}移動しました。`);
+}
+function selectAll() {
+  multi = visibleItems(project)
+    .filter((i) => isEditable(project, i))
+    .map((i) => i.id);
+  selected = multi.at(-1) || null;
+  preview = false;
+  render();
+}
+// Fusion's "Find in Browser": reveal and focus the row of the selection.
+function findInBrowser() {
+  const row = document.querySelector(`[data-layer="${selected}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: "nearest" });
+  row.focus();
+  row.classList.add("found");
+  setTimeout(() => row.classList.remove("found"), 1200);
+}
+function togglePreview() {
+  preview = !preview;
+  tool = "select";
+  render();
+}
 function applyAutoBridges() {
   const ids = selectedItems()
     .filter((i) => i.type !== "bridge")
@@ -813,6 +1024,25 @@ function applyBoolean(operation) {
   }
 }
 function ungroup() {
+  // Groups are released first; ungrouping again splits text, then parts.
+  const grouped = selectedItems().filter((i) => i.groupId);
+  if (grouped.length) {
+    checkpoint();
+    multi = ungroupItems(
+      project,
+      grouped.map((i) => i.id),
+    ).filter((id) =>
+      isEditable(
+        project,
+        project.items.find((i) => i.id === id),
+      ),
+    );
+    selected = multi.includes(selected) ? selected : multi.at(-1) || null;
+    if (selected) multi = [...multi.filter((id) => id !== selected), selected];
+    commit();
+    notify(`グループを解除しました（${multi.length} アイテム）。`);
+    return;
+  }
   try {
     const replaced = [];
     for (const item of selectedItems()) {
@@ -941,6 +1171,8 @@ function canvasPoint(e) {
 }
 $("#canvas").addEventListener("pointerdown", (e) => {
   if (loading || e.button !== 0 || preview) return;
+  // On a Mac, Ctrl+click is a right click and opens the menu instead.
+  if (isMac && e.ctrlKey && e.pointerType === "mouse") return;
   const p = canvasPoint(e);
   if (tool !== "select") {
     if (e.pointerType === "touch") {
@@ -987,11 +1219,11 @@ $("#canvas").addEventListener("pointerdown", (e) => {
     return;
   }
   if (e.shiftKey || e.ctrlKey || e.metaKey) {
-    selectItem(id, true);
+    selectGroupOf(id, true);
     render();
     return;
   }
-  if (!selectionIds().includes(id)) selectItem(id);
+  if (!selectionIds().includes(id)) selectGroupOf(id);
   const chosen = selectedItems();
   if (chosen.length) {
     drag = {
@@ -1061,7 +1293,10 @@ for (const event of ["pointerup", "pointercancel"])
     if (drag?.kind === "marquee") {
       if (event === "pointerup") {
         multi = drag.moved
-          ? marqueeIds(project, drag.start, drag.end, drag.base)
+          ? expandGroups(
+              project,
+              marqueeIds(project, drag.start, drag.end, drag.base),
+            )
           : drag.base;
         selected = multi.at(-1) || null;
         render();
@@ -1209,12 +1444,253 @@ $("#canvas-scroll").addEventListener(
   { passive: false },
 );
 new ResizeObserver(() => renderCanvas()).observe($("#canvas-scroll"));
+// Right-click edit menu, listing Fusion-style commands for the selection.
+const menu = $("#context-menu");
+let menuReturn = null;
+const menuActions = {
+  cut: cutSelection,
+  copy: copySelection,
+  paste,
+  duplicate,
+  delete: remove,
+  group: groupSelection,
+  ungroup,
+  outline: outlineSelected,
+  fillet: () => {
+    const field = $('[data-prop="radius"]');
+    field?.focus();
+    field?.select();
+  },
+  "auto-bridge": applyAutoBridges,
+  union: () => applyBoolean("union"),
+  difference: () => applyBoolean("difference"),
+  intersection: () => applyBoolean("intersection"),
+  xor: () => applyBoolean("xor"),
+  front: () => arrange("front"),
+  forward: () => arrange("forward"),
+  backward: () => arrange("backward"),
+  back: () => arrange("back"),
+  find: findInBrowser,
+  "select-all": selectAll,
+  undo,
+  redo,
+  preview: togglePreview,
+};
+function menuEntries(onObject) {
+  if (!onObject)
+    return [
+      ["undo", "元に戻す", shortcut("Z"), history.length],
+      ["redo", "やり直す", shortcut("Z", true), future.length],
+      "-",
+      ["paste", "貼り付け", shortcut("V"), clipboard],
+      ["select-all", "すべて選択", shortcut("A"), true],
+      "-",
+      ["preview", preview ? "スケッチに戻る" : "加工プレビュー", "", true],
+    ];
+  const chosen = selectedItems(),
+    one = chosen.length === 1 ? chosen[0] : null,
+    has = chosen.length > 0,
+    kinds = new Set(chosen.map(ungroupKind).filter(Boolean));
+  return [
+    ["cut", "切り取り", shortcut("X"), has],
+    ["copy", "コピー", shortcut("C"), has],
+    ["paste", "貼り付け", shortcut("V"), clipboard],
+    ["duplicate", "複製", shortcut("D"), has],
+    ["delete", "削除", "Delete", has],
+    "-",
+    [
+      "group",
+      "グループ化",
+      shortcut("G"),
+      chosen.filter((i) => !i.targetId).length > 1,
+    ],
+    [
+      "ungroup",
+      kinds.size ? ungroupLabel(kinds) : "グループ化解除",
+      shortcut("G", true),
+      kinds.size,
+    ],
+    "-",
+    ["outline", "アウトライン化", "", one?.type === "text"],
+    ["fillet", "フィレット…", "", one?.type === "rect"],
+    [
+      "auto-bridge",
+      "自動ブリッジ",
+      "",
+      chosen.some((i) => i.type !== "bridge"),
+    ],
+    ...(chosen.length > 1
+      ? [
+          "-",
+          ["union", "結合 ∪", "", true],
+          ["difference", "切り抜き −", "", true],
+          ["intersection", "交差 ∩", "", true],
+          ["xor", "排他的 XOR", "", true],
+        ]
+      : []),
+    "-",
+    ["front", "最前面へ", shortcut("]", true), has],
+    ["forward", "前面へ", shortcut("]"), has],
+    ["backward", "背面へ", shortcut("["), has],
+    ["back", "最背面へ", shortcut("[", true), has],
+    "-",
+    ["find", "ブラウザで表示", "", has],
+    ["select-all", "すべて選択", shortcut("A"), true],
+  ];
+}
+function openMenu(x, y, onObject) {
+  const chosen = selectedItems(),
+    title = !onObject
+      ? "キャンバス"
+      : chosen.length === 1
+        ? chosen[0].name
+        : `${chosen.length} アイテム`;
+  menu.innerHTML =
+    `<div class="menu-title">${esc(title)}</div>` +
+    menuEntries(onObject)
+      .map((entry) =>
+        entry === "-"
+          ? '<hr role="separator">'
+          : `<button type="button" role="menuitem" data-action="${entry[0]}" ${entry[3] ? "" : "disabled"}><span>${entry[1]}</span>${entry[2] ? `<kbd>${esc(entry[2])}</kbd>` : ""}</button>`,
+      )
+      .join("");
+  menuReturn = document.activeElement;
+  menu.hidden = false;
+  const box = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(x, innerWidth - box.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, innerHeight - box.height - 8))}px`;
+  menu.querySelector("button:not(:disabled)")?.focus();
+}
+function closeMenu(restoreFocus = true) {
+  if (menu.hidden) return;
+  menu.hidden = true;
+  if (restoreFocus && menuReturn?.isConnected)
+    menuReturn.focus({ preventScroll: true });
+}
+// Keyboard: Shift+F10 or the menu key opens the menu at the selection.
+function openMenuForSelection() {
+  const first = selectedItems()
+      .map((i) => document.querySelector(`#objects [data-object="${i.id}"]`))
+      .find(Boolean),
+    box = (first || $("#canvas-scroll")).getBoundingClientRect();
+  openMenu(
+    box.left + box.width / 2,
+    box.top + box.height / 2,
+    selectedItems().length > 0,
+  );
+}
+menu.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-action]");
+  if (!b || b.disabled) return;
+  closeMenu();
+  menuActions[b.dataset.action]();
+});
+menu.addEventListener("keydown", (e) => {
+  const items = [...menu.querySelectorAll("button:not(:disabled)")],
+    at = items.indexOf(document.activeElement);
+  if (e.key === "ArrowDown" || e.key === "ArrowUp")
+    items[
+      (at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length
+    ]?.focus();
+  else if (e.key === "Home") items[0]?.focus();
+  else if (e.key === "End") items.at(-1)?.focus();
+  else if (e.key === "Escape") closeMenu();
+  else if (e.key === "Tab") closeMenu(false);
+  else return;
+  e.preventDefault();
+  e.stopPropagation();
+});
+menu.addEventListener("contextmenu", (e) => e.preventDefault());
+document.addEventListener(
+  "pointerdown",
+  (e) => !menu.contains(e.target) && closeMenu(false),
+  true,
+);
+document.addEventListener(
+  "scroll",
+  (e) => !menu.contains(e.target) && closeMenu(false),
+  true,
+);
+window.addEventListener("resize", () => closeMenu(false));
+window.addEventListener("blur", () => closeMenu(false));
+$("#canvas").addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  if (loading || drag?.moved) return;
+  // A touch long-press opens the menu instead of starting a drag.
+  drag = null;
+  $("#marquee").setAttribute("hidden", "");
+  const id = e.target.closest("[data-object]")?.dataset.object,
+    item = id && project.items.find((i) => i.id === id),
+    onObject = Boolean(item && isEditable(project, item));
+  if (onObject && !selectionIds().includes(id)) selectGroupOf(id);
+  tool = "select";
+  render();
+  openMenu(e.clientX, e.clientY, onObject);
+});
+$("#layers").addEventListener("contextmenu", (e) => {
+  const row = e.target.closest("[data-layer]:not(:disabled)"),
+    groupRow = e.target.closest("[data-group-row]:not(:disabled)");
+  // Layer name fields keep the browser's own text menu.
+  if (loading || (!row && !groupRow)) return;
+  e.preventDefault();
+  if (row && !selectionIds().includes(row.dataset.layer)) {
+    selectItem(row.dataset.layer);
+    browserAnchor = row.dataset.layer;
+  } else if (groupRow) {
+    const member = project.items.find(
+      (i) => i.groupId === groupRow.dataset.groupRow,
+    );
+    if (
+      member &&
+      !expandGroups(project, [member.id]).every((id) =>
+        selectionIds().includes(id),
+      )
+    )
+      selectGroupOf(member.id);
+  }
+  render();
+  openMenu(e.clientX, e.clientY, true);
+});
 window.addEventListener("keydown", (e) => {
   if (loading) return;
-  if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || $("#help").open) return;
-  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "g") {
+  if (
+    /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) ||
+    $("#help").open ||
+    !menu.hidden
+  )
+    return;
+  const mod = e.metaKey || e.ctrlKey,
+    key = e.key.toLowerCase();
+  if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
     e.preventDefault();
-    ungroup();
+    openMenuForSelection();
+    return;
+  }
+  if (mod && key === "g") {
+    e.preventDefault();
+    e.shiftKey ? ungroup() : groupSelection();
+    return;
+  }
+  if (
+    mod &&
+    !e.shiftKey &&
+    !e.altKey &&
+    ["x", "c", "v", "d", "a"].includes(key)
+  ) {
+    e.preventDefault();
+    ({
+      x: cutSelection,
+      c: copySelection,
+      v: paste,
+      d: duplicate,
+      a: selectAll,
+    })[key]();
+    return;
+  }
+  if (mod && ["[", "]", "{", "}"].includes(e.key)) {
+    e.preventDefault();
+    const up = ["]", "}"].includes(e.key);
+    arrange(e.shiftKey ? (up ? "front" : "back") : up ? "forward" : "backward");
     return;
   }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {

@@ -285,7 +285,8 @@ export function exportSVG(project) {
     : path(result.paths);
   return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${num(project.width)}mm" height="${num(project.height)}mm" viewBox="0 0 ${num(project.width)} ${num(project.height)}">\n<title>TypeFab laser cut paths</title>\n<desc>Units: mm. Flattening tolerance: 0.02 mm. Bridges are gaps in cut paths.</desc>\n${body}\n</svg>\n`;
 }
-export function shapeContours(type, w, h) {
+export function shapeContours(type, w, h, radius = 0) {
+  if (type === "rect" && radius > 0) return [roundedRect(w, h, radius)];
   if (type === "line")
     return [
       [
@@ -320,6 +321,30 @@ export function shapeContours(type, w, h) {
       { x: 0, y: 0 },
     ],
   ];
+}
+// Filleted rectangle, clockwise like the square one. Each corner arc keeps its
+// chord error within TOLERANCE; the radius is clamped to half the shorter side.
+function roundedRect(w, h, radius) {
+  const r = Math.min(radius, w / 2, h / 2),
+    steps = Math.max(
+      2,
+      Math.ceil(Math.PI / 2 / (2 * Math.acos(Math.max(-1, 1 - TOLERANCE / r)))),
+    );
+  const pts = [];
+  for (const [cx, cy, start] of [
+    [w - r, r, -Math.PI / 2],
+    [w - r, h - r, 0],
+    [r, h - r, Math.PI / 2],
+    [r, r, Math.PI],
+  ])
+    for (let i = 0; i <= steps; i++) {
+      const a = start + (i * Math.PI) / 2 / steps,
+        p = { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+      // At the full radius, neighbouring arcs meet without a straight edge.
+      if (!pts.length || !same(pts.at(-1), p)) pts.push(p);
+    }
+  if (same(pts[0], pts.at(-1))) pts.pop();
+  return [...pts, { ...pts[0] }];
 }
 export function bounds(contours) {
   const ps = contours.flat();
