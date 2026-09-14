@@ -255,3 +255,43 @@ test("group ids are validated in saved projects", () => {
       validateProject({ ...project, items: [{ ...rect("a"), groupId }] }),
     );
 });
+test("rotating about a point turns the whole outline rigidly", async () => {
+  const { rotateAbout, selectionCenter, normalizeAngle } =
+    await import("../src/edit.js");
+  const { worldContours } = await import("../src/geometry.js");
+  const { itemBounds, followBridges } = await import("../src/operations.js");
+  const a = { ...rect("a", 10, 20, 40, 10), rotation: 30 };
+  const c = selectionCenter([a], itemBounds);
+  const turned = rotateAbout(a, c, 75),
+    r = (75 * Math.PI) / 180;
+  worldContours(turned)[0].forEach((p, i) => {
+    const q = worldContours(a)[0][i],
+      dx = q.x - c.x,
+      dy = q.y - c.y;
+    assert.ok(
+      Math.abs(p.x - (c.x + dx * Math.cos(r) - dy * Math.sin(r))) < 1e-9,
+    );
+    assert.ok(
+      Math.abs(p.y - (c.y + dx * Math.sin(r) + dy * Math.cos(r))) < 1e-9,
+    );
+  });
+  // A single item keeps its own centre; the angle wraps into ±180°.
+  const again = selectionCenter([turned], itemBounds);
+  assert.ok(Math.abs(again.x - c.x) < 1e-9 && Math.abs(again.y - c.y) < 1e-9);
+  assert.equal(rotateAbout(a, c, 170).rotation, -160);
+  assert.equal(normalizeAngle(540), 180);
+  assert.equal(normalizeAngle(-180), 180);
+  assert.equal(normalizeAngle(-190), 170);
+  // Several items share the centre of their combined box.
+  const b = rect("b", 60, 20, 10, 10);
+  const shared = selectionCenter([rect("l", 0, 0, 10, 10), b], itemBounds);
+  assert.deepEqual(shared, { x: 35, y: 15 });
+  // Scoped bridges follow a rotating owner.
+  const tab = { ...automaticBridges([a])[0], id: "tab" },
+    start = worldContours(a)[0].map((p) => ({ ...p }));
+  followBridges([tab], a, turned);
+  const dx = tab.x - c.x,
+    dy = tab.y - c.y;
+  assert.ok(cutGeometry([turned, tab]).untouched === 0);
+  assert.ok(Math.hypot(dx, dy) > 0 && start.length === 5);
+});

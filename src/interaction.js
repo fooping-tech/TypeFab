@@ -112,12 +112,13 @@ export function layerMovePlan(project, ids, layerId) {
     throw Error("ロック・非表示のアイテムは移動できません。");
   return moved;
 }
+export const MAX_ZOOM = 20;
 export function wheelZoom(current, delta, mode = 0, pinch = false) {
   const pixels = delta * (mode === 1 ? 16 : mode === 2 ? 400 : 1);
   return Math.max(
     0.25,
     Math.min(
-      8,
+      MAX_ZOOM,
       current *
         Math.exp(
           -Math.max(-300, Math.min(300, pixels)) * (pinch ? 0.006 : 0.002),

@@ -1302,3 +1302,9 @@ dialog .primary {
   min-height: 70px;
   max-height: 180px;
 }
+.rotate-handle {
+  cursor: grab;
+}
+.rotate-handle:active {
+  cursor: grabbing;
+}

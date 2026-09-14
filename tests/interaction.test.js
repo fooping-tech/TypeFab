@@ -124,7 +124,8 @@ test("wheel and trackpad zoom direction, units and bounds", () => {
   assert.ok(wheelZoom(1, -100) > 1);
   assert.ok(wheelZoom(1, 100) < 1);
   assert.ok(wheelZoom(1, -100, 0, true) > wheelZoom(1, -100));
-  assert.equal(wheelZoom(8, -1000), 8);
+  assert.equal(wheelZoom(20, -1000), 20);
+  assert.ok(wheelZoom(8, -1000) > 8);
   assert.equal(wheelZoom(0.25, 1000), 0.25);
   assert.equal(wheelZoom(1, 2, 1), wheelZoom(1, 32, 0));
 });

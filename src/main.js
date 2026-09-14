@@ -26,6 +26,7 @@ import {
   layerMovePlan,
   wheelZoom,
   rangeIds,
+  MAX_ZOOM,
 } from "./interaction.js";
 import {
   splitCharacters,
@@ -37,7 +38,13 @@ import {
   expandGroups,
   normalizeGroups,
 } from "./grouping.js";
-import { arrangeItems, cloneItems } from "./edit.js";
+import {
+  arrangeItems,
+  cloneItems,
+  rotateAbout,
+  selectionCenter,
+  normalizeAngle,
+} from "./edit.js";
 import {
   pathFromCommands,
   pathFromContours,
@@ -403,13 +410,36 @@ function addItem(type, x = 35, y = 45) {
     notify(e.message);
   }
 }
-function download(name, data, type) {
-  const url = URL.createObjectURL(new Blob([data], { type })),
+// Saves through the browser's save dialog where it exists (Chrome/Edge), which
+// fixes the file type and extension. Elsewhere the file is downloaded as a
+// named File: some browsers and embedded views ignore the download name of
+// an anonymous Blob and save it under its random id without an extension.
+// Returns the saved name, or null when the dialog was cancelled.
+async function saveFile(name, data, type, extension, description) {
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: name,
+        types: [{ description, accept: { [type]: [extension] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(new Blob([data], { type }));
+      await writable.close();
+      return handle.name;
+    } catch (e) {
+      if (e.name === "AbortError") return null;
+    }
+  }
+  const url = URL.createObjectURL(new File([data], name, { type })),
     a = document.createElement("a");
   a.href = url;
   a.download = name;
+  a.hidden = true;
+  document.body.append(a);
   a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return name;
 }
 function withinBoard() {
   return visibleItems(project)
@@ -426,7 +456,7 @@ function withinBoard() {
         ),
     );
 }
-function exportFile() {
+async function exportFile() {
   try {
     if (!withinBoard())
       throw Error(
@@ -437,8 +467,18 @@ function exportFile() {
       throw Error(
         `${result.vanished} 個の輪郭がブリッジで完全に隠れています。ブリッジを小さくしてください。`,
       );
-    download("typefab.svg", exportSVG(project), "image/svg+xml");
-    notify(`SVGを書き出しました · 切り残しなしの閉輪郭 ${result.untouched} 個`);
+    const name = await saveFile(
+      "typefab.svg",
+      exportSVG(project),
+      "image/svg+xml",
+      ".svg",
+      "SVG（レーザー加工用カットパス）",
+    );
+    notify(
+      name
+        ? `${name} を書き出しました · 切り残しなしの閉輪郭 ${result.untouched} 個`
+        : "書き出しをキャンセルしました。",
+    );
   } catch (e) {
     notify(e.message);
   }
@@ -460,7 +500,7 @@ $("#app").innerHTML = `
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
-<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.9</span></span></footer>
+<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.10</span></span></footer>
 <input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,application/json">
 <dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
 <div id="context-menu" class="context-menu" role="menu" aria-label="編集メニュー" hidden></div>
@@ -662,6 +702,34 @@ function pathOverlay(item, scale) {
     .join("");
   return `<g class="path-edit" transform="translate(${item.x} ${item.y}) rotate(${item.rotation})"><path d="${toPathData(path)}" fill="none" stroke="#1f7ac0" stroke-width="${1.2 * px}" pointer-events="none"/>${handles}${anchors}</g>`;
 }
+// Rotation handle: a knob above the selection, 24 px over its top edge. A
+// single item carries it in its own rotated frame; several items share one
+// over their combined box, drawn dashed.
+function rotateOverlay(items, scale) {
+  const px = 1 / scale,
+    knob = (x, y, top) =>
+      `<line x1="${x}" y1="${top}" x2="${x}" y2="${y}" stroke="#3b85b5" stroke-width="${px}" pointer-events="none"/><circle data-rotate="1" class="rotate-handle" aria-label="回転ハンドル" cx="${x}" cy="${y}" r="${4.5 * px}" fill="white" stroke="#3b85b5" stroke-width="${1.5 * px}"/>`;
+  if (items.length === 1) {
+    const i = items[0],
+      b = itemBounds(i),
+      x = b.x + b.w / 2;
+    return `<g transform="translate(${i.x} ${i.y}) rotate(${i.rotation})">${knob(x, b.y - 24 * px, b.y)}</g>`;
+  }
+  const corners = items.flatMap((i) => {
+      const b = itemBounds(i);
+      return [
+        [b.x, b.y],
+        [b.x + b.w, b.y],
+        [b.x, b.y + b.h],
+        [b.x + b.w, b.y + b.h],
+      ].map(([x, y]) => transform({ x, y }, i));
+    }),
+    xs = corners.map((q) => q.x),
+    ys = corners.map((q) => q.y),
+    box = bounds([corners]),
+    cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+  return `<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" fill="none" stroke="#3b85b5" stroke-width="${px}" stroke-dasharray="${4 * px} ${3 * px}" pointer-events="none"/>${knob(cx, Math.min(...ys) - 24 * px, Math.min(...ys))}`;
+}
 function renderCanvas() {
   const svg = $("#canvas");
   svg.setAttribute("viewBox", `0 0 ${project.width} ${project.height}`);
@@ -718,6 +786,9 @@ function renderCanvas() {
           : ""
       }</g>`;
     }
+  const chosen = selectedItems();
+  if (!preview && !warpId && !pathEdit && chosen.length)
+    overlay += rotateOverlay(chosen, scale);
   $("#selection").innerHTML = overlay;
   $("#canvas").style.cursor = preview
     ? "default"
@@ -731,15 +802,17 @@ function renderCanvas() {
       : pathEdit
         ? "パス編集中 · ノードを直接変形"
         : "スケッチ編集中";
-  $("#hint").textContent = preview
-    ? "赤い線をカットします。自動ブリッジは帯の側面を含む切り抜き輪郭です。"
-    : warpId
-      ? "角・ハンドルをドラッグ（Altで角だけ）· Esc / Enter で完了"
-      : pathEdit
-        ? "ノード・ハンドルをドラッグ · Shiftで追加選択 · パス上をダブルクリックで追加 · Deleteで削除 · Escで終了"
-        : tool === "select"
-          ? "空白からドラッグで範囲選択 · 右クリックで編集メニュー · 2本指スワイプで移動 · ピンチでズーム"
-          : `${labels[tool]}を配置する場所をクリック`;
+  $("#hint").textContent = drag?.label
+    ? drag.label
+    : preview
+      ? "赤い線をカットします。自動ブリッジは帯の側面を含む切り抜き輪郭です。"
+      : warpId
+        ? "角・ハンドルをドラッグ（Altで角だけ）· Esc / Enter で完了"
+        : pathEdit
+          ? "ノード・ハンドルをドラッグ · Shiftで追加選択 · パス上をダブルクリックで追加 · Deleteで削除 · Escで終了"
+          : tool === "select"
+            ? "空白からドラッグで範囲選択 · 右クリックで編集メニュー · 2本指スワイプで移動 · ピンチでズーム"
+            : `${labels[tool]}を配置する場所をクリック`;
   $("#board-label").textContent = `${project.width} × ${project.height} mm`;
   $("#zoom-reset").textContent = `${Math.round(zoom * 100)}%`;
 }
@@ -1322,6 +1395,19 @@ editorText.addEventListener("keydown", (e) => {
   }
 });
 editorText.addEventListener("focusout", closeEditor);
+function rotateSelection(degrees) {
+  const chosen = selectedItems();
+  if (!chosen.length) return;
+  const ids = chosen.map((i) => i.id),
+    center = selectionCenter(chosen, itemBounds);
+  checkpoint();
+  for (const item of chosen) {
+    if (item.targetId && ids.includes(item.targetId)) continue;
+    const current = project.items.find((i) => i.id === item.id);
+    replaceItem(current, rotateAbout(current, center, degrees));
+  }
+  commit();
+}
 const arrangeLabels = {
   front: "最前面へ",
   forward: "前面へ",
@@ -1711,12 +1797,16 @@ function ungroup() {
 }
 $("#ungroup").onclick = ungroup;
 $("#export").onclick = exportFile;
-$("#save-project").onclick = () =>
-  download(
+$("#save-project").onclick = async () => {
+  const name = await saveFile(
     "typefab-project.json",
     JSON.stringify(project, null, 2),
     "application/json",
+    ".json",
+    "TypeFab プロジェクト",
   );
+  if (name) notify(`${name} に保存しました。`);
+};
 $("#open-project").onclick = () => $("#project-file").click();
 $("#new-project").onclick = () => {
   checkpoint();
@@ -1877,6 +1967,19 @@ $("#canvas").addEventListener("pointerdown", (e) => {
     e.preventDefault();
     return;
   }
+  if (e.target.closest("[data-rotate]") && selectedItems().length) {
+    const chosen = selectedItems();
+    drag = {
+      kind: "rotate",
+      center: selectionCenter(chosen, itemBounds),
+      before: chosen.map((i) => structuredClone(i)),
+      start: p,
+      moved: false,
+    };
+    $("#canvas").setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
   const handle = e.target.closest("[data-resize]");
   if (handle && selectedItems().length === 1 && canResize(selectedItem())) {
     drag = {
@@ -1959,7 +2062,29 @@ $("#canvas").addEventListener("pointermove", (e) => {
     checkpoint();
     drag.moved = true;
   }
-  if (drag.kind === "nodes" || drag.kind === "handle") {
+  if (drag.kind === "rotate") {
+    // Angle swept around the selection centre since the press. Shift snaps
+    // a single item's angle (or a selection's turn) to 15°.
+    const c = drag.center,
+      swept =
+        ((Math.atan2(p.y - c.y, p.x - c.x) -
+          Math.atan2(drag.start.y - c.y, drag.start.x - c.x)) *
+          180) /
+        Math.PI,
+      r0 = drag.before.length === 1 ? drag.before[0].rotation || 0 : 0;
+    let delta = normalizeAngle(swept);
+    if (e.shiftKey) delta = Math.round((r0 + delta) / 15) * 15 - r0;
+    const ids = drag.before.map((i) => i.id);
+    for (const before of drag.before) {
+      if (before.targetId && ids.includes(before.targetId)) continue;
+      const current = project.items.find((i) => i.id === before.id);
+      replaceItem(current, rotateAbout(before, c, delta));
+    }
+    drag.label =
+      drag.before.length === 1
+        ? `回転 ${Number(normalizeAngle(r0 + delta).toFixed(1))}° · Shiftで15°刻み`
+        : `回転 ${Number(delta.toFixed(1))}° · Shiftで15°刻み`;
+  } else if (drag.kind === "nodes" || drag.kind === "handle") {
     // Rebuilt from the drag start each frame; one undo step for the drag.
     const { before } = drag,
       current = project.items.find((i) => i.id === before.id),
@@ -2046,6 +2171,7 @@ $("#canvas").addEventListener("pointermove", (e) => {
 });
 for (const event of ["pointerup", "pointercancel"])
   $("#canvas").addEventListener(event, () => {
+    if (drag) drag.label = null;
     if (drag?.kind === "marquee") {
       if (event === "pointerup") {
         multi = drag.moved
@@ -2113,7 +2239,7 @@ function setZoom(v, anchor) {
     clientY: rect.top + rect.height / 2,
   };
   const before = canvasPoint(anchor);
-  zoom = Math.min(8, Math.max(0.25, v));
+  zoom = Math.min(MAX_ZOOM, Math.max(0.25, v));
   renderCanvas();
   const after = new DOMPoint(before.x, before.y).matrixTransform(
     $("#canvas").getScreenCTM(),
@@ -2250,6 +2376,8 @@ const menuActions = {
   ungroup,
   outline: outlineSelected,
   "edit-text": () => editText(selected),
+  "rotate-cw": () => rotateSelection(90),
+  "rotate-ccw": () => rotateSelection(-90),
   "edit-path": () => enterPathEdit(selected),
   "outline-edit": () => outlineSelected() && enterPathEdit(selected),
   "node-smooth": () => nodeAction("smooth"),
@@ -2350,6 +2478,9 @@ function menuEntries(onObject) {
           ["xor", "排他的 XOR", "", true],
         ]
       : []),
+    "-",
+    ["rotate-cw", "右に90°回転", "", has],
+    ["rotate-ccw", "左に90°回転", "", has],
     "-",
     ["front", "最前面へ", shortcut("]", true), has],
     ["forward", "前面へ", shortcut("]"), has],

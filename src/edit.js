@@ -1,3 +1,4 @@
+import { transform } from "./geometry.js";
 // Stacking order changes happen inside each layer: items of other layers and
 // unselected bridges (always drawn above shapes) keep their slots.
 export function arrangeItems(items, ids, mode) {
@@ -59,5 +60,45 @@ export function cloneItems(items, ids, makeId, offset = 5, layerId = null) {
     ids: originals
       .filter((i) => ids.includes(i.id))
       .map((i) => mapping.get(i.id)),
+  };
+}
+// Rotation turns an item about a world point: its origin swings around the
+// point and its angle grows by the same amount (kept within -180° < a ≤ 180°).
+export function normalizeAngle(deg) {
+  const a = ((deg % 360) + 360) % 360;
+  return a > 180 ? a - 360 : a;
+}
+export function rotateAbout(item, center, degrees) {
+  const r = (degrees * Math.PI) / 180,
+    c = Math.cos(r),
+    s = Math.sin(r),
+    dx = item.x - center.x,
+    dy = item.y - center.y;
+  return {
+    ...item,
+    x: center.x + dx * c - dy * s,
+    y: center.y + dx * s + dy * c,
+    rotation: normalizeAngle((item.rotation || 0) + degrees),
+  };
+}
+// Centre of a selection: a single item turns about the middle of its own
+// box; several turn about the middle of their combined world box.
+export function selectionCenter(items, boundsOf) {
+  const corners = items.flatMap((item) => {
+    const b = boundsOf(item);
+    return [
+      [b.x, b.y],
+      [b.x + b.w, b.y],
+      [b.x, b.y + b.h],
+      [b.x + b.w, b.y + b.h],
+      [b.x + b.w / 2, b.y + b.h / 2],
+    ].map(([x, y]) => transform({ x, y }, item));
+  });
+  if (items.length === 1) return corners[4];
+  const xs = corners.map((p) => p.x),
+    ys = corners.map((p) => p.y);
+  return {
+    x: (Math.min(...xs) + Math.max(...xs)) / 2,
+    y: (Math.min(...ys) + Math.max(...ys)) / 2,
   };
 }
