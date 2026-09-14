@@ -410,26 +410,13 @@ function addItem(type, x = 35, y = 45) {
     notify(e.message);
   }
 }
-// Saves through the browser's save dialog where it exists (Chrome/Edge), which
-// fixes the file type and extension. Elsewhere the file is downloaded as a
-// named File: some browsers and embedded views ignore the download name of
-// an anonymous Blob and save it under its random id without an extension.
-// Returns the saved name, or null when the dialog was cancelled.
-async function saveFile(name, data, type, extension, description) {
-  if (window.showSaveFilePicker) {
-    try {
-      const handle = await window.showSaveFilePicker({
-        suggestedName: name,
-        types: [{ description, accept: { [type]: [extension] } }],
-      });
-      const writable = await handle.createWritable();
-      await writable.write(new Blob([data], { type }));
-      await writable.close();
-      return handle.name;
-    } catch (e) {
-      if (e.name === "AbortError") return null;
-    }
-  }
+// Downloads a named File. Some browsers and embedded views ignore the
+// download name of an anonymous Blob and save it under its random id without
+// an extension. The object URL stays valid for five minutes so a browser that
+// asks where to save can still read it after the dialog. (Chrome's
+// showSaveFilePicker is not used: it can reject as "aborted" without showing
+// a dialog.) Returns the file name.
+function saveFile(name, data, type) {
   const url = URL.createObjectURL(new File([data], name, { type })),
     a = document.createElement("a");
   a.href = url;
@@ -438,7 +425,7 @@ async function saveFile(name, data, type, extension, description) {
   document.body.append(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  setTimeout(() => URL.revokeObjectURL(url), 5 * 60 * 1000);
   return name;
 }
 function withinBoard() {
@@ -456,7 +443,7 @@ function withinBoard() {
         ),
     );
 }
-async function exportFile() {
+function exportFile() {
   try {
     if (!withinBoard())
       throw Error(
@@ -467,17 +454,9 @@ async function exportFile() {
       throw Error(
         `${result.vanished} 個の輪郭がブリッジで完全に隠れています。ブリッジを小さくしてください。`,
       );
-    const name = await saveFile(
-      "typefab.svg",
-      exportSVG(project),
-      "image/svg+xml",
-      ".svg",
-      "SVG（レーザー加工用カットパス）",
-    );
+    const name = saveFile("typefab.svg", exportSVG(project), "image/svg+xml");
     notify(
-      name
-        ? `${name} を書き出しました · 切り残しなしの閉輪郭 ${result.untouched} 個`
-        : "書き出しをキャンセルしました。",
+      `${name} をダウンロードしました · 切り残しなしの閉輪郭 ${result.untouched} 個`,
     );
   } catch (e) {
     notify(e.message);
@@ -500,7 +479,7 @@ $("#app").innerHTML = `
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
-<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.10</span></span></footer>
+<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.10.1</span></span></footer>
 <input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,application/json">
 <dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
 <div id="context-menu" class="context-menu" role="menu" aria-label="編集メニュー" hidden></div>
@@ -1797,16 +1776,10 @@ function ungroup() {
 }
 $("#ungroup").onclick = ungroup;
 $("#export").onclick = exportFile;
-$("#save-project").onclick = async () => {
-  const name = await saveFile(
-    "typefab-project.json",
-    JSON.stringify(project, null, 2),
-    "application/json",
-    ".json",
-    "TypeFab プロジェクト",
+$("#save-project").onclick = () =>
+  notify(
+    `${saveFile("typefab-project.json", JSON.stringify(project, null, 2), "application/json")} をダウンロードしました。`,
   );
-  if (name) notify(`${name} に保存しました。`);
-};
 $("#open-project").onclick = () => $("#project-file").click();
 $("#new-project").onclick = () => {
   checkpoint();
