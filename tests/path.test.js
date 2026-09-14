@@ -127,12 +127,39 @@ test("SVG path data: M L H V C S Q T Z, absolute and relative", () => {
   for (const bad of [
     "L10 10",
     "M0 0 L1",
-    "M0 0 A5 5 0 0 1 10 0",
     "M0 0 X1 1",
     "M0 0 L1 1 <",
+    "M0 0 A5 5 0 2 1 10 0",
   ])
     assert.throws(() => parsePathData(bad), bad);
-  assert.throws(() => parsePathData("M0 0 A5 5 0 0 1 10 0"), /円弧/);
+});
+test("arcs (A) become cubics on the true ellipse, honouring the flags", () => {
+  const onCircle = (d, cx, cy, r) => {
+    const contours = pathContours(parsePathData(d));
+    for (const p of contours.flat())
+      assert.ok(Math.abs(Math.hypot(p.x - cx, p.y - cy) - r) < 0.02, d);
+    return contours.flat();
+  };
+  // Half circle from (0,0) to (20,0): sweep 1 goes through y = -10 (y down).
+  let pts = onCircle("M0 0 A10 10 0 0 1 20 0", 10, 0, 10);
+  assert.ok(Math.min(...pts.map((p) => p.y)) < -9.99);
+  pts = onCircle("M0 0 A10 10 0 0 0 20 0", 10, 0, 10);
+  assert.ok(Math.max(...pts.map((p) => p.y)) > 9.99);
+  // Large arc: three quarters of a circle, split into cubics of up to 90°.
+  const large = parsePathData("M10 0 A10 10 0 1 1 0 10");
+  assert.equal(nodeKeys(large).length, 4);
+  // From (10,0) to (0,10) the large clockwise arc runs around (10,10).
+  onCircle("M10 0 A10 10 0 1 1 0 10", 10, 10, 10);
+  onCircle("M10 0 A10 10 0 0 1 0 10", 0, 0, 10);
+  // Packed flags, relative arcs, rotated ellipses and too-small radii.
+  assert.deepEqual(
+    pathContours(parsePathData("M0 0 a10 10 0 0120 0")),
+    pathContours(parsePathData("M0 0 A10 10 0 0 1 20 0")),
+  );
+  const ellipse = pathContours(parsePathData("M0 0 A20 10 90 0 1 0 40")).flat();
+  assert.ok(Math.max(...ellipse.map((p) => Math.abs(p.x))) > 9.9);
+  onCircle("M0 0 A1 1 0 0 1 20 0", 10, 0, 10);
+  assert.equal(nodeKeys(parsePathData("M0 0 A0 5 0 0 1 20 0")).length, 2);
 });
 test("path data round-trips through M/L/C/Z and flattens like the source", () => {
   const d =
@@ -231,6 +258,9 @@ for (const [file, { font }] of Object.entries(fonts))
   });
 test("rectangles and ellipses become exact editable paths", () => {
   assert.equal(nodeKeys(shapePath("rect", 30, 20)).length, 4);
+  const oval = shapePath("rect", 30, 20, 8, 4);
+  assert.equal(nodeKeys(oval).length, 8);
+  assert.equal(bounds(pathContours(oval)).w, 30);
   const rounded = shapePath("rect", 30, 20, 5);
   assert.equal(nodeKeys(rounded).length, 8);
   assert.ok(

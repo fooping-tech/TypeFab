@@ -63,7 +63,7 @@
    - Delete / Backspace で選択ノードを削除
    - 右側または右クリックで「スムーズ」「コーナー」「直線化（ハンドル削除）」を切り替え
    - Esc / Enter / 「完了」で終了
-4. 右側の「SVG path d」にパスのd属性（オブジェクト座標・mm）が表示され、書き換えて反映することもできます。M L H V C S Q T Z（相対座標の小文字も可）を読み込み、内部では M / L / C / Z の3次ベジェに正規化します。円弧（A）は未対応です。
+4. 右側の「SVG path d」にパスのd属性（オブジェクト座標・mm）が表示され、書き換えて反映することもできます。M L H V C S Q T A Z（相対座標の小文字も可）を読み込み、内部では M / L / C / Z の3次ベジェに正規化します（円弧は90°以下ごとの3次ベジェに変換）。
 
 ドラッグ中は毎フレーム輪郭を作り直して表示し、ドラッグ1回が取り消し1回になります。ノードの追加・削除・種類の切り替え・d属性の書き換えもすべて取り消し・やり直しできます。
 
@@ -155,6 +155,16 @@
 - 2本指スワイプ／ホイールで上下左右にスクロールします。
 - ピンチまたはCtrl/⌘＋ホイールで25〜2000%にズームします。タッチ画面は2本指で移動・ピンチできます。
 
+### SVGを開く（読み込み）
+
+「開く」でSVGファイルを選ぶか、SVGファイルをキャンバスにドロップすると、その図形を**今のデザインに編集できるパスとして追加**します（プロジェクトの.jsonを開いた場合はデザイン全体を置き換えます）。取り消しで読み込み前に戻せます。
+
+- 対応する要素: path（M L H V C S Q T A Z）、rect（角丸 rx/ry）、circle、ellipse、line、polyline、polygon。g・a・入れ子のsvgと transform（matrix / translate / scale / rotate / skewX / skewY）を反映します。
+- 大きさ: viewBox と width/height の単位（mm・cm・in・pt・pc・px）からmmに換算します。単位のない値は96 dpiのピクセルとして扱います。TypeFabで書き出したSVGは同じ位置・同じ大きさで戻ります。
+- Inkscapeのレイヤー（TypeFabの書き出しも同じ形式）は同名のレイヤーに入れ、なければ作ります。それ以外は追加先レイヤー（◆）に入れます。同じレイヤーに入った図形は1つのグループになります。
+- 非表示の要素（display:none・visibility:hidden）、defs などの定義は読み込みません。文字（text）・画像（image）・参照（use）は読み込めないため、件数をメッセージで知らせます。文字は元のソフトでアウトライン化してから保存してください。
+- 読み込んだ図形はダブルクリックでノードを編集でき、ブリッジ・図形演算・ワープ・SVG書き出しにそのまま使えます。塗りのルール（evenodd）は反映しません。
+
 ### 編集と保存
 
 - 「アウトライン化」で選択中の文字を固定パスに変換します。SVG出力は、この操作をしなくても常にアウトラインです。
@@ -196,7 +206,7 @@ npm run build
 
 ローカル: http://127.0.0.1:5173/TypeFab/
 
-Vite + JavaScript + opentype.js + HarfBuzz WASM + Clipperの完全静的構成です。`src/geometry.js` が輪郭・ブリッジ・SVG出力、`src/project.js` がJSON入力検証、`src/main.js` が編集UIを担当します。`src/operations.js` は拡縮とブーリアン、`src/layers.js` はレイヤー、`src/typography.js` は文字組版、`src/grouping.js` はグループと文字・部位への分解、`src/edit.js` は重なり順とコピー、`src/warp.js` はワープ（エンベロープ変形）、`src/path.js` はパスのノード編集（SVG pathの読み書き、ベジェ曲線の近似、ノード操作）です。将来別リポジトリ名へ移す場合は `vite.config.js` の `base` を変更してください。
+Vite + JavaScript + opentype.js + HarfBuzz WASM + Clipperの完全静的構成です。`src/geometry.js` が輪郭・ブリッジ・SVG出力、`src/project.js` がJSON入力検証、`src/main.js` が編集UIを担当します。`src/operations.js` は拡縮とブーリアン、`src/layers.js` はレイヤー、`src/typography.js` は文字組版、`src/grouping.js` はグループと文字・部位への分解、`src/edit.js` は重なり順とコピー、`src/warp.js` はワープ（エンベロープ変形）、`src/path.js` はパスのノード編集（SVG pathの読み書き、ベジェ曲線の近似、ノード操作）、`src/svgimport.js` はSVGファイルの読み込みです。将来別リポジトリ名へ移す場合は `vite.config.js` の `base` を変更してください。
 
 ## GitHub Pages
 

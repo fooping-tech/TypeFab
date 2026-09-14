@@ -139,8 +139,73 @@ export function pathFromCommands(commands) {
   }
   return markSmooth(b.path.filter((s) => s.nodes.length > 1));
 }
-// SVG path data with M L H V C S Q T Z (absolute and relative). Quadratic
-// segments become the equivalent cubics.
+// Elliptical arc (SVG A) as cubics of at most 90° each, following the SVG
+// implementation notes (endpoint to centre parameterisation). Returns null
+// when a radius is zero, which SVG draws as a straight line.
+function arcCurves(p1, rx, ry, degrees, large, sweep, p2) {
+  if (exact(p1, p2)) return [];
+  rx = Math.abs(rx);
+  ry = Math.abs(ry);
+  if (!rx || !ry) return null;
+  const phi = (degrees * Math.PI) / 180,
+    cos = Math.cos(phi),
+    sin = Math.sin(phi),
+    hx = (p1.x - p2.x) / 2,
+    hy = (p1.y - p2.y) / 2,
+    x1 = cos * hx + sin * hy,
+    y1 = -sin * hx + cos * hy,
+    lambda = (x1 * x1) / (rx * rx) + (y1 * y1) / (ry * ry);
+  if (lambda > 1) {
+    rx *= Math.sqrt(lambda);
+    ry *= Math.sqrt(lambda);
+  }
+  const num = rx * rx * ry * ry - rx * rx * y1 * y1 - ry * ry * x1 * x1,
+    den = rx * rx * y1 * y1 + ry * ry * x1 * x1,
+    coef = (large === sweep ? -1 : 1) * Math.sqrt(Math.max(0, num / den)),
+    cx1 = (coef * rx * y1) / ry,
+    cy1 = (-coef * ry * x1) / rx,
+    cx = cos * cx1 - sin * cy1 + (p1.x + p2.x) / 2,
+    cy = sin * cx1 + cos * cy1 + (p1.y + p2.y) / 2,
+    angle = (ux, uy, vx, vy) =>
+      Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy),
+    start = angle(1, 0, (x1 - cx1) / rx, (y1 - cy1) / ry);
+  let delta = angle(
+    (x1 - cx1) / rx,
+    (y1 - cy1) / ry,
+    (-x1 - cx1) / rx,
+    (-y1 - cy1) / ry,
+  );
+  if (!sweep && delta > 0) delta -= 2 * Math.PI;
+  else if (sweep && delta < 0) delta += 2 * Math.PI;
+  const n = Math.max(1, Math.ceil(Math.abs(delta) / (Math.PI / 2) - 1e-9)),
+    step = delta / n,
+    t = (4 / 3) * Math.tan(step / 4),
+    at = (a) =>
+      P(
+        cx + rx * Math.cos(a) * cos - ry * Math.sin(a) * sin,
+        cy + rx * Math.cos(a) * sin + ry * Math.sin(a) * cos,
+      ),
+    tangent = (a) =>
+      P(
+        -rx * Math.sin(a) * cos - ry * Math.cos(a) * sin,
+        -rx * Math.sin(a) * sin + ry * Math.cos(a) * cos,
+      ),
+    curves = [];
+  for (let k = 0; k < n; k++) {
+    const a0 = start + k * step,
+      a1 = a0 + step,
+      q0 = k ? curves[k - 1][2] : p1,
+      q3 = k === n - 1 ? P(p2.x, p2.y) : at(a1);
+    curves.push([
+      add(q0, mul(tangent(a0), t)),
+      sub(q3, mul(tangent(a1), t)),
+      q3,
+    ]);
+  }
+  return curves;
+}
+// SVG path data with M L H V C S Q T A Z (absolute and relative). Quadratic
+// segments become the equivalent cubics, arcs cubics of up to 90°.
 export function parsePathData(d) {
   if (typeof d !== "string" || d.length > 2_000_000)
     throw Error("SVGパスが不正です。");
@@ -160,6 +225,15 @@ export function parsePathData(d) {
     if (t === undefined || /^[a-zA-Z]$/.test(t))
       throw Error("SVGパスの数値が足りません。");
     return Number(t);
+  };
+  // Arc flags may be written without separators ("a5 5 0 0110 0").
+  const flag = () => {
+    const t = tokens[i];
+    if (t === undefined || !/^[01]/.test(t))
+      throw Error("円弧（A）のフラグは 0 か 1 です。");
+    if (t.length === 1) i++;
+    else tokens[i] = t.slice(1);
+    return t[0] === "1";
   };
   while (i < tokens.length) {
     if (/^[a-zA-Z]$/.test(tokens[i])) cmd = tokens[i++];
@@ -217,11 +291,18 @@ export function parsePathData(d) {
     } else if (C === "Z") {
       b.close();
       cur = start;
-    } else if (C === "A")
-      throw Error(
-        "円弧（A）コマンドは未対応です。M/L/H/V/C/S/Q/T/Z を使ってください。",
-      );
-    else throw Error(`未対応のパスコマンド: ${cmd}`);
+    } else if (C === "A") {
+      const rx = num(),
+        ry = num(),
+        angle = num(),
+        large = flag(),
+        sweep = flag(),
+        p = pt(),
+        curves = arcCurves(cur, rx, ry, angle, large, sweep, p);
+      if (!curves) b.line(cur, p);
+      else for (const [c1, c2, q] of curves) b.curve(cur, c1, c2, q);
+      cur = p;
+    } else throw Error(`未対応のパスコマンド: ${cmd}`);
     if (![cur.x, cur.y].every(Number.isFinite))
       throw Error("SVGパスの数値が不正です。");
     lastC = c2;
@@ -294,7 +375,9 @@ export function transformPath(path, map) {
 }
 // Exact paths for the basic shapes (ellipse arcs as the standard 4 cubics).
 const KAPPA = 0.5522847498307936;
-export function shapePath(type, w, h, radius = 0) {
+// A rectangle may have different horizontal and vertical corner radii (as SVG
+// rx/ry); a single radius is clamped to half the shorter side.
+export function shapePath(type, w, h, radius = 0, radiusY) {
   if (type === "circle") {
     const cx = w / 2,
       cy = h / 2,
@@ -312,19 +395,24 @@ export function shapePath(type, w, h, radius = 0) {
       },
     ];
   }
-  const r = Math.min(radius || 0, w / 2, h / 2);
-  if (!(r > 0))
+  const rx =
+      radiusY === undefined
+        ? Math.min(radius || 0, w / 2, h / 2)
+        : Math.min(radius || 0, w / 2),
+    ry = radiusY === undefined ? rx : Math.min(radiusY || 0, h / 2);
+  if (!(rx > 0 && ry > 0))
     return [{ closed: true, nodes: [P(0, 0), P(w, 0), P(w, h), P(0, h)] }];
-  const k = KAPPA * r,
+  const kx = KAPPA * rx,
+    ky = KAPPA * ry,
     raw = [
-      { x: r, y: 0, in: P(r - k, 0) },
-      { x: w - r, y: 0, out: P(w - r + k, 0) },
-      { x: w, y: r, in: P(w, r - k) },
-      { x: w, y: h - r, out: P(w, h - r + k) },
-      { x: w - r, y: h, in: P(w - r + k, h) },
-      { x: r, y: h, out: P(r - k, h) },
-      { x: 0, y: h - r, in: P(0, h - r + k) },
-      { x: 0, y: r, out: P(0, r - k) },
+      { x: rx, y: 0, in: P(rx - kx, 0) },
+      { x: w - rx, y: 0, out: P(w - rx + kx, 0) },
+      { x: w, y: ry, in: P(w, ry - ky) },
+      { x: w, y: h - ry, out: P(w, h - ry + ky) },
+      { x: w - rx, y: h, in: P(w - rx + kx, h) },
+      { x: rx, y: h, out: P(rx - kx, h) },
+      { x: 0, y: h - ry, in: P(0, h - ry + ky) },
+      { x: 0, y: ry, out: P(0, ry - ky) },
     ],
     nodes = [];
   // At the full radius the straight sides vanish and their ends meet.

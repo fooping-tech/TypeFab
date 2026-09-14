@@ -38,6 +38,7 @@ import {
   expandGroups,
   normalizeGroups,
 } from "./grouping.js";
+import { svgShapes, shapeItem, parseXML, fromDOM } from "./svgimport.js";
 import {
   arrangeItems,
   cloneItems,
@@ -194,17 +195,26 @@ function notify(message) {
     7000,
   );
 }
+function saveNow() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  try {
+    localStorage.setItem("typefab-v1", JSON.stringify(project));
+    $("#save-status").textContent = "このブラウザに保存済み";
+  } catch {
+    $("#save-status").textContent = "自動保存できません · JSON保存を使用";
+  }
+}
+// Autosave is debounced; a pending save is written when the page is hidden
+// or closed, so the last edit is not lost.
 function persist() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem("typefab-v1", JSON.stringify(project));
-      $("#save-status").textContent = "このブラウザに保存済み";
-    } catch {
-      $("#save-status").textContent = "自動保存できません · JSON保存を使用";
-    }
-  }, 200);
+  saveTimer = setTimeout(saveNow, 200);
 }
+for (const event of ["pagehide", "visibilitychange"])
+  window.addEventListener(event, () => {
+    if (saveTimer && (event === "pagehide" || document.hidden)) saveNow();
+  });
 function checkpoint() {
   history.push(JSON.stringify(project));
   if (history.length > 60) history.shift();
@@ -464,7 +474,7 @@ function exportFile() {
 }
 
 $("#app").innerHTML = `
-<header><a class="brand" href="./"><span class="brand-mark">t<span>f</span></span>TypeFab<span class="beta">BETA</span></a><div class="document-title"><span id="project-name"></span><small id="save-status">ローカルプロジェクト</small></div><div class="header-actions"><button id="new-project" title="新規プロジェクト">新規</button><button id="open-project">開く</button><button id="save-project">保存</button><button id="export" class="primary">↗ SVGを書き出す</button></div></header>
+<header><a class="brand" href="./"><span class="brand-mark">t<span>f</span></span>TypeFab<span class="beta">BETA</span></a><div class="document-title"><span id="project-name"></span><small id="save-status">ローカルプロジェクト</small></div><div class="header-actions"><button id="new-project" title="新規プロジェクト">新規</button><button id="open-project" title="TypeFabプロジェクト（.json）を開く、またはSVGの図形を読み込む（キャンバスへのドロップも可）">開く</button><button id="save-project">保存</button><button id="export" class="primary">↗ SVGを書き出す</button></div></header>
 <div class="workspace-tabs"><span class="workspace-title">DESIGN WORKSPACE</span><span class="tab active">スケッチ</span><span class="subtle">文字から、ものづくりへ。</span><button id="help-button">? 使い方</button></div>
 <nav class="toolbar" aria-label="スケッチツール"><div class="tool-group">${Object.entries(
   labels,
@@ -479,9 +489,9 @@ $("#app").innerHTML = `
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
-<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.10.1</span></span></footer>
-<input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,application/json">
-<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
+<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.11</span></span></footer>
+<input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,.svg,application/json,image/svg+xml">
+<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「開く」でSVGの図形も読み込めます。「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
 <div id="context-menu" class="context-menu" role="menu" aria-label="編集メニュー" hidden></div>
 <div id="text-editor" class="text-editor" hidden><textarea id="canvas-text" aria-label="文字を編集" maxlength="500" rows="2"></textarea><small>入力はすぐに反映 · Esc / ${shortcut("Enter")} で確定</small></div>`;
 
@@ -571,7 +581,7 @@ function pathPanel(i) {
     one
       ? `<h4>選択ノード <span>mm</span></h4><div class="fields"><label>X<input data-node-prop="x" type="number" step="0.1" value="${Number(world.x.toFixed(3))}"></label><label>Y<input data-node-prop="y" type="number" step="0.1" value="${Number(world.y.toFixed(3))}"></label></div>`
       : ""
-  }<label class="full-label path-d">SVG path d <small>オブジェクト座標 mm · M L H V C S Q T Z</small><textarea id="path-d" spellcheck="false" rows="5" aria-label="SVG path d">${esc(toPathData(path))}</textarea></label>${pending ? `<p class="note">${i.warp ? "ワープした形" : i.type === "rect" ? "長方形" : i.type === "circle" ? "楕円" : "この輪郭"}は最初の編集で編集用パスに変換されます。</p>` : ""}<button id="path-done" class="wide-button warp-done">完了</button><p class="note">クリックで選択、Shift+クリックで追加、空白からドラッグで範囲選択。アンカー・ハンドルをドラッグして変形します（Alt+ハンドルでコーナー化）。パス上をダブルクリックでノード追加、Deleteで削除、Escで終了。</p></section>`;
+  }<label class="full-label path-d">SVG path d <small>オブジェクト座標 mm · M L H V C S Q T A Z</small><textarea id="path-d" spellcheck="false" rows="5" aria-label="SVG path d">${esc(toPathData(path))}</textarea></label>${pending ? `<p class="note">${i.warp ? "ワープした形" : i.type === "rect" ? "長方形" : i.type === "circle" ? "楕円" : "この輪郭"}は最初の編集で編集用パスに変換されます。</p>` : ""}<button id="path-done" class="wide-button warp-done">完了</button><p class="note">クリックで選択、Shift+クリックで追加、空白からドラッグで範囲選択。アンカー・ハンドルをドラッグして変形します（Alt+ハンドルでコーナー化）。パス上をダブルクリックでノード追加、Deleteで削除、Escで終了。</p></section>`;
 }
 function renderProperties() {
   const i = selectedItem();
@@ -1831,13 +1841,18 @@ $("#font-file").onchange = async (e) => {
   }
   e.target.value = "";
 };
-$("#project-file").onchange = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
+// 「開く」 and dropped files: a .json project replaces the design, an SVG
+// adds its shapes to it as editable paths.
+async function openFile(file) {
   try {
     if (file.size > 20 * 1024 * 1024)
-      throw Error("プロジェクトは20 MB以下にしてください。");
-    const next = validateProject(JSON.parse(await file.text()));
+      throw Error("ファイルは20 MB以下にしてください。");
+    const text = await file.text();
+    if (/\.svg$/i.test(file.name) || file.type === "image/svg+xml") {
+      importSVG(text, file.name);
+      return;
+    }
+    const next = validateProject(JSON.parse(text));
     checkpoint();
     project = next;
     selectItem(null);
@@ -1849,8 +1864,94 @@ $("#project-file").onchange = async (e) => {
   } catch (error) {
     notify(`開けません: ${error.message}`);
   }
+}
+$("#project-file").onchange = async (e) => {
+  const file = e.target.files[0];
   e.target.value = "";
+  if (file) await openFile(file);
 };
+function readSVG(text) {
+  if (typeof DOMParser !== "function") return parseXML(text);
+  const doc = new DOMParser().parseFromString(text, "image/svg+xml");
+  if (
+    doc.getElementsByTagName("parsererror").length ||
+    doc.documentElement?.localName !== "svg"
+  )
+    throw Error("SVGとして読み込めません。XMLの形式を確認してください。");
+  return fromDOM(doc.documentElement);
+}
+// SVG shapes become fixed paths at their millimetre positions. Inkscape
+// layers (as TypeFab exports) go to layers of the same name; the rest to the
+// active layer. Shapes arriving together in a layer form one group.
+function importSVG(text, fileName) {
+  const { shapes, skipped, invalid } = svgShapes(readSVG(text));
+  if (!shapes.length)
+    throw Error(
+      "読み込める図形がありません（パス・長方形・円・楕円・線・折れ線・多角形に対応）。",
+    );
+  const active = project.layers.find((l) => l.id === activeLayer);
+  if (!active?.visible || active.locked)
+    throw Error("表示中のロックされていないレイヤーを選んでください。");
+  if (project.items.length + shapes.length > 2000)
+    throw Error("図形が多すぎます。オブジェクトは全体で2000個までです。");
+  const next = structuredClone(project),
+    layers = new Map();
+  const items = shapes.map((shape) => {
+    if (shape.layer && !layers.has(shape.layer)) {
+      let layer = next.layers.find(
+        (l) => l.name === shape.layer && l.visible && !l.locked,
+      );
+      if (!layer && next.layers.length < 100) {
+        layer = {
+          id: uid(),
+          name: shape.layer.slice(0, 100),
+          visible: true,
+          locked: false,
+        };
+        next.layers.push(layer);
+      }
+      layers.set(shape.layer, layer?.id ?? activeLayer);
+    }
+    return shapeItem(shape, uid(), layers.get(shape.layer) ?? activeLayer);
+  });
+  for (const layerId of new Set(items.map((i) => i.layerId))) {
+    const members = items.filter((i) => i.layerId === layerId);
+    if (members.length > 1) {
+      const groupId = uid();
+      for (const item of members) item.groupId = groupId;
+    }
+  }
+  next.items.push(...items);
+  validateProject(JSON.parse(JSON.stringify(next)));
+  checkpoint();
+  project = next;
+  multi = items.map((i) => i.id);
+  selected = multi.at(-1);
+  preview = false;
+  tool = "select";
+  warpId = null;
+  pathEdit = null;
+  commit();
+  const notes = [
+    ...Object.entries(skipped).map(([kind, n]) => `${kind} ${n} 個`),
+    ...(invalid ? [`読めない図形 ${invalid} 個`] : []),
+  ];
+  notify(
+    `${fileName} から ${items.length} 個の図形をパスとして読み込みました。${notes.length ? `読み込めないもの: ${notes.join("・")}（文字はアウトライン化して保存してください）。` : "ダブルクリックでノードを編集できます。"}`,
+  );
+}
+// Files dropped on the canvas open like 「開く」.
+$("#canvas-scroll").addEventListener("dragover", (e) => {
+  if (loading || ![...e.dataTransfer.types].includes("Files")) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "copy";
+});
+$("#canvas-scroll").addEventListener("drop", (e) => {
+  const file = e.dataTransfer.files[0];
+  if (loading || !file) return;
+  e.preventDefault();
+  openFile(file);
+});
 function canvasPoint(e) {
   const matrix = $("#canvas").getScreenCTM();
   return new DOMPoint(e.clientX, e.clientY).matrixTransform(matrix.inverse());
