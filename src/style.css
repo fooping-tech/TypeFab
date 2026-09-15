@@ -1514,8 +1514,21 @@ dialog .primary {
   font-weight: 650;
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   padding: 0 12px 6px;
   color: #253748;
+}
+.panel-subheading .eyebrow {
+  margin-right: auto;
+}
+.panel-subheading .text-link {
+  padding: 2px 6px;
+  font-size: 10px;
+}
+.cad-panel .cad-actions button.danger {
+  color: #b83a2c;
+  border-color: #e7b9b3;
 }
 .dimension-row {
   display: flex;

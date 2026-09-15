@@ -224,6 +224,7 @@ const icons = {
   text: "T",
   rect: "▭",
   circle: "◯",
+  polygon: "⬡",
   line: "╱",
   bridge: "⊣⊢",
 };
@@ -384,7 +385,9 @@ const CAD_TOOLS = {
   measure: { group: "INSPECT", label: "計測", icon: "⟷", hint: "2点をクリックで距離・ΔX・ΔY。線分・円をクリックで長さ・角度・半径" },
   dimension: { group: "INSPECT", label: "寸法", icon: "⊢⊣", hint: "右側で種類を選び、点をクリックして寸法を置く（参照寸法・SVGには出力しません）" },
 };
-const CAD_GROUPS = ["CREATE", "MODIFY", "PATTERN", "INSPECT"];
+// The polygon tool sits in the first row next to the ellipse; the second row
+// holds the modify / pattern / inspect tools.
+const CAD_GROUPS = ["MODIFY", "PATTERN", "INSPECT"];
 let cad = null,
   selectedAnnotation = null;
 const cadParams = {
@@ -605,6 +608,9 @@ $("#app").innerHTML = `
 <nav class="toolbar" aria-label="スケッチツール"><div class="tool-group">${Object.entries(
   labels,
 )
+  .flatMap((entry) =>
+    entry[0] === "circle" ? [entry, ["polygon", CAD_TOOLS.polygon.label]] : [entry],
+  )
   .map(
     ([id, label]) =>
       `<button data-tool="${id}" class="tool" title="${label}"><span class="tool-icon">${icons[id]}</span>${label}</button>`,
@@ -843,6 +849,13 @@ function renderProperties() {
   const i = selectedItem();
   if (cad) {
     $("#properties").innerHTML = cadPanel();
+    $("#board-width").value = project.width;
+    $("#board-height").value = project.height;
+    return;
+  }
+  const dim = project.annotations?.find((d) => d.id === selectedAnnotation);
+  if (dim) {
+    $("#properties").innerHTML = `<section class="cad-panel"><div class="object-type">REFERENCE / 寸法</div><h3>${esc(DIMENSION_LABELS[dim.dimensionType])} ${esc(dimensionLabel(dim))}</h3><dl class="measure">${dim.points.map((q, k) => `<dt>点 ${k + 1}</dt><dd>${q.x.toFixed(2)}, ${q.y.toFixed(2)} mm</dd>`).join("")}</dl><p class="note">参照寸法です。値は置いたときの形状から計算したもので、形状を変えても追従せず、加工用SVGにも出力しません。</p><div class="cad-actions"><button id="annotation-delete" class="danger">この寸法を削除</button><button id="annotations-clear">寸法をすべて消す</button></div><p class="note">Delete キーでも削除できます。</p></section>`;
     $("#board-width").value = project.width;
     $("#board-height").value = project.height;
     return;
@@ -1269,6 +1282,8 @@ $("#properties").addEventListener("focusout", (e) => {
   if (current?.type === "text") e.target.value = current.text;
 });
 $("#properties").addEventListener("click", (e) => {
+  if (e.target.closest("#annotation-delete")) return removeAnnotation(selectedAnnotation);
+  if (e.target.closest("#annotations-clear")) return clearAnnotations();
   if (e.target.closest("#cad-confirm")) return cadConfirm();
   if (e.target.closest("#cad-cancel")) return cadCancel();
   if (e.target.closest("#cad-clear") && cad) {
@@ -1723,7 +1738,7 @@ function cadPanel() {
               : `<dt>計測</dt><dd>${cad.points.length ? "2点目をクリック" : "1点目をクリック"}</dd>`
     }${box ? `<dt>選択の幅</dt><dd>${box.width.toFixed(2)} mm</dd><dt>選択の高さ</dt><dd>${box.height.toFixed(2)} mm</dd>` : ""}</dl><div class="cad-actions"><button id="cad-clear">クリア</button></div><p class="note">頂点の近くをクリックすると頂点に吸着します。Esc または計測の終了で表示を消します。</p>`;
   } else if (t === "dimension")
-    body = `<label class="full-label">種類<select data-cad="type">${DIMENSION_TYPES.map((k) => `<option value="${k}" ${cadParams.dimension.type === k ? "selected" : ""}>${DIMENSION_LABELS[k]}</option>`).join("")}</select></label><p class="note">${cad.points.length ? `${cad.points.length} 点目まで指定。` : ""}${cadParams.dimension.type === "angle" ? "頂点、次に2本の方向の点をクリック" : ["radius", "diameter"].includes(cadParams.dimension.type) ? "中心、次に円周上の点をクリック" : "2点をクリック"}。参照寸法です：値を変えても形状は変わらず、加工用SVGには含まれません。寸法は左の一覧から削除できます（Delete）。</p>`;
+    body = `<label class="full-label">種類<select data-cad="type">${DIMENSION_TYPES.map((k) => `<option value="${k}" ${cadParams.dimension.type === k ? "selected" : ""}>${DIMENSION_LABELS[k]}</option>`).join("")}</select></label><p class="note">${cad.points.length ? `${cad.points.length} 点目まで指定。` : ""}${cadParams.dimension.type === "angle" ? "頂点、次に2本の方向の点をクリック" : ["radius", "diameter"].includes(cadParams.dimension.type) ? "中心、次に円周上の点をクリック" : "2点をクリック"}。参照寸法です：値を変えても形状は変わらず、加工用SVGには含まれません。置いた寸法はクリックして選び、Delete または右側のボタンで削除できます。</p>${project.annotations?.length ? `<div class="cad-actions"><button id="annotations-clear">寸法をすべて消す（${project.annotations.length}）</button></div>` : ""}`;
   return `<section class="cad-panel"><div class="object-type">${esc(info.group)} / 2D CAD</div><h3>${esc(info.label)}</h3>${body}${cad.error ? `<p class="cad-error">${esc(cad.error)}</p>` : ""}<div class="cad-actions">${["mirror", "rpattern", "cpattern", "offset"].includes(t) ? `<button id="cad-confirm" class="primary" ${confirmable ? "" : "disabled"}>確定</button>` : ""}<button id="cad-cancel">${["trim", "extend", "fillet", "chamfer", "measure", "dimension"].includes(t) ? "終了" : "キャンセル"}</button></div><p class="note">${esc(info.hint)}</p></section>`;
 }
 // Ghost previews, tool markers and reference dimensions on the canvas.
@@ -1796,10 +1811,20 @@ function annotationsOverlay(scale) {
     })
     .join("");
 }
+function clearAnnotations() {
+  if (!project.annotations?.length) return;
+  checkpoint();
+  delete project.annotations;
+  selectedAnnotation = null;
+  cad = null;
+  tool = tool === "dimension" ? "select" : tool;
+  commit();
+  notify("寸法をすべて消しました（取り消し可）。");
+}
 function annotationRows() {
   const list = project.annotations ?? [];
   if (!list.length) return "";
-  return `<div class="dimension-list"><div class="panel-subheading">寸法 <span class="eyebrow">REFERENCE</span></div>${list
+  return `<div class="dimension-list"><div class="panel-subheading">寸法 <span class="eyebrow">REFERENCE</span><button data-annotations-clear class="text-link" title="寸法をすべて消す">すべて消す</button></div>${list
     .map(
       (d) =>
         `<div class="dimension-row ${d.id === selectedAnnotation ? "selected" : ""}"><button data-annotation="${esc(d.id)}" class="layer">⊢⊣ ${esc(DIMENSION_LABELS[d.dimensionType])} ${esc(dimensionLabel(d))}</button><button data-annotation-delete="${esc(d.id)}" title="寸法を削除" aria-label="寸法を削除">×</button></div>`,
@@ -1815,6 +1840,7 @@ function removeAnnotation(id) {
   commit();
 }
 $("#layers").addEventListener("click", (e) => {
+  if (e.target.closest("[data-annotations-clear]")) return clearAnnotations();
   const del = e.target.closest("[data-annotation-delete]");
   if (del) return removeAnnotation(del.dataset.annotationDelete);
   const row = e.target.closest("[data-annotation]");
