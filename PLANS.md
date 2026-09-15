@@ -320,3 +320,110 @@
 - Implemented: selecting a dimension on the canvas or in the list shows an inspector panel (type, value, points) with 「この寸法を削除」 and 「寸法をすべて消す」; the 寸法 list header has 「すべて消す」 and the dimension tool panel shows the same button with the count; clearing is one undo step. The polygon button now sits in the first toolbar row directly after 楕円 (same size and style); the CAD row shows MODIFY / PATTERN / INSPECT (10 tools). README updated.
 - `npm test`: 145 passed; build passed. Real Chromium (production preview): the CAD suite grew to 59 checks (first-row order select/text/rect/circle/polygon/line/bridge, 10 tools in the second row, canvas click on a dimension opens the delete panel, inspector delete, すべて消す removes all and undo restores them) — all passed.
 - Deployed: commit `13785ce` pushed to `main` → https://github.com/fooping-tech/TypeFab/actions/runs/34951574169 — success. Public `/TypeFab/app/` HTTP 200; the 59-check CAD suite passed against the public site.
+
+## Smart Connect — Issue #5 実装計画（2026-09-15）
+
+### 要求・今回の成果物
+- 出典: https://github.com/fooping-tech/TypeFab/issues/5 （本文・コメントを取得して確認。コメントなし）。文字自体を切り出すため、文字内部・文字間の材料を接続し、一体の閉じた輪郭として出力する。
+- 今回は実装計画の作成。以下は未実装・未検証の計画であり、過去のテスト件数や公開結果を本機能の検証結果として扱わない。
+- 既存Stencil Bridgeは切断領域・カット線を削る機能として維持。Smart Connectは文字材料 T に接続形状 C を加える `Union(T, C)` とし、別のコマンド・編集状態で扱う。
+
+### 現状と再利用する処理
+| 現在のコード | 利用方法・注意点 |
+| --- | --- |
+| `src/grouping.js` の非公開 `filledRegions()` / `splitParts()` | 既にClipper PolyTreeで外周と穴をまとめ、穴内の独立した材料も分離している。連結成分抽出の第一候補として共通化する。 |
+| `src/geometry.js` の `contourTree()` | 輪郭の包含関係の参考。輪郭数を材料の部品数として数えない。重なりをUnionした後の材料領域を用いる。 |
+| 同 `nearestConnection()`（非公開） | 点→線分投影による最短候補。共有するなら既存Bridgeの出力を回帰検証し、Smart Connectでは複数候補へ拡張する。 |
+| `src/operations.js` の `booleanContours()` | nonzero規則・整数倍率10000を使うUnion。単一入力の正規化は現在のAPIでは不可なので、共通の低水準処理を追加する。 |
+| `src/typography.js` の `layoutGlyphs()` | 字形・クラスタ単位の所属情報を取得する。最終輪郭へ同じ長体・Warp・配置変換を適用し、所属を対応づける。 |
+| `src/main.js` のCADプレビュー・`checkpoint()` / `commit()` | project外のプレビュー、確定1回のUndo、キャンセルの作法を踏襲する。 |
+| `src/path.js` / `src/project.js` | 最終Unionを通常の編集可能なoutlineへ変換し、既存v1/v2 JSONとSVG経路を利用する。 |
+- V1は既存の素のJavaScript + Clipperで実装する。Paper.js、別のBooleanライブラリ、Skeletonライブラリ、MLは追加しない。
+
+### V1の仕様判断
+- 対象: 選択された編集可能なtextまたは閉じたoutline（複数選択可）。非表示・ロック・線分・開いた輪郭・Bridgeを含む選択は理由を示して実行不可。複数レイヤーを跨ぐ入力はV1では実行不可とし、結果の所属を曖昧にしない。
+- 文字所属のない固定outlineは幾何的な連結成分だけで接続する。「文字内／隣接文字」設定は無効化して説明し、文字所属を座標から推測して断定しない。日本語優先は手動指定可能にする。
+- 幅1.5 mm、Max gap 10 mm、Style Autoを初期値とする。幅は接続部の最小設計幅（Taperedでは中央幅）。Max gapは材料表面間の距離で判定し、曲線の迂回長にも上限を設ける。NaN・非正数・過大な値は入力検証する。
+- 「全体を1つ」は初期ONで文字内／文字間接続を必須にする。個別設定をOFFにする場合は「全体を1つ」もOFFにし、連結する対象範囲を明示する。隣接文字は組版順の直前・直後の可視字形（空白を飛ばす）。改行・縦書きの列を跨ぐ接続は「全体を1つ」の場合だけ候補に含め、Max gapは常に守る。
+- 全体接続ONで候補グラフが分断される場合、未接続部品数・該当箇所・原因を表示してApplyを無効化する。距離・幅・穴の制約を黙って緩めない。全体接続OFFでは設定対象の接続結果と残存部品数を表示する。
+- 手動調整はV1では「確定前」に全操作を提供する。確定後は通常のoutlineとPath Editで編集し、Connectorとしての再編集はV1.5以降。Apply時に文字編集・元Warp設定を焼き込むことを説明し、Undoで元データへ戻せるようにする。
+- 既存の対象付きBridgeを持つ入力、または対象範囲に作用する全体Bridgeがある場合はV1の実行を止めて理由を示す。所有先を勝手に変更したり、切断済み形状を一体形状として扱ったりしない。
+- IssueのV1/V1.5記述に従い、V1は方向・細端候補を優先したSmooth / Tapered / RoundedとStraightフォールバック。専用Stroke Extendスタイルと精密なlocal thickness推定はV1.5。ただし日本語で自然な画の延長候補を優先する評価と目視確認はV1から必須とし、矩形を並べるだけでは完了にしない。
+
+### 実装順序と各段階の完了条件
+1. **材料成分解析と入力の固定**
+   - 新規 `src/polygon.js`（仮）に正規化・PolyTree成分抽出を集約し、既存 `filledRegions()` を利用側へ整理する。既存Bridgeの判定ロジックは不用意に置き換えない。
+   - 最終ワールド座標の輪郭をUnionし、`componentId / outer / holes / sourceItemIds / glyphIds / bounds` を作る。重なった字形は同一成分、穴は空隙、穴内の独立材料は別成分とする。
+   - 点だけの接触を有効な接続と数えない。辺共有・有限幅の重なり・極細接触を区別する試験を先に作り、必要な幅を確保できない接続は候補追加または明示的失敗にする。
+   - 完了: 穴・入れ子・重なり・離れた点・ワープ後の実座標を持つfixtureで成分と所属が正しく得られる。
+2. **複数候補の生成と評価**
+   - 新規 `src/smart-connect.js` に純粋関数として実装。一定のmm間隔で輪郭をsampleし、近傍から接線・曲率・端部らしさを推定。細い先端の両側輪郭から延長軸を推定し、輪郭接線そのものと筆画の伸びる方向を混同しない。
+   - 境界boxとMax gapで成分対を絞り、最短候補に加えて端部・直線端・方向の良い候補を複数保持する。尖った先端を好む評価と接合部の鋭角を避ける評価を分離し、実際の接合は先端より少し太い位置へ戻す。
+   - 距離/Max gap、角度、曲率を無次元化し、距離・方向・接合角・細すぎる根元・負形状への侵入・交差・不自然な曲率を評価する。日本語は端部軸と接続先方向の整合を加点する。
+   - 穴の不要な閉塞・無関係な輪郭の横断・自己交差は単なる低得点でなく棄却条件。穴内の材料をつなぐ場合の負形状変更は必要な接続帯に限定し、元の穴領域の完全消失を避ける。可読性は幾何的な代理指標と目視評価に分ける。
+   - 完了: 最短候補より方向の良い候補を選べるfixture、同点時の安定順序、候補なしの診断がある。
+3. **Connector形状と最小接続の選択**
+   - Smooth: 3次Bezier中心線を帯にする。Tapered: 根元を太くし中央を指定幅にする。Rounded: カプセル。Straight: 最終フォールバック。Autoでは候補と形状を組にして評価する。
+   - 両端を元材料内部へ有限量重ねる。曲線平坦化は既存0.02 mmを基準に、幅に対して粗すぎる場合は細分化または入力拒否する。Clipper整数丸めで根元や中央幅が消えないことを検証する。
+   - 有効候補を辺としたKruskal/Union-Find相当で選択する。既に連結した成分へ余分な辺を足さず、採用済みConnectorとの交差も検査して別候補を試す。
+   - 衝突制約で貪欲選択が詰まる場合は、上限付きの別候補探索を行う。探索上限到達は「自動生成できなかった」と区別し、幾何的に不可能と断言しない。
+   - 2成分ずつを結ぶ制約下で初期N成分に対しN−1本を基準にする。最後にUnion後の成分数・穴・接合幅を再検査し、除去しても接続が保たれる余分なConnectorを取り除く。MSTだけで最終形状の連結を保証しない。
+   - 完了: 全体ONの成功時に材料成分1、不要な辺なし、閉じた非自己交差輪郭、失敗時に原因が返る。
+4. **Previewと手動調整**
+   - `src/main.js` / `src/style.css` に独立したSmart Connect入口・設定パネル・オーバーレイを追加する。必要なら専用UIモジュールへ分離する。
+   - 一時状態に入力snapshot、設定、成分、候補、選択辺、手動変更、Union結果、診断を保持する。Preview・設定変更・キャンセルでproject、Undo履歴、自動保存を変更しない。
+   - ConnectorとUnion後輪郭を切替表示し、部品数の前後・接続本数・未接続箇所を示す。Connector選択後に移動、両接続点の変更、幅、Bezier制御点による曲率、削除、Next candidateを提供する。
+   - 移動・端点変更は元材料との接合を再計算する。削除で分断した場合はApplyを止める。設定の再生成で手動修正が失われる場合は明示し、古いプレビューを確定させない。
+   - 重い生成を描画のたびに実行せず、設定変更時に間引いて計算・キャッシュする。入力変更・他ツールへの移行・Escapeで失効し、遅れて返った計算結果を採用しない。
+   - 完了: すべての手動操作とキャンセル、無効入力、失敗状態をブラウザで確認できる。
+5. **Apply・既存編集との統合**
+   - Apply前に最新設定・手動結果を再検証し、成功時だけ1回のcheckpointで入力をUnion済みoutlineへ置換する。所属レイヤーと重ね順を決め、消えた入力のgroupIdなど参照を整理する。
+   - 保存する `contours` は最終形状。`path` は同じ形状の閉じた直線ノードから始め、曲線の再近似で接合・穴が変わることを避ける。元text/warp等の再生成情報は結果へ残さない。
+   - V1はConnector専用の永続型を増やさずv2 outlineとして保存する。保存/再読込、Undo/Redo、Path Edit、結果への新たなWarp、移動・回転・拡縮、SVG出力を確認する。
+   - 完了: Applyが1 Undoで元の文字・Warp・選択対象を復元し、Redoで同じ最終形状を再現。書体がなくても保存結果を再表示・出力できる。
+6. **回帰・見た目・利用者向け説明**
+   - 下記の自動/ブラウザ試験を実行し、READMEにStencil Bridgeとの使い分け、確定で固定outlineになること、調整と失敗時の操作を追記する。
+   - 完了: テスト・build・実ブラウザ確認の結果をこの節へ追記する。実装後の公開作業ではリポジトリの公開手順に従いActionsと公開サイトを別途確認する。
+
+### 検証計画
+- 新規 `tests/smart-connect.test.js`: 成分0/1/N、`i`のdot、穴と穴内材料、重なり、点接触、有限幅接合、Max gap境界、幅の境界値、候補衝突、候補なし、決定性、N−1本、既接続で追加0、全体OFFの部分接続、手動削除・再接合。
+- 形状検査: 元材料を欠損させないこと、Union後1成分、意図しない穴の消失なし、自己交差なし、設計幅を下回る接合の拒否、回転・拡縮・Warp後の座標整合。位相と幅は別のassertionにする。
+- 実フォント: Zen Kaku Gothic New / Shippori Minchoを主対象に、Latin `TypeFab` / `i` / `A B C`、ひらがな `ここまで読んだ` / `ありがとう`、カタカナ `タイプファブ`、漢字 `文字` / `加工` / `設計`。残る同梱6書体も輪郭生成・異常なしをスモーク確認。字間・サイズはMax gap内の成功例と意図的な失敗例を分けて記録する。
+- 日本語品質: ゴシック/明朝の同条件で最短距離のみの基準結果と並べ、払い・はね・横画・縦画の延長方向、穴、可読性、曲率をスクリーンショットで比較する。自動テストの成功だけで「自然」と判断しない。
+- ブラウザ: 対象選択、全設定、Preview中の保存データ不変、手動編集全操作、Next candidate、Apply不可の理由、Escape、Undo/Redo、保存/再読込、SVGダウンロード、ツール切替、console errorなし。
+- 回帰: 既存Stencil Bridgeの形状とtargetId、Warp、Path Edit、CAD、グループ、レイヤー、v1/v2読込、mm/viewBox/pathのみのSVG。`npm test` と `npm run build` を実行する。
+- 性能: 長文100字・複雑な明朝体で成分数/候補数/処理時間を記録し、候補探索・sample数に上限を設ける。UIが継続的に固まるならWorker化を段階4へ追加する。未測定の速度目標を達成済みとしない。
+- 実機加工、kerfによる接続消失、材料ごとの最小幅・強度、加工ソフトでの結果は別検証。V1で示すのは輪郭の連結と設計幅であり、物理的一体性の保証ではない。
+
+### V1完了チェックリスト
+- [x] Smart Connect独立UI、材料の成分解析、文字内・文字間・全体接続。（2026-09-15 実装・検証済み。下記「実装」節）
+- [x] 最短距離だけに依存しない日本語方向・端部候補の優先と目視評価。（2026-09-15 実装・検証済み。下記「実装」節）
+- [x] Smooth / Tapered / Rounded / Straight、Auto、必要最小限の接続、最終Union検証。（2026-09-15 実装・検証済み。下記「実装」節）
+- [x] projectを変えないPreviewと、確定前の移動・接続点・幅・曲率・削除・候補切替。（2026-09-15 実装・検証済み。下記「実装」節）
+- [x] 失敗理由と未接続箇所を表示し、全体接続未達や無効形状でApplyしない。（2026-09-15 実装・検証済み。下記「実装」節）
+- [x] Apply 1回のUndo/Redo、保存互換、Path Edit/Warp統合、mm SVG出力。（2026-09-15 実装・検証済み。下記「実装」節）
+- [x] 日本語/英数字の試験、既存機能の回帰、build、実ブラウザconsole確認、README更新。（2026-09-15 実装・検証済み。下記「実装」節）
+
+### V1.5・将来と未解決事項
+- V1.5: 精密なlocal thickness・曲率に基づく払い/はね推定、専用Stroke Extend。確定後Connector再編集を追加する場合は元輪郭・接続パラメータの永続モデルとWarp/Path Edit時の無効化規則を先に設計する。
+- 将来: Skeleton/medial axis、筆画分類、書体別最適化、MLランキング。
+- 着手前のユーザー回答を必須とする事項は現時点ではない。上記V1の仕様判断を前提に実装可能。日本語品質の採否は段階2〜3の実フォント結果で見直す。
+- 今回の実施結果: Issueと関連コードを読み、計画を追記。実装・テスト実行・公開は未実施。
+
+## Smart Connect — Issue #5 実装（2026-09-15）
+
+### 要求
+- 上記「Smart Connect — Issue #5 実装計画（2026-09-15）」に従って V1 を実装し、テスト・ビルド・実ブラウザ確認を行い、PRを作成する。
+- 完了条件: 計画の「V1完了チェックリスト」を満たす。`npm test` / `npm run build` が通る。README に使い方を追記する。PR を作成し、URL をこの節に記録する（公開は PR マージ後の `main` push で行う）。
+
+### 実装結果（2026-09-15）
+- 新規 `src/polygon.js`: Clipper PolyTree による Union → 領域（外周＋穴、穴内の島は別領域）、交差面積、点内部判定、内部点、帯（ClipperOffset）、閉輪郭オフセット。`grouping.js` の `filledRegions()` はこれを使う形に置換（`splitParts` の挙動は既存テストで回帰なし）。点接触は `StrictlySimple` で別部品として扱う（結果側の Union は速度のため非strict。接続帯は材料に重ねるため点接触に依存しない）。
+- 新規 `src/smart-connect.js`（純粋関数）: `analyze()` で最終ワールド座標の Union 成分と字形所属（`layoutGlyphs` の字形ごとの最終輪郭をワープ・回転込みで対応づけ、内部点で判定）。`generate()` は輪郭を 0.2〜0.6 mm 間隔でサンプルし、内向き法線の材料深さ（端部は深く、側面は薄い）と窓内の回転角から端部らしさを推定、成分対（bbox 距離 ≤ Max gap）ごとに最短だけでなく方向・端部・接合角・細い根元・行またぎを無次元化した評価で最大8候補（他輪郭と交差する候補は棄却）を保持し、Kruskal/Union-Find で必要最小限の辺を採用。Connector は Smooth（3次ベジェ中心線の帯）／Tapered（根元1.6倍→中央指定幅）／Rounded（カプセル）／Straight（矩形）、Auto はこの順で成立するものを採用。各接続は他成分との重なり・他接続との交差／重なり・穴の面積50%超の閉塞・Max gap 超過で無効化。最後に Union で成分数・穴数を再検査し、余分な接続は除去。`nextCandidate / setConnector / moveEnd / moveConnector / removeConnector / addConnector` は確定前の手動調整、`finalize()` は再検証して輪郭と直線ノードの閉パスを返す。`nearestOnly` は比較・テスト用の最短距離のみ評価（UI なし）。
+- `src/main.js`: ツールバー「スマート接続」、プロパティ欄のボタン、右クリックメニューから開始。入力検証（文字／固定パスのみ、開いた輪郭・複数レイヤー・対象付きブリッジ・重なる全体ブリッジ・部品1個は理由を表示して不可）。パネルで幅・最大距離・スタイル・文字内／隣接／全体・日本語優先を設定（全体ONで両方ON、片方OFFで全体OFF、固定パスは文字内／隣接を無効化して説明）。接続表示／結果の輪郭の切替、部品数前後・接続本数・未接続グループ・理由・警告を表示、接続一覧と選択接続の幅・スタイル・曲率・次の候補・削除、両端○と中央◇のドラッグ、2点クリックの手動追加。設定変更は世代番号付きで遅延計算し、手動調整があるときは再生成の確認表示にして古いプレビューを確定不可。Enter で確定（1 checkpoint、入力を Union 済み固定パス `contours`＋直線ノード `path` に置換、60,000 点超は path 省略）、Esc でキャンセル、入力アイテムの変更・Undo・他ツール切替で失効。プレビュー中は project・履歴・自動保存を変更しない。
+- `README.md` に「スマート接続」節を追加。`src/style.css` に一覧・ハンドルのスタイル追加。
+- テスト: 新規 `tests/smart-connect.test.js` 17件（設定検証、成分0/1/N・重なり・穴・島、点接触／辺共有／極細接触の区別と警告、回転・ワープ後の所属、端部優先 vs 最短距離、交差回避と診断、決定性、4スタイルの帯と Tapered の幅、N−1本・既接続0本・Union 1成分・自己交差なし・材料欠損なし、穴の保持、部分モード、手動操作一式と削除時の Apply 不可、finalize の閉直線パス・project 検証・SVG 出力、実フォント18ケース（Zen Kaku Gothic New／Shippori Mincho × TypeFab・i・A B C・ここまで読んだ・ありがとう・タイプファブ・文字・加工・設計）、日本語の端部優先が最短距離と異なること、意図的な失敗（字間3 mm・Max gap 6 mm）、縦書き2列は全体ONのみで接続、残る6書体のスモーク、`splitParts` 回帰）。`npm test`: 162 passed（既存145＋17）。`npm run build` 成功。
+- 実ブラウザ（Chromium、production preview、Playwright スクリプト46項目）: 未選択で無効、失敗表示（既定の Max gap 10 mm ではデモ文字「く→る」「、→を」が離れて未接続・原因表示・確定不可）、Max gap 20 で「部品 11 → 1」、プレビュー中の保存データ不変、結果の輪郭表示、接続選択・次の候補・幅・スタイル・無効値の拒否、◇／○ドラッグ、手動調整後の設定変更で再生成確認と確定不可、削除で全体未達→確定不可と赤枠表示、手動追加で復帰、全体／文字内／隣接の連動、Esc キャンセルで保存データ不変、前回設定の保持、Enter で確定（10本・1固定パス・直線ノード path）、Undo で文字復元、Redo で同一輪郭、パス編集開始、SVG 書き出し（mm・path のみ）、再読込後の保持、線分は無効、対象付きブリッジ付き文字の拒否、メニュー項目、console error なし — すべて通過。
+- 日本語品質（目視）: Zen Kaku Gothic New／Shippori Mincho の「ここまで読んだ」「ありがとう」「TypeFab」「設計」を最短距離のみ（`nearestOnly`）と並べて SVG を描画し確認。「ま」の横画端→「で」、「T」の横画端、「で」の上端など端部から延ばす候補が採用され、最短距離のみとは接続位置が変わる（自動テストでも差を確認）。明朝の払い・はねの先端は端部として検出されない箇所が残り、Smooth が常に成立するため Tapered／Rounded は手動指定時のみ使われる。矩形を並べるだけの結果ではないが「自然さ」の評価は目視の範囲で、V1.5 の local thickness／Stroke Extend は未実装。
+- 性能（Node、Shippori Mincho 12 mm、100文字、成分205・接続201）: analyze 約70〜90 ms、generate 約0.6 s（結果 Union の strict 簡略化を外す前は約2.1 s）。実機のブラウザでは同程度の待ちが1回の生成・手動操作ごとに発生する。Worker 化は未実施。
+- 未検証・未実装: 実機加工、kerf による接続消失、材料ごとの最小幅・強度、加工ソフトでの結果。確定後の Connector 再編集（V1.5）、Stroke Extend スタイル、精密な local thickness。公開（GitHub Pages）は PR マージ後の `main` push で行い、その際に Actions と公開 URL を確認する。
+- PR: https://github.com/fooping-tech/TypeFab/pull/6（ブランチ `smart-connect`、コミット `7d528e2`）。マージ後の `main` push で Pages デプロイが走る。Actions と公開 URL の確認はマージ後に別途行う。

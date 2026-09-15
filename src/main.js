@@ -10,6 +10,7 @@ import {
   automaticBridges,
   bounds,
   transform,
+  crossesContour,
 } from "./geometry.js";
 import { validateProject } from "./project.js";
 import { ensureLayers, visibleItems, isEditable } from "./layers.js";
@@ -106,6 +107,24 @@ import {
   dimensionGeometry,
   DIMENSION_TYPES,
 } from "./cad.js";
+import {
+  analyze as scAnalyze,
+  generate as scGenerate,
+  textInput,
+  outlineInput,
+  normalizeSettings as scNormalize,
+  nextCandidate as scNextCandidate,
+  setConnector as scSetConnector,
+  removeConnector as scRemoveConnector,
+  moveEnd as scMoveEnd,
+  moveConnector as scMoveConnector,
+  addConnector as scAddConnector,
+  finalize as scFinalize,
+  label as scLabel,
+  DEFAULT_SETTINGS as SC_DEFAULTS,
+  STYLES as SC_STYLES,
+  LIMITS as SC_LIMITS,
+} from "./smart-connect.js";
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 let typography;
 const typographyReady = import("./typography.js").then((m) => (typography = m));
@@ -298,11 +317,13 @@ function restore(snapshot) {
 }
 function undo() {
   if (!history.length) return;
+  if (sc) sc = null;
   future.push(JSON.stringify(project));
   restore(history.pop());
 }
 function redo() {
   if (!future.length) return;
+  if (sc) sc = null;
   history.push(JSON.stringify(project));
   restore(future.pop());
 }
@@ -617,7 +638,7 @@ $("#app").innerHTML = `
   )
   .join(
     "",
-  )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button><button id="group" class="tool" title="選択をグループ化 (${shortcut("G")})"><span class="tool-icon">▣</span>グループ化</button><button id="ungroup" class="tool" title="グループを解除、または文字を1文字ずつ・部位ごとに分解 (${shortcut("G", true)})"><span class="tool-icon">⊞</span>グループ化解除</button><button id="warp" class="tool" title="文字のアウトラインをエンベロープで変形（Text Warp）"><span class="tool-icon">⌒</span>ワープ</button><button id="edit-path" class="tool" title="パスのノードを直接編集（ダブルクリックでも開始）"><span class="tool-icon">✎</span>パス編集</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
+  )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="smart-connect" class="tool" title="文字どうし・文字内の部位を接続形状でつないで1つの輪郭にする（Smart Connect）"><span class="tool-icon">⟟</span>スマート接続</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button><button id="group" class="tool" title="選択をグループ化 (${shortcut("G")})"><span class="tool-icon">▣</span>グループ化</button><button id="ungroup" class="tool" title="グループを解除、または文字を1文字ずつ・部位ごとに分解 (${shortcut("G", true)})"><span class="tool-icon">⊞</span>グループ化解除</button><button id="warp" class="tool" title="文字のアウトラインをエンベロープで変形（Text Warp）"><span class="tool-icon">⌒</span>ワープ</button><button id="edit-path" class="tool" title="パスのノードを直接編集（ダブルクリックでも開始）"><span class="tool-icon">✎</span>パス編集</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
 <nav class="toolbar cad-toolbar" aria-label="2D CADツール">${CAD_GROUPS.map((g) => `<div class="tool-group"><span class="tool-group-label">${g}</span>${Object.entries(CAD_TOOLS).filter(([, t]) => t.group === g).map(([id, t]) => `<button data-tool="${id}" class="tool cad-tool" title="${t.hint}"><span class="tool-icon">${t.icon}</span>${t.label}</button>`).join("")}</div>`).join("")}<span class="subtle cad-note">拘束なしの2D編集 · 結果は通常のパス · 寸法は参照のみ</span></nav>
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
@@ -847,6 +868,12 @@ function requestFontFile() {
 }
 function renderProperties() {
   const i = selectedItem();
+  if (sc) {
+    $("#properties").innerHTML = scPanel();
+    $("#board-width").value = project.width;
+    $("#board-height").value = project.height;
+    return;
+  }
   if (cad) {
     $("#properties").innerHTML = cadPanel();
     $("#board-width").value = project.width;
@@ -894,7 +921,7 @@ function renderProperties() {
       $("#properties").innerHTML +=
         `<section><label class="check"><input id="ratio-lock" type="checkbox" ${i.ratioLocked ? "checked" : ""}> 縦横比を固定</label><p class="note">四隅のハンドルをドラッグして拡縮。Shiftでも比率を固定できます。</p></section>`;
     $("#properties").innerHTML +=
-      `<section><label class="full-label">所属レイヤー<select id="item-layer">${project.layers.map((l) => `<option value="${l.id}" ${i.layerId === l.id ? "selected" : ""} ${l.locked || !l.visible ? "disabled" : ""}>${esc(l.name)}</option>`).join("")}</select></label><button id="item-auto-bridge" class="wide-button">✧ 選択アイテムに自動ブリッジ</button>${i.targetId ? '<p class="note">このブリッジは対象アイテムのみに適用され、移動に追従します。</p>' : ""}</section>`;
+      `<section><label class="full-label">所属レイヤー<select id="item-layer">${project.layers.map((l) => `<option value="${l.id}" ${i.layerId === l.id ? "selected" : ""} ${l.locked || !l.visible ? "disabled" : ""}>${esc(l.name)}</option>`).join("")}</select></label><button id="item-auto-bridge" class="wide-button">✧ 選択アイテムに自動ブリッジ</button>${chosen.some((c) => ["text", "outline"].includes(c.type)) ? '<button id="item-smart-connect" class="wide-button">⟟ スマート接続（文字を一体化）</button><p class="note">文字どうし・文字内の部位を接続形状でつなぎ、1つの閉じた輪郭として切り出せるようにします。</p>' : ""}${i.targetId ? '<p class="note">このブリッジは対象アイテムのみに適用され、移動に追従します。</p>' : ""}</section>`;
   }
   $("#board-width").value = project.width;
   $("#board-height").value = project.height;
@@ -1030,7 +1057,7 @@ function renderCanvas() {
         .join("");
   let overlay = "";
   for (const i of selectedItems())
-    if (!preview) {
+    if (!preview && !sc) {
       if (i.id === warpId) {
         overlay += warpOverlay(i, scale);
         continue;
@@ -1059,9 +1086,9 @@ function renderCanvas() {
       }</g>`;
     }
   const chosen = selectedItems();
-  if (!preview && !warpId && !pathEdit && chosen.length && !cad)
+  if (!preview && !warpId && !pathEdit && chosen.length && !cad && !sc)
     overlay += rotateOverlay(chosen, scale);
-  overlay += annotationsOverlay(scale) + cadOverlay(scale);
+  overlay += annotationsOverlay(scale) + cadOverlay(scale) + scOverlay(scale);
   $("#selection").innerHTML = overlay;
   $("#canvas").style.cursor = preview
     ? "default"
@@ -1070,7 +1097,9 @@ function renderCanvas() {
       : "crosshair";
   $("#canvas-mode").textContent = preview
     ? "加工プレビュー · 実際に出力されるカット線"
-    : warpId
+    : sc
+      ? "スマート接続 · 接続案のプレビュー（確定まで保存データは変わりません）"
+      : warpId
       ? "ワープ編集中 · アウトラインそのものを変形"
       : pathEdit
         ? "パス編集中 · ノードを直接変形"
@@ -1081,7 +1110,11 @@ function renderCanvas() {
     ? drag.label
     : preview
       ? "赤い線をカットします。自動ブリッジは帯の側面を含む切り抜き輪郭です。"
-      : warpId
+      : sc
+        ? sc.addMode
+          ? "接続したい2つの部品の輪郭付近を順にクリック · Escでキャンセル"
+          : "接続をクリックして選択 · 端の○で接続点、◇で位置を変更 · Enterで確定 · Escでキャンセル"
+        : warpId
         ? "角・ハンドルをドラッグ（Altで角だけ）· Esc / Enter で完了"
         : pathEdit
           ? "ノード・ハンドルをドラッグ · Shiftで追加選択 · パス上をダブルクリックで追加 · Deleteで削除 · Escで終了"
@@ -1112,6 +1145,10 @@ function render({ properties = true } = {}) {
   selected = valid.at(-1) || null;
   // Warp mode lasts while its text is the only selection.
   if (warpId && !(multi.length === 1 && warpItem())) warpId = null;
+  if (sc && !scStillValid()) {
+    sc = null;
+    notify("対象が変更されたため、スマート接続を終了しました。");
+  }
   if (pathEdit && !(multi.length === 1 && selected === pathEdit.id))
     pathEdit = null;
   $("#project-name").textContent = project.name;
@@ -1135,6 +1172,9 @@ function render({ properties = true } = {}) {
   $("#auto-bridge").disabled = !selectedItems().some(
     (i) => i.type !== "bridge",
   );
+  $("#smart-connect").disabled =
+    !sc && !selectedItems().some((i) => ["text", "outline"].includes(i.type));
+  $("#smart-connect").classList.toggle("active", Boolean(sc));
   $("#ungroup").disabled = !selectedItems().some(ungroupKind);
   $("#group").disabled = selectedItems().filter((i) => !i.targetId).length < 2;
   $("#warp").disabled =
@@ -1192,6 +1232,7 @@ function updateSelected(key, value) {
 }
 $("#properties").addEventListener("change", (e) => {
   const el = e.target;
+  if (el.dataset.sc) return scParamChange(el);
   if (el.dataset.cad) return cadParamChange(el);
   if (el.dataset.prop) {
     if (!el.checkValidity() || !Number.isFinite(el.valueAsNumber)) {
@@ -1270,6 +1311,11 @@ function liveBend(percent) {
   $("#warp-bend-value").textContent = `${percent}%`;
 }
 $("#properties").addEventListener("input", (e) => {
+  if (e.target.dataset.sc === "connCurvature") {
+    const label = $("#sc-curvature-value");
+    if (label) label.textContent = e.target.valueAsNumber.toFixed(2);
+    return;
+  }
   if (e.target.id === "text-content") liveText(e.target.value);
   if (e.target.id === "warp-bend") liveBend(e.target.valueAsNumber);
 });
@@ -1282,6 +1328,24 @@ $("#properties").addEventListener("focusout", (e) => {
   if (current?.type === "text") e.target.value = current.text;
 });
 $("#properties").addEventListener("click", (e) => {
+  if (sc) {
+    const row = e.target.closest("[data-sc-connector]");
+    if (row) {
+      sc.selected = sc.selected === row.dataset.scConnector ? null : row.dataset.scConnector;
+      sc.addMode = null;
+      return render();
+    }
+    if (e.target.closest("#sc-apply")) return applySmartConnect();
+    if (e.target.closest("#sc-cancel")) return cancelSmartConnect("スマート接続をキャンセルしました。");
+    if (e.target.closest("#sc-regenerate")) return scRegenerate();
+    if (e.target.closest("#sc-next")) return scConnectorAction("next");
+    if (e.target.closest("#sc-delete")) return scConnectorAction("delete");
+    if (e.target.closest("#sc-add")) return scConnectorAction("add");
+    if (e.target.closest("#sc-view-connectors") || e.target.closest("#sc-view-union")) {
+      sc.view = e.target.closest("#sc-view-union") ? "union" : "connectors";
+      return render();
+    }
+  }
   if (e.target.closest("#annotation-delete")) return removeAnnotation(selectedAnnotation);
   if (e.target.closest("#annotations-clear")) return clearAnnotations();
   if (e.target.closest("#cad-confirm")) return cadConfirm();
@@ -1300,6 +1364,7 @@ $("#properties").addEventListener("click", (e) => {
   if (e.target.closest("#add-font")) requestFontFile();
   if (e.target.closest("#font-gallery-button")) openFontGallery();
   if (e.target.closest("#item-auto-bridge")) applyAutoBridges();
+  if (e.target.closest("#item-smart-connect")) startSmartConnect();
   if (e.target.closest("#item-ungroup")) ungroup();
   if (e.target.closest("#item-group")) groupSelection();
   if (e.target.closest("#enter-warp")) enterWarp();
@@ -1486,6 +1551,7 @@ $("#add-layer").onclick = () => {
 for (const b of document.querySelectorAll("[data-tool]"))
   b.onclick = () => {
     preview = false;
+    if (sc) cancelSmartConnect();
     if (CAD_TOOLS[b.dataset.tool]) return startCadTool(b.dataset.tool);
     cad = null;
     tool = b.dataset.tool;
@@ -1501,6 +1567,7 @@ function selectionWithBridges() {
   ];
 }
 function startCadTool(id) {
+  if (sc) cancelSmartConnect();
   if (warpId) exitWarp();
   if (pathEdit) exitPathEdit();
   tool = id;
@@ -1867,6 +1934,336 @@ function remove() {
   commit();
 }
 $("#delete").onclick = remove;
+// ---- Smart Connect (issue #5). `sc` holds the transient session: the input
+// snapshot, settings, analysis, the current plan and the selected connector.
+// Nothing touches the project until Apply, which is one undo step.
+let sc = null;
+const scSettings = { ...SC_DEFAULTS };
+function scInputsOf(items) {
+  return items.map((item) => {
+    if (item.type !== "text") return outlineInput(item);
+    try {
+      return textInput(item, textGlyphs(item));
+    } catch {
+      // Without the font the outline is used as it is (no character info).
+      return outlineInput(item);
+    }
+  });
+}
+function scSnapshot(items) {
+  return JSON.stringify(items.map((i) => [i.id, i.x, i.y, i.rotation, i.contours.length, i.layerId]));
+}
+function startSmartConnect() {
+  try {
+    const chosen = selectedItems().filter((i) => i.type !== "bridge");
+    if (!chosen.length) throw Error("スマート接続する文字または固定パスを選択してください。");
+    const wrong = chosen.filter((i) => !["text", "outline"].includes(i.type));
+    if (wrong.length)
+      throw Error(`文字と固定パスだけが対象です（${wrong.map((i) => labels[i.type] ?? i.type).join("・")}は対象外。アウトライン化や結合で固定パスにしてください）。`);
+    const open = chosen.filter((i) => i.type === "outline" && !i.contours.some((c) => c.length > 3 && Math.hypot(c[0].x - c.at(-1).x, c[0].y - c.at(-1).y) < 1e-7));
+    if (open.length) throw Error(`閉じた輪郭がありません: ${open.map((i) => i.name).join("・")}`);
+    if (new Set(chosen.map((i) => i.layerId)).size > 1)
+      throw Error("複数のレイヤーにまたがる選択はスマート接続できません。同じレイヤーのアイテムを選んでください。");
+    const ids = new Set(chosen.map((i) => i.id));
+    const scoped = project.items.filter((b) => b.type === "bridge" && ids.has(b.targetId));
+    if (scoped.length)
+      throw Error(`対象付きブリッジ（${scoped.length} 個）が付いたアイテムはスマート接続できません。ブリッジを削除するか、別のアイテムを選んでください。`);
+    const global = visibleItems(project).filter(
+      (b) => b.type === "bridge" && !b.targetId && chosen.some((i) => worldContours(i).some((c) => crossesContour(c, b))),
+    );
+    if (global.length)
+      throw Error(`選択に重なる全体ブリッジ（${global.length} 個）があります。ブリッジを外してから実行してください。`);
+    const inputs = scInputsOf(chosen),
+      analysis = scAnalyze(inputs);
+    if (!analysis.components.length) throw Error("閉じた輪郭がありません。");
+    if (analysis.components.length === 1) throw Error("すでに1つの部品です。接続の必要はありません。");
+    if (warpId) exitWarp();
+    if (pathEdit) exitPathEdit();
+    cad = null;
+    selectedAnnotation = null;
+    preview = false;
+    tool = "select";
+    sc = {
+      ids: [...ids],
+      snapshot: scSnapshot(chosen),
+      names: chosen.map((i) => i.name),
+      analysis,
+      settings: { ...scSettings },
+      plan: null,
+      selected: null,
+      view: "connectors",
+      addMode: null,
+      stale: false,
+      busy: false,
+      error: null,
+      generation: 0,
+      fontless: chosen.some((i, n) => i.type === "text" && !inputs[n].glyphs),
+    };
+    scSchedule();
+    render();
+    notify("スマート接続: 接続案を計算しています…");
+  } catch (e) {
+    notify(e.message);
+  }
+}
+// Generation runs after the panel shows its busy state; a stale result
+// (settings changed or the session ended meanwhile) is discarded.
+function scSchedule() {
+  if (!sc) return;
+  const gen = ++sc.generation;
+  sc.busy = true;
+  sc.error = null;
+  renderProperties();
+  setTimeout(() => {
+    if (!sc || sc.generation !== gen) return;
+    try {
+      sc.plan = scGenerate(sc.analysis, sc.settings);
+      sc.selected = sc.plan.connectors.some((c) => c.id === sc.selected) ? sc.selected : null;
+      Object.assign(scSettings, sc.plan.settings);
+    } catch (e) {
+      sc.error = e.message;
+    }
+    sc.busy = false;
+    sc.stale = false;
+    render();
+  }, 20);
+}
+function cancelSmartConnect(message = null) {
+  if (!sc) return;
+  sc = null;
+  drag = null;
+  render();
+  if (message) notify(message);
+}
+// The session ends when its inputs change under it (undo, edits elsewhere).
+function scStillValid() {
+  if (!sc) return true;
+  const items = sc.ids.map((id) => project.items.find((i) => i.id === id));
+  return items.every(Boolean) && scSnapshot(items) === sc.snapshot;
+}
+const scManualCount = () => sc?.plan?.connectors.filter((c) => c.manual).length ?? 0;
+// Re-rendering the panel blurs the changed field, which can fire a second
+// change event while the first is still handled; that one is ignored.
+let scParamBusy = false;
+function scParamChange(el) {
+  if (!sc || scParamBusy) return;
+  scParamBusy = true;
+  try {
+    scParamApply(el);
+  } finally {
+    scParamBusy = false;
+  }
+}
+function scParamApply(el) {
+  const key = el.dataset.sc;
+  const value = el.type === "checkbox" ? el.checked : el.type === "number" ? el.valueAsNumber : el.value;
+  if (el.type === "number" && !Number.isFinite(value)) {
+    notify("有効な数値を入力してください。");
+    return renderProperties();
+  }
+  if (key === "connWidth" || key === "connStyle" || key === "connCurvature") {
+    if (!sc.selected || !sc.plan) return;
+    try {
+      const patch = key === "connWidth" ? { width: value } : key === "connStyle" ? { style: value } : { curvature: value };
+      const current = sc.plan.connectors.find((c) => c.id === sc.selected);
+      // The browser repeats a change on blur; an unchanged value is a no-op.
+      if (current && Object.entries(patch).every(([k, v]) => current[k] === v)) return;
+      sc.plan = scSetConnector(sc.analysis, sc.plan, sc.selected, patch);
+      render();
+    } catch (e) {
+      notify(e.message);
+      renderProperties();
+    }
+    return;
+  }
+  if (key === "view") {
+    sc.view = value;
+    return render();
+  }
+  const next = { ...sc.settings, [key]: value };
+  // One piece needs both kinds; dropping either drops the whole-piece option.
+  if (key === "wholePiece" && value) next.withinCharacters = next.adjacentCharacters = true;
+  if ((key === "withinCharacters" || key === "adjacentCharacters") && !value) next.wholePiece = false;
+  try {
+    const normalized = scNormalize(next);
+    if (JSON.stringify(normalized) === JSON.stringify(sc.settings)) return;
+    sc.settings = normalized;
+  } catch (e) {
+    notify(e.message);
+    return renderProperties();
+  }
+  if (scManualCount()) {
+    sc.stale = true;
+    render();
+  } else scSchedule();
+}
+function scRegenerate() {
+  if (!sc) return;
+  sc.selected = null;
+  scSchedule();
+  renderProperties();
+}
+function scConnectorAction(action) {
+  if (!sc?.plan) return;
+  const id = sc.selected;
+  try {
+    if (action === "next" && id) sc.plan = scNextCandidate(sc.analysis, sc.plan, id);
+    else if (action === "delete" && id) {
+      sc.plan = scRemoveConnector(sc.analysis, sc.plan, id);
+      sc.selected = null;
+    } else if (action === "add") {
+      sc.addMode = sc.addMode ? null : { first: null };
+      sc.selected = null;
+    }
+    render();
+  } catch (e) {
+    notify(e.message);
+  }
+}
+function applySmartConnect() {
+  if (!sc?.plan) return;
+  if (sc.busy) return notify("計算が終わるまでお待ちください。");
+  if (sc.stale) return notify("設定が変わっています。再生成してから確定してください。");
+  try {
+    if (!scStillValid()) throw Error("対象のアイテムが変更されたため、スマート接続をやり直してください。");
+    const result = scFinalize(sc.analysis, sc.plan);
+    const items = sc.ids.map((id) => project.items.find((i) => i.id === id)),
+      first = items[0],
+      index = project.items.indexOf(first),
+      points = result.contours.reduce((n, c) => n + c.length, 0);
+    const outline = {
+      id: uid(),
+      type: "outline",
+      name: `${sc.names[0]}${sc.names.length > 1 ? ` ほか${sc.names.length - 1}` : ""}（スマート接続）`,
+      x: 0,
+      y: 0,
+      rotation: 0,
+      layerId: first.layerId,
+      ratioLocked: false,
+      contours: result.contours,
+      // Huge outlines keep only the contours; Path Edit fits a path later.
+      ...(points <= 60000 ? { path: result.path } : {}),
+    };
+    const count = result.plan.connectors.length;
+    checkpoint();
+    project.items = project.items.filter((i) => !sc.ids.includes(i.id));
+    project.items.splice(Math.max(0, Math.min(index, project.items.length)), 0, outline);
+    normalizeGroups(project);
+    sc = null;
+    selectItem(outline.id);
+    commit();
+    notify(`スマート接続: ${count} 本の接続で 1 つの固定パスにしました（1回の取り消しで元の文字に戻せます）。`);
+  } catch (e) {
+    notify(e.message);
+  }
+}
+function scConnectorLabel(c, n) {
+  const a = sc.analysis.components[c.pair[0]],
+    b = sc.analysis.components[c.pair[1]];
+  return `${n + 1}. ${scLabel(sc.analysis, a)}–${scLabel(sc.analysis, b)}`;
+}
+function scPanel() {
+  const s = sc.settings,
+    plan = sc.plan,
+    glyphInfo = sc.analysis.hasGlyphInfo,
+    manual = scManualCount(),
+    check = (key, label, disabled = false) =>
+      `<label class="check"><input type="checkbox" data-sc="${key}" ${s[key] ? "checked" : ""} ${disabled ? "disabled" : ""}> ${label}</label>`;
+  const status = sc.busy
+    ? `<p class="note">計算中…</p>`
+    : sc.error
+      ? `<p class="cad-error">${esc(sc.error)}</p>`
+      : plan
+        ? `<dl class="measure"><dt>部品</dt><dd>${plan.before} → ${plan.after}</dd><dt>接続</dt><dd>${plan.connectors.length} 本${manual ? `（手動 ${manual}）` : ""}</dd>${plan.unconnected.length ? `<dt>${s.wholePiece ? "未接続" : "残る部品"}</dt><dd>${plan.unconnected.length} グループ</dd>` : ""}</dl>${plan.messages.map((m) => `<p class="${plan.ok ? "note" : "cad-error"}">${esc(m)}</p>`).join("")}`
+        : "";
+  const selected = plan?.connectors.find((c) => c.id === sc.selected);
+  const rows = plan
+    ? plan.connectors
+        .map(
+          (c, n) =>
+            `<button type="button" class="layer sc-row ${c.id === sc.selected ? "selected" : ""} ${c.problem ? "problem" : ""}" data-sc-connector="${esc(c.id)}">${esc(scConnectorLabel(c, n))}<small>${esc(SC_STYLES[c.resolvedStyle] ?? c.resolvedStyle)} · ${c.width} mm${c.manual ? " · 手動" : ""}${c.fallback ? " · 代替" : ""}${c.problem ? ` · ${esc(c.problem)}` : ""}</small></button>`,
+        )
+        .join("")
+    : "";
+  const editor = selected
+    ? `<div class="sc-editor"><h4>選択中の接続</h4><div class="fields"><label>幅 mm<input data-sc="connWidth" type="number" value="${selected.width}" step="0.1" min="${SC_LIMITS.width[0]}" max="${SC_LIMITS.width[1]}"></label><label>スタイル<select data-sc="connStyle">${Object.entries(SC_STYLES).map(([k, v]) => `<option value="${k}" ${selected.style === k ? "selected" : ""}>${v}</option>`).join("")}</select></label></div><label class="full-label">曲率 <span id="sc-curvature-value">${selected.curvature.toFixed(2)}</span><input data-sc="connCurvature" type="range" min="${SC_LIMITS.curvature[0]}" max="${SC_LIMITS.curvature[1]}" step="0.05" value="${selected.curvature}"></label><div class="cad-actions"><button id="sc-next" ${selected.candidates?.length > 1 ? "" : "disabled"}>次の候補（${selected.candidates?.length ? `${selected.index + 1}/${selected.candidates.length}` : "なし"}）</button><button id="sc-delete" class="danger">削除</button></div><p class="note">キャンバスで両端の○をドラッグして接続点を、中央の◇をドラッグして位置を変えられます。</p></div>`
+    : "";
+  return `<section class="cad-panel sc-panel"><div class="object-type">SMART CONNECT / 一体化</div><h3>スマート接続</h3><p class="note">対象: ${esc(sc.names.slice(0, 3).join("・"))}${sc.names.length > 3 ? ` ほか${sc.names.length - 3}` : ""}。文字どうし・文字内の部位に接続形状を足して、1つの閉じた輪郭にします。切り抜きブリッジ（カット線の途切れ）とは別の機能です。</p>${sc.fontless ? `<p class="note">書体を読めない文字があるため、その文字は輪郭だけで扱います（文字内／隣接の区別なし）。</p>` : ""}<div class="fields"><label>幅 mm<input data-sc="width" type="number" value="${s.width}" step="0.1" min="${SC_LIMITS.width[0]}" max="${SC_LIMITS.width[1]}"></label><label>最大距離 mm<input data-sc="maxGap" type="number" value="${s.maxGap}" step="0.5" min="${SC_LIMITS.maxGap[0]}" max="${SC_LIMITS.maxGap[1]}"></label></div><label class="full-label">スタイル<select data-sc="style">${Object.entries(SC_STYLES).map(([k, v]) => `<option value="${k}" ${s.style === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>${check("withinCharacters", "文字内の部位をつなぐ", !glyphInfo)}${check("adjacentCharacters", "隣の文字とつなぐ", !glyphInfo)}${check("wholePiece", "全体を1つにする")}<label class="full-label">日本語の筆画延長を優先<select data-sc="japanese"><option value="auto" ${s.japanese === "auto" ? "selected" : ""}>自動（日本語の文字で）</option><option value="on" ${s.japanese === "on" ? "selected" : ""}>常に</option><option value="off" ${s.japanese === "off" ? "selected" : ""}>しない</option></select></label>${glyphInfo ? "" : `<p class="note">固定パスには文字の情報がないため、部品どうしを距離と形で接続します（全体を1つにする、のみ）。</p>`}${sc.stale ? `<p class="cad-error">設定が変わりました。再生成すると手動調整（${manual} 本）は失われます。<br><button id="sc-regenerate">再生成する</button></p>` : ""}${status}<div class="cad-actions sc-view"><button id="sc-view-connectors" class="${sc.view === "connectors" ? "primary" : ""}">接続を表示</button><button id="sc-view-union" class="${sc.view === "union" ? "primary" : ""}">結果の輪郭</button></div>${plan ? `<div class="sc-list">${rows || '<p class="note">接続はありません。</p>'}</div>` : ""}${editor}<div class="cad-actions"><button id="sc-add" class="${sc.addMode ? "primary" : ""}">${sc.addMode ? (sc.addMode.first ? "2点目をクリック…" : "1点目をクリック…") : "＋ 接続を手で追加"}</button></div><div class="cad-actions"><button id="sc-apply" class="primary" ${plan?.ok && !sc.busy && !sc.stale ? "" : "disabled"}>確定</button><button id="sc-cancel">キャンセル</button></div><p class="note">確定すると、文字設定・ワープを焼き込んだ1つの固定パスになります（取り消し1回で元に戻ります）。以後はパス編集で調整してください。輪郭がつながることの検査で、材料の強度や加工結果を保証するものではありません。</p></section>`;
+}
+function scOverlay(scale) {
+  if (!sc) return "";
+  const sw = 0.25,
+    r = 3.5 / scale,
+    path = (contours) => pathData(contours);
+  let out = "";
+  const plan = sc.plan;
+  if (plan && sc.view === "union") {
+    out += `<path d="${path(plan.union)}" fill="#2f7d5a" fill-opacity=".55" fill-rule="nonzero" stroke="#1d5c40" stroke-width="${sw}" pointer-events="none"/>`;
+  } else if (plan) {
+    if (plan.settings.wholePiece)
+      for (const group of plan.unconnected)
+        for (const k of group) out += `<path d="${path([sc.analysis.components[k].outer])}" fill="none" stroke="#c8402f" stroke-width="${sw * 1.5}" stroke-dasharray="1.2 .8" pointer-events="none"/>`;
+    for (const c of plan.connectors) {
+      const selected = c.id === sc.selected;
+      out += `<path data-sc-connector="${esc(c.id)}" class="sc-connector" d="${path(c.polygon)}" fill="${c.problem ? "#e2574a" : "#f5a623"}" fill-opacity="${selected ? ".95" : ".75"}" fill-rule="nonzero" stroke="${selected ? "#1f4f74" : c.problem ? "#a3281c" : "#c77d16"}" stroke-width="${selected ? sw * 2 : sw}"/>`;
+    }
+    const s = plan.connectors.find((c) => c.id === sc.selected);
+    if (s) {
+      const m = { x: (s.a.p.x + s.b.p.x) / 2, y: (s.a.p.y + s.b.p.y) / 2 };
+      if (drag?.kind === "sc-handle") {
+        const from = drag.handle === "a" ? s.a.p : drag.handle === "b" ? s.b.p : m;
+        out += `<path d="M${from.x} ${from.y} L${drag.current.x} ${drag.current.y}" stroke="#1f4f74" stroke-width="${sw}" stroke-dasharray="1 .6" pointer-events="none"/>`;
+      }
+      out += `<circle data-sc-handle="a" class="sc-handle" cx="${s.a.p.x}" cy="${s.a.p.y}" r="${r}" fill="white" stroke="#1f4f74" stroke-width="${sw}"/><circle data-sc-handle="b" class="sc-handle" cx="${s.b.p.x}" cy="${s.b.p.y}" r="${r}" fill="white" stroke="#1f4f74" stroke-width="${sw}"/><rect data-sc-handle="move" class="sc-handle" x="${m.x - r}" y="${m.y - r}" width="${r * 2}" height="${r * 2}" transform="rotate(45 ${m.x} ${m.y})" fill="white" stroke="#1f4f74" stroke-width="${sw}"/>`;
+    }
+  }
+  if (sc.addMode?.first) {
+    const p = sc.addMode.first;
+    out += `<circle cx="${p.x}" cy="${p.y}" r="${r}" fill="none" stroke="#c27a45" stroke-width="${sw}" pointer-events="none"/>`;
+  }
+  return out;
+}
+function scPointerDown(e, p) {
+  const handle = e.target.closest("[data-sc-handle]"),
+    connector = e.target.closest("[data-sc-connector]");
+  if (handle && sc.selected && sc.plan) {
+    drag = { kind: "sc-handle", handle: handle.dataset.scHandle, start: p, current: p, moved: false };
+    $("#canvas").setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
+  if (sc.addMode && sc.plan) {
+    if (!sc.addMode.first) sc.addMode.first = p;
+    else {
+      try {
+        sc.plan = scAddConnector(sc.analysis, sc.plan, sc.addMode.first, p);
+        sc.selected = sc.plan.connectors.at(-1)?.id ?? null;
+        sc.addMode = null;
+      } catch (err) {
+        notify(err.message);
+        sc.addMode = { first: null };
+      }
+    }
+    render();
+    return;
+  }
+  sc.selected = connector ? connector.dataset.scConnector : null;
+  render();
+}
+function scPointerUp(p) {
+  if (!sc?.plan || !sc.selected) return;
+  const { handle, start } = drag;
+  try {
+    sc.plan =
+      handle === "move"
+        ? scMoveConnector(sc.analysis, sc.plan, sc.selected, { x: p.x - start.x, y: p.y - start.y })
+        : scMoveEnd(sc.analysis, sc.plan, sc.selected, handle, p);
+  } catch (err) {
+    notify(err.message);
+  }
+  render();
+}
+$("#smart-connect").onclick = () => (sc ? cancelSmartConnect() : startSmartConnect());
 function addCopies(copies) {
   if (project.items.length + copies.length > 2000) {
     notify("オブジェクトが多すぎます。");
@@ -2014,6 +2411,7 @@ $("#edit-path").onclick = () => {
 const editor = $("#text-editor"),
   editorText = $("#canvas-text");
 function editText(id) {
+  if (sc) cancelSmartConnect();
   const item = project.items.find((i) => i.id === id);
   if (loading || item?.type !== "text" || !isEditable(project, item)) return;
   if (warpId !== id) warpId = null;
@@ -2099,6 +2497,7 @@ function findInBrowser() {
   setTimeout(() => row.classList.remove("found"), 1200);
 }
 function togglePreview() {
+  if (sc) cancelSmartConnect();
   preview = !preview;
   tool = "select";
   render();
@@ -2181,6 +2580,7 @@ function applyBoolean(operation) {
   }
 }
 function enterPathEdit(id) {
+  if (sc) cancelSmartConnect();
   const item = project.items.find((i) => i.id === id);
   if (!item || !PATHABLE.includes(item.type) || !isEditable(project, item)) {
     notify(
@@ -2293,6 +2693,7 @@ function nudgeNodes(dx, dy) {
 // Text Warp: the envelope deforms the real glyph outlines; the text, font and
 // warp parameters stay on the item so it can be edited again.
 function enterWarp() {
+  if (sc) cancelSmartConnect();
   const item = selectedItem();
   if (selectedItems().length !== 1 || !canWarp(item)) {
     notify("ワープする文字・長方形・楕円・固定パスを1つ選択してください。");
@@ -2679,6 +3080,11 @@ $("#canvas").addEventListener("pointerdown", (e) => {
   // On a Mac, Ctrl+click is a right click and opens the menu instead.
   if (isMac && e.ctrlKey && e.pointerType === "mouse") return;
   const p = canvasPoint(e);
+  if (sc) {
+    scPointerDown(e, p);
+    e.preventDefault();
+    return;
+  }
   const annotation = e.target.closest("[data-annotation]");
   if (annotation && !cad) {
     selectItem(null);
@@ -2793,6 +3199,12 @@ $("#canvas").addEventListener("pointerdown", (e) => {
 $("#canvas").addEventListener("pointermove", (e) => {
   if (!drag) return;
   const p = canvasPoint(e);
+  if (drag.kind === "sc-handle") {
+    drag.current = p;
+    drag.moved = drag.moved || Math.hypot(p.x - drag.start.x, p.y - drag.start.y) > 0.2;
+    renderCanvas();
+    return;
+  }
   if (drag.kind === "place") {
     if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) > 0.5)
       drag.moved = true;
@@ -2925,6 +3337,13 @@ $("#canvas").addEventListener("pointermove", (e) => {
 for (const event of ["pointerup", "pointercancel"])
   $("#canvas").addEventListener(event, () => {
     if (drag) drag.label = null;
+    if (drag?.kind === "sc-handle") {
+      const done = drag;
+      if (event === "pointerup" && done.moved) scPointerUp(done.current);
+      drag = null;
+      renderCanvas();
+      return;
+    }
     if (drag?.kind === "marquee") {
       if (event === "pointerup") {
         multi = drag.moved
@@ -3147,6 +3566,7 @@ const menuActions = {
     field?.select();
   },
   "auto-bridge": applyAutoBridges,
+  "smart-connect": startSmartConnect,
   union: () => applyBoolean("union"),
   difference: () => applyBoolean("difference"),
   intersection: () => applyBoolean("intersection"),
@@ -3221,6 +3641,12 @@ function menuEntries(onObject) {
       "自動ブリッジ",
       "",
       chosen.some((i) => i.type !== "bridge"),
+    ],
+    [
+      "smart-connect",
+      "スマート接続（文字を一体化）…",
+      "",
+      chosen.some((i) => ["text", "outline"].includes(i.type)),
     ],
     ...(chosen.length > 1
       ? [
@@ -3324,7 +3750,7 @@ window.addEventListener("resize", () => closeMenu(false));
 window.addEventListener("blur", () => closeMenu(false));
 $("#canvas").addEventListener("contextmenu", (e) => {
   e.preventDefault();
-  if (loading || drag?.moved) return;
+  if (loading || drag?.moved || sc) return;
   // A touch long-press opens the menu instead of starting a drag.
   drag = null;
   $("#marquee").setAttribute("hidden", "");
@@ -3379,6 +3805,29 @@ window.addEventListener("keydown", (e) => {
     return;
   const mod = e.metaKey || e.ctrlKey,
     key = e.key.toLowerCase();
+  if (sc) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      if (sc.addMode) {
+        sc.addMode = null;
+        return render();
+      }
+      return cancelSmartConnect("スマート接続をキャンセルしました。");
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      return applySmartConnect();
+    }
+    if ((e.key === "Delete" || e.key === "Backspace") && sc.selected) {
+      e.preventDefault();
+      return scConnectorAction("delete");
+    }
+    if (mod && key === "z") {
+      e.preventDefault();
+      return notify("スマート接続中は取り消しできません。キャンセルまたは確定してください。");
+    }
+    return;
+  }
   if (cad) {
     if (e.key === "Escape") {
       e.preventDefault();
