@@ -76,10 +76,41 @@ import {
   shapeSource,
   applyWarp,
 } from "./warp.js";
+import {
+  createFontLoader,
+  FONT_CATALOG,
+  FONT_CATEGORIES,
+  bundledFont,
+  DEFAULT_FONT,
+  fontPolicyAccepted,
+  FONT_POLICY_VERSION,
+  FONT_POLICY_TEXT,
+  BUNDLED_FONTS_NOTE,
+} from "./fonts.js";
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 let typography;
-const shapingFonts = new Map();
 const typographyReady = import("./typography.js").then((m) => (typography = m));
+// Bundled fonts are fetched lazily (issue #3): the default font at start-up,
+// others when a text item needs them; each id is fetched once.
+const fontLoader = createFontLoader({
+  fetch: (url) => fetch(url),
+  baseUrl: import.meta.env.BASE_URL,
+  parse: (bytes) => opentype.parse(bytes),
+  makeShaping: (bytes) => typography.makeShapingFont(bytes),
+  onChange: () => {
+    if (!loading) renderProperties();
+  },
+});
+const shapingFonts = fontLoader.shaping;
+async function loadFont(id) {
+  await typographyReady;
+  return fontLoader.load(id);
+}
+let fontPreviews = null;
+const fontPreviewsReady = () =>
+  fontPreviews
+    ? Promise.resolve(fontPreviews)
+    : import("./font-previews.js").then((m) => (fontPreviews = m.FONT_PREVIEWS));
 
 const $ = (s) => document.querySelector(s),
   esc = (s) =>
@@ -94,11 +125,8 @@ const $ = (s) => document.querySelector(s),
           "'": "&#39;",
         })[c],
     );
-const fonts = new Map(),
-  fontLabels = new Map([
-    ["zen", "Zen Kaku Gothic New"],
-    ["shippori", "しっぽり明朝"],
-  ]);
+const fonts = fontLoader.fonts,
+  fontLabels = fontLoader.labels;
 let project = {
   version: 1,
   name: "はじめてのタイポグラフィ",
@@ -257,8 +285,22 @@ function redo() {
   history.push(JSON.stringify(project));
   restore(future.pop());
 }
+// A bundled font that is not loaded yet is fetched in the background; the
+// caller gets a clear message instead of a silent fallback to another font.
+function requireFont(id) {
+  if (fonts.has(id)) return;
+  const entry = bundledFont(id);
+  if (!entry) return;
+  const state = fontLoader.state(id);
+  if (state === "error") throw Error(fontLoader.error(id));
+  if (state !== "loading") loadFont(id).catch(() => renderProperties());
+  throw Error(
+    `フォント「${entry.label}」を読み込んでいます。完了後にもう一度操作してください。`,
+  );
+}
 function textContours(item) {
   if (!typography) throw Error("フォントの準備が完了するまでお待ちください。");
+  requireFont(item.font);
   return typography.layoutText(
     item,
     fonts.get(item.font),
@@ -267,6 +309,7 @@ function textContours(item) {
 }
 function textGlyphs(item) {
   if (!typography) throw Error("フォントの準備が完了するまでお待ちください。");
+  requireFont(item.font);
   return typography.layoutGlyphs(
     item,
     fonts.get(item.font),
@@ -517,9 +560,12 @@ $("#app").innerHTML = `
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
-<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <span class="subtle">TypeFab / 0.11</span></span></footer>
+<footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <button id="font-licenses-button" class="text-link">フォントライセンス</button> <span class="subtle">TypeFab / 0.12</span></span></footer>
 <input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,.svg,application/json,image/svg+xml">
 <dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「開く」でSVGの図形も読み込めます。「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
+<dialog id="font-gallery" class="font-gallery" aria-labelledby="font-gallery-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">FONTS</div><h2 id="font-gallery-title">フォント一覧</h2><div class="gallery-body"></div><button class="text-link" data-open-licenses>フォントライセンスを見る</button></dialog>
+<dialog id="font-licenses" class="font-licenses" aria-labelledby="font-licenses-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">FONT LICENSES</div><h2 id="font-licenses-title">フォントライセンス</h2><div class="licenses-body"></div></dialog>
+<dialog id="font-policy" class="font-policy" aria-labelledby="font-policy-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">USER FONTS</div><h2 id="font-policy-title">ユーザー追加フォントについて</h2><div class="policy-body">${FONT_POLICY_TEXT.split("\n\n").map((t) => `<p>${esc(t)}</p>`).join("")}</div><label class="check policy-check"><input type="checkbox" id="font-policy-agree"> このフォントを使用するために必要な権利・許諾を有していることを確認しました。</label><div class="policy-actions"><button class="text-link" data-open-licenses>詳細を見る（規約全文・標準フォントのライセンス）</button><button id="font-policy-accept" class="primary" disabled>確認してフォントを選ぶ</button></div><p class="note">規約バージョン ${FONT_POLICY_VERSION} · 同意はこのブラウザに保存され、規約が更新されると再確認します。</p></dialog>
 <div id="context-menu" class="context-menu" role="menu" aria-label="編集メニュー" hidden></div>
 <div id="text-editor" class="text-editor" hidden><textarea id="canvas-text" aria-label="文字を編集" maxlength="500" rows="2"></textarea><small>入力はすぐに反映 · Esc / ${shortcut("Enter")} で確定</small></div>`;
 
@@ -611,6 +657,132 @@ function pathPanel(i) {
       : ""
   }<label class="full-label path-d">SVG path d <small>オブジェクト座標 mm · M L H V C S Q T A Z</small><textarea id="path-d" spellcheck="false" rows="5" aria-label="SVG path d">${esc(toPathData(path))}</textarea></label>${pending ? `<p class="note">${i.warp ? "ワープした形" : i.type === "rect" ? "長方形" : i.type === "circle" ? "楕円" : "この輪郭"}は最初の編集で編集用パスに変換されます。</p>` : ""}<button id="path-done" class="wide-button warp-done">完了</button><p class="note">クリックで選択、Shift+クリックで追加、空白からドラッグで範囲選択。アンカー・ハンドルをドラッグして変形します（Alt+ハンドルでコーナー化）。パス上をダブルクリックでノード追加、Deleteで削除、Escで終了。</p></section>`;
 }
+// Font picker: a <select> grouped by category (bundled fonts marked 標準,
+// session fonts under 追加フォント), the current font's name drawn with its own
+// glyphs, the loading / error state, and buttons for the gallery and adding.
+function fontPreviewSVG(id, height = 22) {
+  const p = fontPreviews?.[id];
+  return p
+    ? `<svg viewBox="${p.viewBox}" style="height:${height}px;width:auto;max-width:100%" aria-hidden="true"><path d="${p.d}" fill="currentColor"/></svg>`
+    : "";
+}
+function fontStateLine(id) {
+  const state = fontLoader.state(id);
+  if (state === "loading") return `<span class="font-state loading">読み込み中…</span>`;
+  if (state === "error") return `<span class="font-state error">${esc(fontLoader.error(id))}</span>`;
+  if (state === "missing") return `<span class="font-state error">追加フォント（このセッションにありません。再度追加してください）</span>`;
+  return "";
+}
+// The font being fetched for the selected item (the item keeps its font
+// until the new one is ready).
+let pendingFont = null;
+function fontField(i) {
+  if (!fontPreviews) fontPreviewsReady().then(() => selectedItem()?.type === "text" && renderProperties());
+  const custom = [...fontLabels].filter(([k]) => !bundledFont(k));
+  const waiting = pendingFont && fontLoader.state(pendingFont) === "loading" ? pendingFont : null;
+  const shown = waiting ?? i.font;
+  const groups = Object.entries(FONT_CATEGORIES)
+    .map(([cat, label]) => {
+      const entries = FONT_CATALOG.filter((f) => f.category === cat);
+      return entries.length
+        ? `<optgroup label="${esc(label)}">${entries.map((f) => `<option value="${f.id}" ${shown === f.id ? "selected" : ""}>${esc(f.label)}（標準）</option>`).join("")}</optgroup>`
+        : "";
+    })
+    .join("");
+  const customGroup = custom.length
+    ? `<optgroup label="追加フォント">${custom.map(([k, v]) => `<option value="${esc(k)}" ${shown === k ? "selected" : ""}>${esc(v)}</option>`).join("")}</optgroup>`
+    : "";
+  const unknown = !fontLabels.has(i.font)
+    ? `<option value="${esc(i.font)}" selected>追加フォント（再読込が必要）</option>`
+    : "";
+  const entry = bundledFont(shown);
+  const stateLine = waiting
+    ? `<span class="font-state loading">「${esc(fontLabels.get(waiting))}」を読み込み中…（完了まで現在のフォントのままです）</span>`
+    : fontStateLine(i.font);
+  return `<label class="full-label">フォント<select id="font-select" aria-describedby="font-state">${groups}${customGroup}${unknown}</select></label><div id="font-preview" class="font-preview" title="${esc(fontLabels.get(shown) ?? shown)}">${fontPreviewSVG(shown, 26) || `<span>${esc(fontLabels.get(shown) ?? shown)}</span>`}</div><div id="font-state" class="font-meta">${entry ? `<span class="badge-std">TypeFab標準</span> ${esc(FONT_CATEGORIES[entry.category])} · ${esc(entry.licenseId)}` : `<span class="badge-user">追加フォント</span>`} ${stateLine}</div><div class="font-buttons"><button id="font-gallery-button" class="wide-button">☷ フォント一覧・プレビュー</button><button id="add-font" class="wide-button">＋ フォント追加 <small>TTF / OTF / WOFF</small></button></div>`;
+}
+// Selecting a font that is not loaded yet fetches it first; the item keeps its
+// current font until the new one is ready, and errors are shown as errors.
+async function chooseFont(id) {
+  const item = selectedItem();
+  if (!item || item.type !== "text") return;
+  if (fonts.has(id)) return updateSelected("font", id);
+  if (!bundledFont(id)) {
+    notify("このフォントはこのセッションにありません。フォントを追加し直してください。");
+    return renderProperties();
+  }
+  pendingFont = id;
+  renderProperties();
+  try {
+    await loadFont(id);
+    pendingFont = null;
+    const current = selectedItem();
+    if (current?.id === item.id && current.type === "text") updateSelected("font", id);
+    else notify(`フォント「${fontLabels.get(id)}」を読み込みました。`);
+  } catch (e) {
+    pendingFont = null;
+    notify(e.message);
+    renderProperties();
+  }
+}
+const fontGallery = $("#font-gallery");
+function renderFontGallery() {
+  const item = selectedItem(),
+    current = item?.type === "text" ? item.font : null;
+  const group = (title, entries) =>
+    entries.length
+      ? `<h4>${esc(title)}</h4><div class="gallery-list">${entries
+          .map(
+            ([id, label, std]) =>
+              `<button data-font="${esc(id)}" class="gallery-item ${id === current ? "current" : ""}" aria-pressed="${id === current}"><span class="gallery-preview">${fontPreviewSVG(id, 24) || `<span>${esc(label)}</span>`}</span><span class="gallery-meta">${esc(label)}${std ? ` <span class="badge-std">TypeFab標準</span>` : ` <span class="badge-user">追加フォント</span>`} ${fontStateLine(id)}${id === current ? " · 選択中" : ""}</span></button>`,
+          )
+          .join("")}</div>`
+      : "";
+  fontGallery.querySelector(".gallery-body").innerHTML =
+    Object.entries(FONT_CATEGORIES)
+      .map(([cat, label]) =>
+        group(
+          label,
+          FONT_CATALOG.filter((f) => f.category === cat).map((f) => [f.id, f.label, true]),
+        ),
+      )
+      .join("") +
+    group(
+      "追加フォント（このセッション）",
+      [...fontLabels].filter(([k]) => !bundledFont(k)).map(([k, v]) => [k, v, false]),
+    ) +
+    `<p class="note">標準フォントは選択時に読み込みます。プレビューは各フォントの実際の字形です。${current ? "" : "文字を選択してから開くと、ここでフォントを切り替えられます。"}</p>`;
+}
+function openFontGallery() {
+  fontPreviewsReady().then(() => {
+    renderFontGallery();
+    fontGallery.showModal();
+  });
+}
+const fontLicenses = $("#font-licenses");
+function renderFontLicenses() {
+  const base = import.meta.env.BASE_URL;
+  const paragraphs = (text) => text.split("\n\n").map((t) => `<p>${esc(t)}</p>`).join("");
+  fontLicenses.querySelector(".licenses-body").innerHTML = `<h3>標準搭載フォントについて</h3>${paragraphs(BUNDLED_FONTS_NOTE)}<table class="licenses"><thead><tr><th>フォント</th><th>著作権表示</th><th>ライセンス</th><th>配布元</th></tr></thead><tbody>${FONT_CATALOG.map((f) => `<tr><td>${esc(f.label)}<br><small>${esc(FONT_CATEGORIES[f.category])}</small></td><td>${esc(f.copyright)}</td><td><a href="${base}fonts/${f.licenseFile}" target="_blank" rel="noopener">${esc(f.license)}</a><br><small>同梱: fonts/${esc(f.licenseFile)}</small></td><td><a href="${esc(f.source)}" target="_blank" rel="noopener">Google Fonts</a><br><a href="${esc(f.upstream)}" target="_blank" rel="noopener"><small>作者リポジトリ</small></a></td></tr>`).join("")}</tbody></table><p class="note">同じ情報をリポジトリの <code>THIRD_PARTY_FONTS.md</code> でも管理しています。</p><h3 id="font-policy-heading">ユーザー追加フォントについて</h3>${paragraphs(FONT_POLICY_TEXT)}<p class="note">規約バージョン ${FONT_POLICY_VERSION}</p>`;
+}
+function openFontLicenses() {
+  renderFontLicenses();
+  fontLicenses.showModal();
+}
+// Local fonts can be added only after the person confirms they hold the
+// rights; the accepted policy version is kept in this browser.
+const FONT_POLICY_KEY = "typefab-font-policy";
+function requestFontFile() {
+  let accepted = false;
+  try {
+    accepted = fontPolicyAccepted(localStorage.getItem(FONT_POLICY_KEY));
+  } catch {}
+  if (accepted) return $("#font-file").click();
+  const dialog = $("#font-policy");
+  dialog.querySelector("#font-policy-agree").checked = false;
+  dialog.querySelector("#font-policy-accept").disabled = true;
+  dialog.showModal();
+}
 function renderProperties() {
   const i = selectedItem();
   if (pathItem()) {
@@ -627,7 +799,7 @@ function renderProperties() {
   }
   $("#properties").innerHTML = i
     ? `<section><div class="object-type">${i.type === "bridge" ? "BRIDGE / 非カット" : i.type === "text" ? "TYPOGRAPHY" : "SKETCH / パス"}</div><h3>${esc(i.name)}</h3><h4>配置 <span>mm</span></h4><div class="fields">${field("x", "X", i.x, 0.5)}${field("y", "Y", i.y, 0.5)}${field("rotation", "回転 °", i.rotation, 1, -360, 360)}</div></section>
-  ${i.type === "text" ? `<section><h4>テキスト</h4><textarea id="text-content" maxlength="500" aria-label="文字内容">${esc(i.text)}</textarea><label class="full-label">フォント<select id="font-select">${[...fontLabels].map(([k, v]) => `<option value="${esc(k)}" ${i.font === k ? "selected" : ""}>${esc(v)}</option>`).join("")}${!fontLabels.has(i.font) ? `<option value="${esc(i.font)}" selected>追加フォント（再読込が必要）</option>` : ""}</select></label><div id="font-preview" class="font-preview" style="font-family:${i.font === "zen" ? "ZenPreview" : i.font === "shippori" ? "ShipporiPreview" : "sans-serif"}">日本語 Aa 123</div><button id="add-font" class="wide-button">＋ フォント追加 <small>TTF / OTF / WOFF</small></button><div class="fields">${field("size", "サイズ mm", i.size, 0.5, 1, 300)}${field("spacing", "字間 mm", i.spacing, 0.1, -100, 100)}${field("stretch", "長体・平体 %", (i.stretch ?? 1) * 100, 1, 5, 2000)}</div><label class="check vertical-check"><input type="checkbox" id="vertical" ${i.vertical ? "checked" : ""}> 縦書き（右から左）</label><p class="note">四隅のハンドルで拡縮すると、サイズと長体・平体が変わります。キャンバスでダブルクリックすると文字を編集できます。</p></section><section><h4>ワープ・パス</h4><button id="enter-warp" class="wide-button">⌒ ワープ（エンベロープ変形）</button><p class="note">${i.warp ? `現在: ${esc(warpLabel(i.warp))} · ` : ""}文字のアウトラインそのものを曲線のエンベロープで変形します。</p><button id="outline-edit" class="wide-button">✎ アウトライン化してパス編集</button><p class="note">文字の輪郭をベジェ曲線のパスに変換し、ノードを直接編集します。</p></section>` : ""}
+  ${i.type === "text" ? `<section><h4>テキスト</h4><textarea id="text-content" maxlength="500" aria-label="文字内容">${esc(i.text)}</textarea>${fontField(i)}<div class="fields">${field("size", "サイズ mm", i.size, 0.5, 1, 300)}${field("spacing", "字間 mm", i.spacing, 0.1, -100, 100)}${field("stretch", "長体・平体 %", (i.stretch ?? 1) * 100, 1, 5, 2000)}</div><label class="check vertical-check"><input type="checkbox" id="vertical" ${i.vertical ? "checked" : ""}> 縦書き（右から左）</label><p class="note">四隅のハンドルで拡縮すると、サイズと長体・平体が変わります。キャンバスでダブルクリックすると文字を編集できます。</p></section><section><h4>ワープ・パス</h4><button id="enter-warp" class="wide-button">⌒ ワープ（エンベロープ変形）</button><p class="note">${i.warp ? `現在: ${esc(warpLabel(i.warp))} · ` : ""}文字のアウトラインそのものを曲線のエンベロープで変形します。</p><button id="outline-edit" class="wide-button">✎ アウトライン化してパス編集</button><p class="note">文字の輪郭をベジェ曲線のパスに変換し、ノードを直接編集します。</p></section>` : ""}
   ${["bridge", "rect", "circle", "line"].includes(i.type) ? `<section><h4>${i.type === "bridge" ? "切り残し領域" : "寸法"} <span>mm</span></h4><div class="fields">${field("w", "幅", i.w, 0.1, i.type === "line" ? 0 : 0.1)}${field("h", "高さ", i.h, 0.1, i.type === "line" ? 0 : 0.1)}${i.type === "rect" ? field("radius", "フィレット R", i.radius ?? 0, 0.1, 0, 1000) : ""}</div>${i.type === "rect" ? '<p class="note">4つの角を半径Rで丸めます。最大は短辺の半分です。</p>' : ""}${i.type === "bridge" ? '<p class="note">オレンジ色の領域に重なったカット線を除去します。</p>' : ""}</section>` : ""}`
     : '<section class="no-selection"><span>↖</span><h3>オブジェクトを選択</h3><p>キャンバスや左の一覧から選択して、文字・位置・寸法を編集できます。</p></section>';
   if (i && i.type !== "text" && canWarp(i))
@@ -941,7 +1113,7 @@ $("#properties").addEventListener("change", (e) => {
       return;
     }
     updateSelected(el.dataset.prop, el.valueAsNumber);
-  } else if (el.id === "font-select") updateSelected("font", el.value);
+  } else if (el.id === "font-select") chooseFont(el.value);
   else if (el.id === "vertical") updateSelected("vertical", el.checked);
   else if (el.id === "ratio-lock") updateSelected("ratioLocked", el.checked);
   else if (el.id === "warp-bend") liveSession = null;
@@ -1023,7 +1195,8 @@ $("#properties").addEventListener("focusout", (e) => {
   if (current?.type === "text") e.target.value = current.text;
 });
 $("#properties").addEventListener("click", (e) => {
-  if (e.target.closest("#add-font")) $("#font-file").click();
+  if (e.target.closest("#add-font")) requestFontFile();
+  if (e.target.closest("#font-gallery-button")) openFontGallery();
   if (e.target.closest("#item-auto-bridge")) applyAutoBridges();
   if (e.target.closest("#item-ungroup")) ungroup();
   if (e.target.closest("#item-group")) groupSelection();
@@ -1854,12 +2027,12 @@ $("#font-file").onchange = async (e) => {
     const bytes = await file.arrayBuffer();
     const font = opentype.parse(bytes);
     const id = `custom-${uid()}`;
-    fonts.set(id, font);
-    shapingFonts.set(
+    fontLoader.add(
       id,
+      font,
       typography.makeShapingFont(await typography.fontSFNT(bytes)),
+      file.name.replace(/\.[^.]+$/, ""),
     );
-    fontLabels.set(id, file.name.replace(/\.[^.]+$/, ""));
     if (selectedItem()?.type === "text") updateSelected("font", id);
     else render();
     notify(
@@ -2833,6 +3006,23 @@ window.addEventListener("keydown", (e) => {
   }
 });
 $("#help-button").onclick = () => $("#help").showModal();
+$("#font-licenses-button").onclick = openFontLicenses;
+document.querySelectorAll("dialog [data-close]").forEach((b) => (b.onclick = () => b.closest("dialog").close()));
+document.querySelectorAll("dialog [data-open-licenses]").forEach((b) => (b.onclick = openFontLicenses));
+fontGallery.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-font]");
+  if (!b) return;
+  fontGallery.close();
+  chooseFont(b.dataset.font);
+});
+$("#font-policy-agree").onchange = (e) => ($("#font-policy-accept").disabled = !e.target.checked);
+$("#font-policy-accept").onclick = () => {
+  try {
+    localStorage.setItem(FONT_POLICY_KEY, String(FONT_POLICY_VERSION));
+  } catch {}
+  $("#font-policy").close();
+  $("#font-file").click();
+};
 $("#close-help").onclick = $("#start").onclick = () => $("#help").close();
 async function init() {
   let restored = false;
@@ -2849,18 +3039,17 @@ async function init() {
   render();
   try {
     await typographyReady;
-    await Promise.all(
-      [
-        ["zen", "ZenKakuGothicNew-Regular.ttf"],
-        ["shippori", "ShipporiMincho-Regular.ttf"],
-      ].map(async ([id, file]) => {
-        const res = await fetch(`${import.meta.env.BASE_URL}fonts/${file}`);
-        if (!res.ok) throw Error(`フォント取得に失敗 (${res.status})`);
-        const bytes = await res.arrayBuffer();
-        fonts.set(id, opentype.parse(bytes));
-        shapingFonts.set(id, typography.makeShapingFont(bytes));
-      }),
-    );
+    // Only the default font is fetched at start-up. Fonts used by a restored
+    // project load in the background (their outlines are already stored).
+    await loadFont(DEFAULT_FONT);
+    const used = [
+      ...new Set(
+        project.items
+          .filter((i) => i.type === "text" && bundledFont(i.font))
+          .map((i) => i.font),
+      ),
+    ];
+    for (const id of used) loadFont(id).catch((e) => notify(e.message));
     if (!restored) {
       const title = {
         id: uid(),

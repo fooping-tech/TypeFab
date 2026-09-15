@@ -48,7 +48,8 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | `src/svgimport.js` | SVGファイルの読み込み：要素（path/rect/circle/ellipse/line/polyline/polygon）、transform・viewBox・単位のmm換算、Inkscapeレイヤー。ブラウザはDOMParser、Nodeのテストは同梱の簡易XMLパーサーを使う |
 | `src/edit.js` | 重ね順（最前面へ／前面へ／背面へ／最背面へ）、複製・貼り付け用のコピー |
 | `src/project.js` | プロジェクトJSONの入力検証、v1→v2移行 |
-| `public/fonts/` | 同梱書体（Zen Kaku Gothic New / しっぽり明朝）とOFLライセンス |
+| `src/fonts.js` / `src/font-previews.js` | 同梱フォントのカタログ（`FONT_CATALOG`）、遅延読み込み（`createFontLoader`）、ユーザー追加フォント規約（バージョン付き）。プレビューは `scripts/font-previews.mjs` で生成 |
+| `public/fonts/` / `THIRD_PARTY_FONTS.md` | 同梱書体8種（すべてOFL-1.1）とOFL本文。追加時はライセンス本文を確認し、カタログと一覧を更新する |
 | `tests/` | `node:test` による形状・編集・操作のテスト |
 
 ## 守るべき前提

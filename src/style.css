@@ -1,11 +1,3 @@
-@font-face {
-  font-family: ZenPreview;
-  src: url("/fonts/ZenKakuGothicNew-Regular.ttf");
-}
-@font-face {
-  font-family: ShipporiPreview;
-  src: url("/fonts/ShipporiMincho-Regular.ttf");
-}
 :root {
   font-family:
     Inter,
@@ -540,10 +532,140 @@ select {
   font-size: 11px;
 }
 .font-preview {
-  font-size: 21px;
-  padding: 13px 0;
+  font-size: 17px;
+  padding: 12px 0 6px;
   text-align: center;
-  color: #516373;
+  color: #35495b;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.font-meta {
+  font-size: 10px;
+  color: #8d9aa5;
+  margin: 0 0 10px;
+  line-height: 1.7;
+}
+.badge-std,
+.badge-user {
+  display: inline-block;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  font-weight: 650;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid #d9c3aa;
+  color: #a4602f;
+  background: #fff7ef;
+  vertical-align: middle;
+}
+.badge-user {
+  border-color: #c9d6e2;
+  color: #52697c;
+  background: #f2f6f9;
+}
+.font-state {
+  display: block;
+}
+.font-state.loading {
+  color: #3f85b7;
+}
+.font-state.error {
+  color: #b83a2c;
+}
+.font-buttons {
+  display: grid;
+  gap: 8px;
+}
+.font-buttons .wide-button {
+  margin-bottom: 0;
+}
+.font-buttons + .fields {
+  margin-top: 16px;
+}
+.font-gallery,
+.font-licenses,
+.font-policy {
+  width: min(720px, 92vw);
+  max-width: 720px;
+  max-height: 88vh;
+  overflow: auto;
+}
+.font-gallery h4 {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: #8d9aa5;
+  margin: 18px 0 8px;
+}
+.gallery-list {
+  display: grid;
+  gap: 6px;
+}
+.gallery-item {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  text-align: left;
+  border: 1px solid #dfe4e8;
+  padding: 10px 12px;
+}
+.gallery-item.current {
+  border-color: #c27a45;
+  background: #fff8f1;
+}
+.gallery-preview {
+  color: #253748;
+  display: block;
+}
+.gallery-meta {
+  font-size: 11px;
+  color: #6b7a87;
+}
+.licenses {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 14px 0;
+}
+.licenses th,
+.licenses td {
+  text-align: left;
+  vertical-align: top;
+  padding: 8px 8px 8px 0;
+  border-bottom: 1px solid #e6ebef;
+}
+.licenses th {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #8d9aa5;
+}
+.font-licenses h3,
+.font-policy h3 {
+  font-size: 14px;
+  margin: 22px 0 6px;
+}
+.policy-body p,
+.licenses-body p {
+  color: #4b5b69;
+}
+.policy-check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 13px;
+  margin: 14px 0;
+  color: #253748;
+}
+.policy-check input {
+  margin-top: 4px;
+}
+.policy-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 .wide-button {
   width: 100%;
