@@ -426,3 +426,4 @@
 - 日本語品質（目視）: Zen Kaku Gothic New／Shippori Mincho の「ここまで読んだ」「ありがとう」「TypeFab」「設計」を最短距離のみ（`nearestOnly`）と並べて SVG を描画し確認。「ま」の横画端→「で」、「T」の横画端、「で」の上端など端部から延ばす候補が採用され、最短距離のみとは接続位置が変わる（自動テストでも差を確認）。明朝の払い・はねの先端は端部として検出されない箇所が残り、Smooth が常に成立するため Tapered／Rounded は手動指定時のみ使われる。矩形を並べるだけの結果ではないが「自然さ」の評価は目視の範囲で、V1.5 の local thickness／Stroke Extend は未実装。
 - 性能（Node、Shippori Mincho 12 mm、100文字、成分205・接続201）: analyze 約70〜90 ms、generate 約0.6 s（結果 Union の strict 簡略化を外す前は約2.1 s）。実機のブラウザでは同程度の待ちが1回の生成・手動操作ごとに発生する。Worker 化は未実施。
 - 未検証・未実装: 実機加工、kerf による接続消失、材料ごとの最小幅・強度、加工ソフトでの結果。確定後の Connector 再編集（V1.5）、Stroke Extend スタイル、精密な local thickness。公開（GitHub Pages）は PR マージ後の `main` push で行い、その際に Actions と公開 URL を確認する。
+- PR: https://github.com/fooping-tech/TypeFab/pull/6（ブランチ `smart-connect`、コミット `7d528e2`）。マージ後の `main` push で Pages デプロイが走る。Actions と公開 URL の確認はマージ後に別途行う。
