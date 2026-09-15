@@ -34,6 +34,21 @@
               <div class="fields"><label>実寸の幅 (mm)<input type="number" id="confirm-width" min="1" step="0.1" /></label><div class="field"><span>&nbsp;</span><button id="confirm-apply">実寸を適用</button></div></div>
             </div>
             <div class="stat" id="stat"></div>
+            <div id="mockup" class="mockup hidden">
+              <div class="mockup-head">
+                <h3>完成イメージ（黒クラフトペーパーのしおり）</h3>
+                <div class="tabs" role="tablist" aria-label="完成イメージの表示" id="mockup-tabs">
+                  <button type="button" role="tab" id="mockup-tab-single" aria-controls="mockup-panel" aria-selected="false" tabindex="-1" data-view="single">単体</button>
+                  <button type="button" role="tab" id="mockup-tab-book" aria-controls="mockup-panel" aria-selected="true" tabindex="0" data-view="book">本に挟む</button>
+                  <button type="button" role="tab" id="mockup-tab-compare" aria-controls="mockup-panel" aria-selected="false" tabindex="-1" data-view="compare">サイズ比較</button>
+                </div>
+              </div>
+              <div id="mockup-panel" class="mockup-scene" role="tabpanel" aria-labelledby="mockup-tab-book" tabindex="0"></div>
+              <dl class="mockup-info" id="mockup-info"></dl>
+              <label class="mockup-rotate hidden" id="mockup-rotate-wrap"><input type="checkbox" id="mockup-rotate" checked /> 横長のデザインを 90° 回転して縦向きに表示する</label>
+              <ul class="checks" id="mockup-warnings"></ul>
+              <p class="note" id="mockup-note">完成イメージは切断線から求めた形を黒いクラフトペーパー風に描いた目安です。実際の材料の色・表面・仕上がりとは異なります。文庫本は 105 × 148 mm の固定サイズで、上部から見える長さは 20 mm としています。</p>
+            </div>
           </section>
         </div>
         <div>

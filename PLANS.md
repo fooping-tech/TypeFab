@@ -427,3 +427,20 @@
 - 性能（Node、Shippori Mincho 12 mm、100文字、成分205・接続201）: analyze 約70〜90 ms、generate 約0.6 s（結果 Union の strict 簡略化を外す前は約2.1 s）。実機のブラウザでは同程度の待ちが1回の生成・手動操作ごとに発生する。Worker 化は未実施。
 - 未検証・未実装: 実機加工、kerf による接続消失、材料ごとの最小幅・強度、加工ソフトでの結果。確定後の Connector 再編集（V1.5）、Stroke Extend スタイル、精密な local thickness。公開（GitHub Pages）は PR マージ後の `main` push で行い、その際に Actions と公開 URL を確認する。
 - PR: https://github.com/fooping-tech/TypeFab/pull/6（ブランチ `smart-connect`、コミット `7d528e2`）。マージ後の `main` push で Pages デプロイが走る。Actions と公開 URL の確認はマージ後に別途行う。
+
+## 注文ページのしおり出来栄えプレビュー — Issue #7（2026-09-15）
+
+### 要求
+- 出典: https://github.com/fooping-tech/TypeFab/issues/7 （本文を取得して確認。コメントなし）。加工注文ページに、黒いクラフトペーパーで作るしおりの完成イメージを「単体／本に挟む／サイズ比較」の3表示で確認できるプレビューを追加する。
+- 文庫本は固定値 105 × 148 mm、上部から見える長さは固定値 20 mm。本としおりは実寸比率で描く。しおりの実寸・文庫本のサイズ・上部表示量を表示する。
+- しおり用途として不自然なサイズ（幅 50 mm 超、長さ 90 mm 未満、160 mm 超）は注文を止めない注意として表示し、閾値は定数化する。
+- 実寸が確定していないSVGではモックアップを出さず、既存の実寸確認フローを優先する。既存のSVG検査・サニタイズ・料金計算・Checkoutは変更しない。Three.js等は導入しない。
+- 完了条件: Issueの「完了条件」一覧（表示切替、黒クラフト表現、文庫本モックアップ、実寸比率、挟んだ状態、実寸表示、上部表示長、サイズ警告、実寸未確定時の非表示、既存検査・料金・Checkoutの維持、Desktop/iPad/iPhone確認、build・既存テスト成功、console errorなし）。README更新、GitHub Pagesへの反映と確認。
+
+### 実装結果（2026-09-15）
+- 新規 `src/bookmark-preview.js`（純粋関数、Node でテスト可能）: 定数 `BOOK_WIDTH_MM=105` / `BOOK_HEIGHT_MM=148` / `VISIBLE_TOP_MM=20` / `BOOKMARK_THRESHOLDS`（幅50超・長さ90未満・160超）/ `COMPARISON_REFERENCES`。`bookmarkPiece(svg)` は既存の `parseSVG` / `documentSize` / `svgShapes` / `pathContours` で切断線を mm で取り出し、`closeCutLoops` で開いた線（ブリッジで途切れた線）を閉じる（隙間 6 mm 以内は輪郭に沿って閉じ、ブリッジの側面が短い場合はそちらをたどって接続部を材料として残す）。すべての切断線を囲む閉じた外形があればそれを紙片（外形の周りは余白）、なければ SVG 全体を1枚の紙として扱う。実寸未確定・図形なし・読めない SVG は null。`renderSingle` / `renderInBook` / `renderComparison` は mm 単位の viewBox を持つ SVG 文字列（偶奇規則の塗り、feTurbulence の紙繊維、feDropShadow、カット縁の細線、寸法線、本は表紙・背・上端のページ、隠れる部分は破線のゴースト）。横長は既定で 90° 回転（`bookmarkOrientation`）。
+- `order/index.html` / `src/order.js` / `src/order.css`: SVG カードの下に「完成イメージ（黒クラフトペーパーのしおり）」を追加。`role="tablist"` / `role="tab"`（`aria-selected`、矢印・Home/End キー、44 px 以上のタップ領域）と `role="tabpanel"`。既定は「本に挟む」。情報欄に文庫本・しおり（外形／用紙）・SVG実寸（異なる場合）・上部表示・下部はみ出し・文庫本との比を表示。サイズ警告は ⚠ 付きの注意（注文は止めない）。実寸未確定の SVG は既存の実寸確認フローを案内しタブを無効化、スクリプト等を含む SVG・図形なしは非表示。既存の 2D プレビュー・検査・サニタイズ・料金計算・Checkout は変更なし。
+- `README.md` に「完成イメージ（文庫本しおりのプレビュー）」節を追加。
+- テスト: 新規 `tests/bookmark-preview.test.js` 13件（定数、Issue の4サイズの警告、レイアウト（上部20・挿入・はみ出し12・短い紙片）、向き、保持タブの隙間閉じ、リング＋ブリッジの接続、外形／用紙の判定、実寸未確定・図形なし・不正テキストで null、開いた線のみ、Shippori Mincho の実フォント＋自動ブリッジの TypeFab 出力、3描画の viewBox・evenodd・ラベル・NaN なし、180 mm のはみ出し・横長の回転、比較対象の追加）。`npm test`: 175 passed（既存162＋13）。`npm run build` 成功。
+- 実ブラウザ（Chromium、production preview、Playwright 35項目）: エディタ受け渡し SVG で表示、既定タブ、105×148 の本、情報欄、SVG実寸の別表示、2D プレビューと料金の維持、タブ切替と `aria-labelledby`、単体の質感フィルタと evenodd、サイズ比較の画面上の幅比 = 38/105（0.3619）、矢印・Home キー、60×180（幅広＋はみ出し警告、下部はみ出し 12 mm、注文検査は不変）、20×80（短い警告のみ）、50×148（警告なし）、横長 118×36（回転トグル既定 ON、OFF で警告2件）、px SVG（案内表示・タブ無効・描画なし → 38 mm 適用で 38×120 を表示）、script 入り SVG（拒否・非表示）、文字のみ（非表示）、iPad 820px / iPhone 390px（横スクロールなし、タブ高さ 40/44 px、シーン幅）、console error なし。WebKit でも描画・console error なし。スクリーンショットで Desktop / iPad / iPhone の見た目を確認。
+- 既知事項: TypeFab の自動ブリッジ（ステンシル）の「A」頂点付近に細い切れ端が出るのは既存の書き出し形状で、プレビューはそれを忠実に描く。太い画（ブリッジ幅の約4倍超）の隙間式ブリッジでは接続部を描かず穴を閉じた形になる場合がある。文庫本サイズ・上部表示量は固定で、本の厚さは考慮しない。実物の紙色・表面・加工結果は未検証。

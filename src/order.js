@@ -1,6 +1,7 @@
 import "./order.css";
 import { CATALOG, quote, publicCatalog } from "./pricing.js";
 import { analyzeSVG, sanitizeSVG, withPhysicalSize } from "./svganalyze.js";
+import { BOOK_WIDTH_MM, BOOK_HEIGHT_MM, bookmarkPiece, bookmarkOrientation, bookmarkLayout, bookmarkWarnings, renderSingle, renderInBook, renderComparison } from "./bookmark-preview.js";
 
 const API = (import.meta.env.VITE_ORDER_API_URL || "").replace(/\/$/, "");
 const HANDOFF_KEY = "typefab-order";
@@ -33,6 +34,10 @@ const state = {
   quantity: 1,
   deliveryType: "NORMAL",
   quote: null,
+  // Finished-look mock-ups (issue #7): which view is open, whether a
+  // landscape design is shown upright (null = automatic), and the piece
+  // read from the SVG (null until the physical size is known).
+  mockup: { view: "book", rotated: null, piece: null },
 };
 let previewUrl = null;
 
@@ -54,8 +59,78 @@ function setSVG(text, fileName, fromEditor = false) {
   state.fileName = fileName || "design.svg";
   state.fromEditor = fromEditor;
   state.analysis = analyzeSVG(text, { limits: state.catalog.limits });
+  state.mockup.piece = null;
+  state.mockup.rotated = null;
+  if (state.analysis.size?.known && !state.analysis.security.length) {
+    try {
+      state.mockup.piece = bookmarkPiece(text);
+    } catch {
+      state.mockup.piece = null;
+    }
+  }
   renderSVG();
+  renderMockup();
   updateQuote();
+}
+// ---- finished-look mock-ups -------------------------------------------------------
+const MOCKUP_VIEWS = { single: renderSingle, book: renderInBook, compare: renderComparison };
+function renderMockup() {
+  const a = state.analysis,
+    m = state.mockup,
+    box = $("#mockup"),
+    panel = $("#mockup-panel"),
+    tabs = [...$("#mockup-tabs").querySelectorAll("[role=tab]")];
+  const unreadable = !a || !state.svg || a.errors.some((e) => /読み込めません|SVGファイルではありません|大きすぎます（最大/.test(e)) || a.security.length;
+  const sizePending = a && a.size && !a.size.known;
+  if (unreadable || !a.pathCount || (!sizePending && !m.piece)) {
+    box.classList.add("hidden");
+    return;
+  }
+  box.classList.remove("hidden");
+  for (const t of tabs) {
+    const on = t.dataset.view === m.view;
+    t.setAttribute("aria-selected", on ? "true" : "false");
+    t.tabIndex = on ? 0 : -1;
+    t.disabled = Boolean(sizePending);
+  }
+  panel.setAttribute("aria-labelledby", `mockup-tab-${m.view}`);
+  $("#mockup-rotate-wrap").classList.add("hidden");
+  if (sizePending) {
+    panel.innerHTML = `<p class="empty">実寸（mm）を確定すると完成イメージを表示します。上の「実寸の幅 (mm)」を入力して「実寸を適用」を押してください。</p>`;
+    $("#mockup-info").innerHTML = "";
+    $("#mockup-warnings").innerHTML = "";
+    return;
+  }
+  const piece = m.piece;
+  const o = bookmarkOrientation(piece, m.rotated);
+  const lay = bookmarkLayout(o.widthMm, o.heightMm);
+  panel.innerHTML = MOCKUP_VIEWS[m.view](piece, { rotated: o.rotated });
+  const mm = (v) => `${Number(v).toFixed(1)} mm`;
+  const rows = [
+    ["文庫本", `${BOOK_WIDTH_MM} × ${BOOK_HEIGHT_MM} mm`],
+    ["しおり", `${mm(o.widthMm)} × ${mm(o.heightMm)}${piece.sheet ? "（SVG全体を1枚の紙として表示）" : "（切断線の外形）"}`],
+  ];
+  if (!piece.sheet && (Math.abs(piece.sheetWidthMm - piece.widthMm) > 0.05 || Math.abs(piece.sheetHeightMm - piece.heightMm) > 0.05))
+    rows.push(["SVG実寸", `${mm(piece.sheetWidthMm)} × ${mm(piece.sheetHeightMm)}（外形の周りは余白）`]);
+  if (m.view === "book") {
+    rows.push(["上部表示", mm(lay.visibleTopMm)]);
+    if (lay.bottomOverhangMm > 0) rows.push(["下部はみ出し", mm(lay.bottomOverhangMm)]);
+  }
+  if (m.view === "compare") rows.push(["文庫本との比", `幅 ${Math.round(lay.widthRatio * 100)}% · 高さ ${Math.round(lay.heightRatio * 100)}%`]);
+  $("#mockup-info").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+  if (piece.widthMm > piece.heightMm) {
+    $("#mockup-rotate-wrap").classList.remove("hidden");
+    $("#mockup-rotate").checked = o.rotated;
+  }
+  $("#mockup-warnings").innerHTML = bookmarkWarnings(o.widthMm, o.heightMm)
+    .map((w) => `<li class="warn" data-code="${esc(w.code)}">${esc(w.text)}</li>`)
+    .join("");
+}
+function selectMockupView(view, focus = false) {
+  if (!MOCKUP_VIEWS[view]) return;
+  state.mockup.view = view;
+  renderMockup();
+  if (focus) $(`#mockup-tab-${view}`)?.focus();
 }
 function renderSVG() {
   const a = state.analysis;
@@ -314,6 +389,22 @@ function wire() {
       alertMsg(e.message);
     }
   };
+  $("#mockup-tabs").addEventListener("click", (e) => {
+    const tab = e.target.closest("[role=tab]");
+    if (tab && !tab.disabled) selectMockupView(tab.dataset.view);
+  });
+  $("#mockup-tabs").addEventListener("keydown", (e) => {
+    const views = Object.keys(MOCKUP_VIEWS),
+      i = views.indexOf(state.mockup.view);
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      selectMockupView(views[(i + (e.key === "ArrowRight" ? 1 : views.length - 1)) % views.length], true);
+    } else if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      selectMockupView(e.key === "Home" ? views[0] : views.at(-1), true);
+    }
+  });
+  $("#mockup-rotate").onchange = (e) => { state.mockup.rotated = e.target.checked; renderMockup(); };
   $("#material").onchange = (e) => { state.material = e.target.value; renderOptions(); updateQuote(); };
   $("#thickness").onchange = (e) => { state.thicknessMm = Number(e.target.value); updateQuote(); };
   $("#quantity").oninput = (e) => { state.quantity = Math.max(1, Math.floor(Number(e.target.value) || 1)); updateQuote(); };
