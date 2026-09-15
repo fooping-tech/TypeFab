@@ -458,3 +458,4 @@
 - テスト: `tests/landing.test.js` に「8書体・Smart Connect・2D CAD・完成イメージ・新しい画像参照・削除した画像を参照しない」の1件を追加。`npm test`: 176 passed。`npm run build` 成功。
 - 実ブラウザ（本番ビルドの preview、Chromium 1440×900 / 1024×1366 / 390×844、WebKit 390×844、68項目）: タイトル、横スクロールなし、9タブすべて表示と画像読み込み、全16画像の読み込み、しおり・スマート接続の図、Coming Soon 表示の維持、エディタCTA、console error / warning なし、失敗リクエストなし — すべて通過。Desktop / iPhone のスクリーンショットで新節の見た目を確認。
 - 気づき: エディタを Playwright で操作中（スマート接続の最大距離入力→change 送出、または CAD ツールのクリック）に1回 `NotFoundError: Failed to set the 'innerHTML' property ... moved in a 'blur' event handler` の page error が出た。紹介ページとは無関係のエディタ側の事象で、手動操作での再現は未確認。今回は対応していない。
+- 公開: コミット `f2179f0` を `main` へ push。Actions https://github.com/fooping-tech/TypeFab/actions/runs/34977662161 は success。`https://fooping-tech.github.io/TypeFab/`、`landing/smart-connect.webp`、`landing/bookmark.webp`、`landing/og.png` が HTTP 200。公開サイトに対して同じ68項目のブラウザ検査（Chromium Desktop / iPad / iPhone、WebKit iPhone）を実行し、すべて通過（2026-09-15）。
