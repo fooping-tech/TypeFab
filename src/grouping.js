@@ -1,4 +1,3 @@
-import ClipperLib from "clipper-lib";
 import {
   bounds,
   transform,
@@ -6,7 +5,7 @@ import {
   crossesContour,
 } from "./geometry.js";
 import { warpContours } from "./warp.js";
-const SCALE = 10000;
+import { unionRegions } from "./polygon.js";
 const isClosed = (c) =>
   c.length > 3 && Math.hypot(c[0].x - c.at(-1).x, c[0].y - c.at(-1).y) < 1e-7;
 const shift = (contours, d) =>
@@ -58,46 +57,8 @@ export function splitParts(item) {
     }));
 }
 // Nonzero union of closed contours, grouped as [outer, ...holes] per region.
-function filledRegions(contours) {
-  const clipper = new ClipperLib.Clipper();
-  clipper.AddPaths(
-    contours.map((c) =>
-      c.slice(0, -1).map((p) => ({
-        X: Math.round(p.x * SCALE),
-        Y: Math.round(p.y * SCALE),
-      })),
-    ),
-    ClipperLib.PolyType.ptSubject,
-    true,
-  );
-  const tree = new ClipperLib.PolyTree();
-  if (
-    !clipper.Execute(
-      ClipperLib.ClipType.ctUnion,
-      tree,
-      ClipperLib.PolyFillType.pftNonZero,
-      ClipperLib.PolyFillType.pftNonZero,
-    )
-  )
-    throw Error("部位の分解に失敗しました。");
-  const decode = (path) => {
-    const ps = path.map((p) => ({ x: p.X / SCALE, y: p.Y / SCALE }));
-    return [...ps, { ...ps[0] }];
-  };
-  const groups = [];
-  const walk = (node) => {
-    for (const outer of node.Childs()) {
-      groups.push(
-        [outer.Contour(), ...outer.Childs().map((hole) => hole.Contour())]
-          .filter((c) => c.length >= 3)
-          .map(decode),
-      );
-      for (const hole of outer.Childs()) walk(hole);
-    }
-  };
-  walk(tree);
-  return groups;
-}
+const filledRegions = (contours) =>
+  unionRegions(contours).map((r) => [r.outer, ...r.holes]);
 // A bridge scoped to a split item keeps acting on every piece it crosses, so
 // the cut geometry is unchanged: it is retargeted to the first such piece and
 // copied for the others. A bridge crossing none goes to the nearest piece.
