@@ -87,6 +87,25 @@ import {
   FONT_POLICY_TEXT,
   BUNDLED_FONTS_NOTE,
 } from "./fonts.js";
+import {
+  polygonItem,
+  mirrorItems,
+  axisThrough,
+  rectangularPattern,
+  circularPattern,
+  offsetItem,
+  trimItem,
+  extendItem,
+  cornerItem,
+  cornerOfLines,
+  measurePoints,
+  measureItem,
+  snapToVertex,
+  makeDimension,
+  dimensionLabel,
+  dimensionGeometry,
+  DIMENSION_TYPES,
+} from "./cad.js";
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 let typography;
 const typographyReady = import("./typography.js").then((m) => (typography = m));
@@ -162,6 +181,7 @@ const selectedItems = () =>
     .map((id) => project.items.find((i) => i.id === id))
     .filter((i) => isEditable(project, i));
 function selectItem(id, additive = false) {
+  if (id) selectedAnnotation = null;
   if (
     id &&
     !isEditable(
@@ -349,6 +369,41 @@ function withWarp(item, warp, base = unwarpedLayout(item)) {
 // item.path; rectangles and ellipses start from exact paths, warped shapes and
 // plain polyline outlines from fitted curves. Nothing changes until an edit,
 // which turns the item into a fixed path whose contours are the flattened path.
+// ---- 2D CAD tools (issue #4). `cad` holds the active tool's transient state
+// (clicked points, errors); `cadParams` keeps each tool's last parameters.
+const CAD_TOOLS = {
+  polygon: { group: "CREATE", label: "多角形", icon: "⬡", hint: "中心をクリックして正多角形を置く（頂点数・半径・回転は右側）" },
+  offset: { group: "MODIFY", label: "オフセット", icon: "⧉", hint: "図形を選び、右側で距離と向きを決めて確定", panelOnly: true },
+  trim: { group: "MODIFY", label: "トリム", icon: "✂", hint: "他の図形と交差している線の、消したい部分をクリック" },
+  extend: { group: "MODIFY", label: "延長", icon: "⟶", hint: "延長したい線の端の近くをクリック（最初に交差する図形まで延長）" },
+  fillet: { group: "MODIFY", label: "フィレット", icon: "◜", hint: "丸めたい角（ノード）をクリック。半径は右側。接する2本の線分は端点をクリック" },
+  chamfer: { group: "MODIFY", label: "面取り", icon: "◺", hint: "面取りしたい角（ノード）をクリック。距離は右側" },
+  mirror: { group: "PATTERN", label: "ミラー", icon: "⇔", hint: "図形を選び、基準線の2点をクリック（または右側の軸ボタン）→ 確定" },
+  rpattern: { group: "PATTERN", label: "矩形パターン", icon: "▦", hint: "図形を選び、右側で列・行・間隔を決めて確定", panelOnly: true },
+  cpattern: { group: "PATTERN", label: "円形パターン", icon: "✱", hint: "図形を選び、中心をクリック（または右側で入力）→ 確定" },
+  measure: { group: "INSPECT", label: "計測", icon: "⟷", hint: "2点をクリックで距離・ΔX・ΔY。線分・円をクリックで長さ・角度・半径" },
+  dimension: { group: "INSPECT", label: "寸法", icon: "⊢⊣", hint: "右側で種類を選び、点をクリックして寸法を置く（参照寸法・SVGには出力しません）" },
+};
+const CAD_GROUPS = ["CREATE", "MODIFY", "PATTERN", "INSPECT"];
+let cad = null,
+  selectedAnnotation = null;
+const cadParams = {
+  polygon: { sides: 6, radius: 20, rotation: 0 },
+  rpattern: { columns: 3, rows: 2, dx: 30, dy: 30 },
+  cpattern: { cx: 0, cy: 0, count: 6, totalAngle: 360 },
+  offset: { distance: 2, side: "outside", join: "round" },
+  fillet: { radius: 3 },
+  chamfer: { distance: 2 },
+  dimension: { type: "linear" },
+};
+const DIMENSION_LABELS = {
+  linear: "直線（2点間）",
+  horizontal: "水平",
+  vertical: "垂直",
+  angle: "角度（頂点→2点）",
+  radius: "半径（中心→円周）",
+  diameter: "直径（中心→円周）",
+};
 const PATHABLE = ["outline", "rect", "circle"];
 const pathItem = () => {
   const item = selectedItem();
@@ -557,6 +612,7 @@ $("#app").innerHTML = `
   .join(
     "",
   )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button><button id="group" class="tool" title="選択をグループ化 (${shortcut("G")})"><span class="tool-icon">▣</span>グループ化</button><button id="ungroup" class="tool" title="グループを解除、または文字を1文字ずつ・部位ごとに分解 (${shortcut("G", true)})"><span class="tool-icon">⊞</span>グループ化解除</button><button id="warp" class="tool" title="文字のアウトラインをエンベロープで変形（Text Warp）"><span class="tool-icon">⌒</span>ワープ</button><button id="edit-path" class="tool" title="パスのノードを直接編集（ダブルクリックでも開始）"><span class="tool-icon">✎</span>パス編集</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
+<nav class="toolbar cad-toolbar" aria-label="2D CADツール">${CAD_GROUPS.map((g) => `<div class="tool-group"><span class="tool-group-label">${g}</span>${Object.entries(CAD_TOOLS).filter(([, t]) => t.group === g).map(([id, t]) => `<button data-tool="${id}" class="tool cad-tool" title="${t.hint}"><span class="tool-icon">${t.icon}</span>${t.label}</button>`).join("")}</div>`).join("")}<span class="subtle cad-note">拘束なしの2D編集 · 結果は通常のパス · 寸法は参照のみ</span></nav>
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
@@ -603,7 +659,7 @@ function renderLayers() {
     ${layerRows(project.items.filter((i) => i.layerId === l.id).reverse())}
   </div>`,
     )
-    .join("");
+    .join("") + annotationRows();
 }
 function field(key, label, value, step = 1, min = -2000, max = 2000) {
   return `<label>${label}<input data-prop="${key}" type="number" value="${Number(value.toFixed(3))}" step="${step}" min="${min}" max="${max}"></label>`;
@@ -785,6 +841,12 @@ function requestFontFile() {
 }
 function renderProperties() {
   const i = selectedItem();
+  if (cad) {
+    $("#properties").innerHTML = cadPanel();
+    $("#board-width").value = project.width;
+    $("#board-height").value = project.height;
+    return;
+  }
   if (pathItem()) {
     $("#properties").innerHTML = pathPanel(i);
     $("#board-width").value = project.width;
@@ -919,6 +981,14 @@ function rotateOverlay(items, scale) {
     cx = (Math.min(...xs) + Math.max(...xs)) / 2;
   return `<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" fill="none" stroke="#3b85b5" stroke-width="${px}" stroke-dasharray="${4 * px} ${3 * px}" pointer-events="none"/>${knob(cx, Math.min(...ys) - 24 * px, Math.min(...ys))}`;
 }
+// Lines and outlines made only of open contours (trimmed paths, offset
+// polylines, filleted line pairs) are drawn as strokes, not filled areas.
+const openOnly = (i) =>
+  i.type === "line" ||
+  (i.type === "outline" &&
+    !i.contours.some(
+      (c) => c.length > 3 && Math.hypot(c[0].x - c.at(-1).x, c[0].y - c.at(-1).y) < 1e-7,
+    ));
 function renderCanvas() {
   const svg = $("#canvas");
   svg.setAttribute("viewBox", `0 0 ${project.width} ${project.height}`);
@@ -936,7 +1006,7 @@ function renderCanvas() {
     : normal
         .map(
           (i) =>
-            `<g data-object="${i.id}" class="canvas-object"><path d="${pathData(stencilContours(i, bridges))}" fill="${i.type === "line" ? "none" : selectionIds().includes(i.id) ? "#d9e9f5" : "#354859"}" fill-opacity="${i.type === "line" ? 0 : 0.9}" fill-rule="nonzero" stroke="${selectionIds().includes(i.id) ? "#276c9c" : "#243b50"}" stroke-width="0.22"/><path d="${pathData(worldContours(i))}" fill="none" stroke="transparent" stroke-width="2"/></g>`,
+            `<g data-object="${i.id}" class="canvas-object"><path d="${pathData(stencilContours(i, bridges))}" fill="${openOnly(i) ? "none" : selectionIds().includes(i.id) ? "#d9e9f5" : "#354859"}" fill-opacity="${openOnly(i) ? 0 : 0.9}" fill-rule="nonzero" stroke="${selectionIds().includes(i.id) ? "#276c9c" : "#243b50"}" stroke-width="${openOnly(i) ? 0.35 : 0.22}"/><path d="${pathData(worldContours(i))}" fill="none" stroke="transparent" stroke-width="2"/></g>`,
         )
         .join("") +
       bridges
@@ -976,8 +1046,9 @@ function renderCanvas() {
       }</g>`;
     }
   const chosen = selectedItems();
-  if (!preview && !warpId && !pathEdit && chosen.length)
+  if (!preview && !warpId && !pathEdit && chosen.length && !cad)
     overlay += rotateOverlay(chosen, scale);
+  overlay += annotationsOverlay(scale) + cadOverlay(scale);
   $("#selection").innerHTML = overlay;
   $("#canvas").style.cursor = preview
     ? "default"
@@ -990,7 +1061,9 @@ function renderCanvas() {
       ? "ワープ編集中 · アウトラインそのものを変形"
       : pathEdit
         ? "パス編集中 · ノードを直接変形"
-        : "スケッチ編集中";
+        : cad
+          ? `${CAD_TOOLS[cad.tool].label} · 2D CAD`
+          : "スケッチ編集中";
   $("#hint").textContent = drag?.label
     ? drag.label
     : preview
@@ -1001,7 +1074,7 @@ function renderCanvas() {
           ? "ノード・ハンドルをドラッグ · Shiftで追加選択 · パス上をダブルクリックで追加 · Deleteで削除 · Escで終了"
           : tool === "select"
             ? "空白からドラッグで範囲選択 · 右クリックで編集メニュー · 2本指スワイプで移動 · ピンチでズーム"
-            : `${labels[tool]}を配置する場所をクリック`;
+            : (CAD_TOOLS[tool]?.hint ?? `${labels[tool]}を配置する場所をクリック`);
   $("#board-label").textContent = `${project.width} × ${project.height} mm`;
   $("#zoom-reset").textContent = `${Math.round(zoom * 100)}%`;
 }
@@ -1106,6 +1179,7 @@ function updateSelected(key, value) {
 }
 $("#properties").addEventListener("change", (e) => {
   const el = e.target;
+  if (el.dataset.cad) return cadParamChange(el);
   if (el.dataset.prop) {
     if (!el.checkValidity() || !Number.isFinite(el.valueAsNumber)) {
       notify("有効な数値を入力してください。");
@@ -1195,6 +1269,19 @@ $("#properties").addEventListener("focusout", (e) => {
   if (current?.type === "text") e.target.value = current.text;
 });
 $("#properties").addEventListener("click", (e) => {
+  if (e.target.closest("#cad-confirm")) return cadConfirm();
+  if (e.target.closest("#cad-cancel")) return cadCancel();
+  if (e.target.closest("#cad-clear") && cad) {
+    cad.points = [];
+    cad.result = null;
+    return render();
+  }
+  if ((e.target.closest("#cad-axis-v") || e.target.closest("#cad-axis-h")) && cad) {
+    const chosen = selectedItems();
+    if (!chosen.length) return notify("先に図形を選んでください。");
+    cad.points = axisThrough(selectionCenter(chosen, itemBounds), e.target.closest("#cad-axis-v") ? "vertical" : "horizontal");
+    return render();
+  }
   if (e.target.closest("#add-font")) requestFontFile();
   if (e.target.closest("#font-gallery-button")) openFontGallery();
   if (e.target.closest("#item-auto-bridge")) applyAutoBridges();
@@ -1383,16 +1470,367 @@ $("#add-layer").onclick = () => {
 };
 for (const b of document.querySelectorAll("[data-tool]"))
   b.onclick = () => {
-    tool = b.dataset.tool;
     preview = false;
+    if (CAD_TOOLS[b.dataset.tool]) return startCadTool(b.dataset.tool);
+    cad = null;
+    tool = b.dataset.tool;
     render();
   };
+// Items an operation works on: the selection plus the bridges scoped to it.
+function selectionWithBridges() {
+  const chosen = selectedItems(),
+    ids = new Set(chosen.map((i) => i.id));
+  return [
+    ...chosen,
+    ...project.items.filter((i) => i.targetId && ids.has(i.targetId) && !ids.has(i.id)),
+  ];
+}
+function startCadTool(id) {
+  if (warpId) exitWarp();
+  if (pathEdit) exitPathEdit();
+  tool = id;
+  cad = { tool: id, points: [], error: null, result: null };
+  if (id === "cpattern") {
+    const chosen = selectedItems();
+    if (chosen.length) {
+      const c = selectionCenter(chosen, itemBounds);
+      cadParams.cpattern.cx = Number(c.x.toFixed(2));
+      cadParams.cpattern.cy = Number(c.y.toFixed(2));
+    }
+  }
+  render();
+}
+function cadCancel(message = null) {
+  cad = null;
+  tool = "select";
+  render();
+  if (message) notify(message);
+}
+const snapPoint = (p, mmPerPx) =>
+  snapToVertex(
+    p,
+    visibleItems(project).filter((i) => i.type !== "bridge"),
+    8 * mmPerPx,
+  );
+// Preview items for the confirmable tools; errors are shown in the panel.
+function cadPreview() {
+  if (!cad) return [];
+  const source = selectionWithBridges();
+  try {
+    cad.error = null;
+    if (cad.tool === "mirror" && cad.points.length === 2)
+      return source.length ? mirrorItems(source, cad.points[0], cad.points[1], uid) : [];
+    if (cad.tool === "rpattern") return source.length ? rectangularPattern(source, cadParams.rpattern, uid) : [];
+    if (cad.tool === "cpattern")
+      return source.length && cad.points.length
+        ? circularPattern(source, { center: cad.points[0], count: cadParams.cpattern.count, totalAngle: cadParams.cpattern.totalAngle }, uid)
+        : [];
+    if (cad.tool === "offset")
+      return selectedItems()
+        .filter((i) => i.type !== "bridge")
+        .map((i) =>
+          offsetItem(i, cadParams.offset.side === "inside" ? -Math.abs(cadParams.offset.distance) : Math.abs(cadParams.offset.distance), cadParams.offset.join, uid()),
+        );
+  } catch (e) {
+    cad.error = e.message;
+  }
+  return [];
+}
+function cadConfirm() {
+  if (!cad) return;
+  const copies = cadPreview();
+  if (cad.error) return notify(cad.error);
+  if (!copies.length) return notify("複製する図形を選び、パラメータを指定してください。");
+  if (project.items.length + copies.length > 2000) return notify("アイテム数の上限（2000）を超えます。");
+  checkpoint();
+  project.items.push(...copies);
+  multi = copies.filter((i) => i.type !== "bridge").map((i) => i.id);
+  selected = multi.at(-1) || null;
+  const label = CAD_TOOLS[cad.tool].label;
+  cad = null;
+  tool = "select";
+  commit();
+  notify(`${label}: ${copies.length} 個のアイテムを作成しました（取り消し可）。`);
+}
+// Replaces items with new ones in place; scoped bridges move to the first
+// replacement.
+function replaceItems(oldItems, newItems) {
+  const oldIds = new Set(oldItems.map((i) => i.id));
+  const index = project.items.findIndex((i) => oldIds.has(i.id));
+  checkpoint();
+  for (const b of project.items)
+    if (b.targetId && oldIds.has(b.targetId)) {
+      if (newItems.length) b.targetId = newItems[0].id;
+      else delete b.targetId;
+    }
+  project.items = project.items.filter((i) => !oldIds.has(i.id));
+  project.items.splice(index < 0 ? project.items.length : index, 0, ...newItems);
+  multi = newItems.map((i) => i.id);
+  selected = multi.at(-1) || null;
+  commit();
+}
+// Editable item under or nearest to a point (bridges excluded).
+function cadTarget(p, hitId, mmPerPx) {
+  const candidates = visibleItems(project).filter((i) => i.type !== "bridge" && isEditable(project, i));
+  const hit = candidates.find((i) => i.id === hitId);
+  if (hit) return hit;
+  let best = null;
+  for (const item of candidates)
+    for (const c of worldContours(item))
+      for (let k = 0; k + 1 < c.length; k++) {
+        const a = c[k],
+          b = c[k + 1],
+          abx = b.x - a.x,
+          aby = b.y - a.y,
+          l2 = abx * abx + aby * aby,
+          t = l2 ? Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / l2)) : 0,
+          d = Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t));
+        if (d <= 10 * mmPerPx && (!best || d < best.d)) best = { item, d };
+      }
+  return best?.item ?? null;
+}
+function cadPointerDown(p, hitId, mmPerPx) {
+  const t = cad.tool;
+  try {
+    if (t === "polygon") {
+      const q = snap ? { x: Math.round(p.x), y: Math.round(p.y) } : p;
+      const layer = project.layers.find((l) => l.id === activeLayer);
+      if (!layer?.visible || layer.locked) throw Error("表示中のロックされていないレイヤーを選んでください。");
+      const item = polygonItem({ cx: q.x, cy: q.y, ...cadParams.polygon }, uid(), activeLayer);
+      checkpoint();
+      project.items.push(item);
+      selectItem(item.id);
+      cad = null;
+      tool = "select";
+      commit();
+      notify(`正${cadParams.polygon.sides}角形を追加しました。ダブルクリックでノードを編集できます。`);
+    } else if (t === "mirror" || t === "cpattern") {
+      const q = snapPoint(p, mmPerPx);
+      cad.points = t === "mirror" ? [...cad.points, q].slice(-2) : [q];
+      if (t === "cpattern") {
+        cadParams.cpattern.cx = q.x;
+        cadParams.cpattern.cy = q.y;
+      }
+      render();
+    } else if (t === "trim" || t === "extend") {
+      const item = cadTarget(p, hitId, mmPerPx);
+      if (!item) throw Error("線や図形をクリックしてください。");
+      const others = visibleItems(project);
+      if (t === "trim") {
+        const pieces = trimItem(item, p, others, uid);
+        replaceItems([item], pieces);
+        notify(pieces.length ? "トリムしました（取り消し可）。" : "輪郭を削除しました（取り消し可）。");
+      } else {
+        replaceItems([item], [extendItem(item, p, others, uid)]);
+        notify("延長しました（取り消し可）。");
+      }
+    } else if (t === "fillet" || t === "chamfer") {
+      const item = cadTarget(p, hitId, mmPerPx);
+      if (!item) throw Error("角のあるパスや線分をクリックしてください。");
+      const amount = t === "fillet" ? cadParams.fillet.radius : cadParams.chamfer.distance;
+      if (item.type === "line") {
+        const partner = visibleItems(project).find((o) => o.id !== item.id && o.type === "line" && isEditable(project, o) && sharesEnd(item, o, p));
+        if (!partner) throw Error("端点で接している別の線分が見つかりません。2本の線分の接点付近をクリックしてください。");
+        const joined = cornerOfLines(item, partner, amount, t, uid());
+        replaceItems([item, partner], [joined]);
+      } else replaceItems([item], [cornerItem(item, p, amount, t, uid())]);
+      notify(`${CAD_TOOLS[t].label}を適用しました（取り消し可）。`);
+    } else if (t === "measure") {
+      const item = hitId ? project.items.find((i) => i.id === hitId) : null;
+      if (item && !cad.points.length && ["line", "circle"].includes(item.type)) {
+        cad.result = { item: item.name, ...measureItem(item) };
+        render();
+        return;
+      }
+      const q = snapPoint(p, mmPerPx);
+      cad.points = cad.points.length >= 2 ? [q] : [...cad.points, q];
+      cad.result = cad.points.length === 2 ? measurePoints(cad.points[0], cad.points[1]) : null;
+      render();
+    } else if (t === "dimension") {
+      const q = snapPoint(p, mmPerPx);
+      const type = cadParams.dimension.type,
+        need = type === "angle" ? 3 : 2;
+      cad.points = [...cad.points, q];
+      if (cad.points.length >= need) {
+        const d = makeDimension(type, cad.points, uid());
+        checkpoint();
+        (project.annotations ??= []).push(d);
+        cad.points = [];
+        selectedAnnotation = d.id;
+        commit();
+        notify(`寸法 ${dimensionLabel(d)} を置きました（参照寸法・取り消し可）。`);
+      } else render();
+    }
+  } catch (e) {
+    cad.error = e.message;
+    notify(e.message);
+    renderProperties();
+  }
+}
+// Two lines whose ends meet near the click.
+function sharesEnd(a, b, p) {
+  const ends = (l) => [transform({ x: 0, y: 0 }, l), transform({ x: l.w, y: 0 }, l)];
+  return ends(a).some((ea) => ends(b).some((eb) => Math.hypot(ea.x - eb.x, ea.y - eb.y) < 0.5 && Math.hypot(ea.x - p.x, ea.y - p.y) < 6));
+}
+function cadParamChange(el) {
+  const key = el.dataset.cad,
+    value = el.type === "number" ? el.valueAsNumber : el.value;
+  if (el.type === "number" && !Number.isFinite(value)) return notify("有効な数値を入力してください。");
+  if (cad?.tool === "cpattern" && (key === "cx" || key === "cy")) {
+    cadParams.cpattern[key] = value;
+    cad.points = [{ x: cadParams.cpattern.cx, y: cadParams.cpattern.cy }];
+  } else if (cad?.tool === "dimension") {
+    cadParams.dimension.type = value;
+    cad.points = [];
+  } else cadParams[cad.tool][key] = value;
+  render();
+}
+const cadField = (key, label, value, step = 1, min = -2000, max = 2000) =>
+  `<label>${label}<input data-cad="${key}" type="number" value="${value}" step="${step}" min="${min}" max="${max}"></label>`;
+function cadPanel() {
+  const t = cad.tool,
+    info = CAD_TOOLS[t],
+    chosen = selectedItems().filter((i) => i.type !== "bridge"),
+    preview = ["mirror", "rpattern", "cpattern", "offset"].includes(t) ? cadPreview() : [],
+    confirmable = preview.length > 0 && !cad.error;
+  let body = "";
+  if (t === "polygon")
+    body = `<div class="fields">${cadField("sides", "頂点数", cadParams.polygon.sides, 1, 3, 100)}${cadField("radius", "半径 mm", cadParams.polygon.radius, 0.5, 0.1, 1000)}${cadField("rotation", "回転 °", cadParams.polygon.rotation, 1, -360, 360)}</div><p class="note">外接円の半径です。置いた後は通常のパスとして編集できます。</p>`;
+  else if (t === "mirror")
+    body = `<p class="note">${chosen.length ? `${chosen.length} 個を選択中。` : "先に図形を選んでください。"}基準線: ${cad.points.length === 0 ? "1点目をクリック" : cad.points.length === 1 ? "2点目をクリック" : `設定済み（プレビュー ${preview.length} 個）`}</p><div class="cad-actions"><button id="cad-axis-v" ${chosen.length ? "" : "disabled"}>選択の中心で縦軸</button><button id="cad-axis-h" ${chosen.length ? "" : "disabled"}>選択の中心で横軸</button></div><p class="note">コピーを作ります。文字・ワープ済み・パスは反転した固定パスに、長方形・楕円・線分はそのままの種類で反転します。</p>`;
+  else if (t === "rpattern")
+    body = `<div class="fields">${cadField("columns", "列 (X)", cadParams.rpattern.columns, 1, 1, 200)}${cadField("rows", "行 (Y)", cadParams.rpattern.rows, 1, 1, 200)}${cadField("dx", "X 間隔 mm", cadParams.rpattern.dx, 1)}${cadField("dy", "Y 間隔 mm", cadParams.rpattern.dy, 1)}</div><p class="note">${chosen.length ? `${chosen.length} 個を1セットとして、元を含めて ${cadParams.rpattern.columns * cadParams.rpattern.rows} セット（コピー ${preview.length} 個）。` : "先に図形を選んでください。"}間隔は元の位置からの距離で、負の値も使えます。</p>`;
+  else if (t === "cpattern")
+    body = `<div class="fields">${cadField("cx", "中心 X", cadParams.cpattern.cx, 0.5)}${cadField("cy", "中心 Y", cadParams.cpattern.cy, 0.5)}${cadField("count", "個数（元を含む）", cadParams.cpattern.count, 1, 2, 360)}${cadField("totalAngle", "全体の角度 °", cadParams.cpattern.totalAngle, 5, -360, 360)}</div><p class="note">${chosen.length ? "" : "先に図形を選んでください。"}${cad.points.length ? `中心 (${cad.points[0].x}, ${cad.points[0].y}) · コピー ${preview.length} 個` : "キャンバスをクリックして中心を指定"}。360° なら等間隔、それ未満なら両端を含めて配置します。各コピーは回転も更新されます。</p>`;
+  else if (t === "offset")
+    body = `<div class="fields">${cadField("distance", "距離 mm", cadParams.offset.distance, 0.5, 0.01, 500)}<label>向き<select data-cad="side"><option value="outside" ${cadParams.offset.side === "outside" ? "selected" : ""}>外側</option><option value="inside" ${cadParams.offset.side === "inside" ? "selected" : ""}>内側</option></select></label><label class="full">角の形<select data-cad="join"><option value="round" ${cadParams.offset.join === "round" ? "selected" : ""}>Round（丸）</option><option value="miter" ${cadParams.offset.join === "miter" ? "selected" : ""}>Miter（尖り）</option><option value="square" ${cadParams.offset.join === "square" ? "selected" : ""}>Square（面取り）</option></select></label></div><p class="note">${chosen.length ? `${chosen.length} 個の輪郭を新しいパスにオフセットします（元は残ります）。` : "先に図形を選んでください。"}穴は反対向きに、開いた線は平行線になります。</p>`;
+  else if (t === "trim") body = `<p class="note">クリックした線の、最寄りの交点から交点までを削除します。線分は短い線分に、閉じた図形は開いたパスになります。</p>`;
+  else if (t === "extend") body = `<p class="note">線分や開いたパスの端を、延長方向で最初に交差する図形まで伸ばします。</p>`;
+  else if (t === "fillet") body = `<div class="fields">${cadField("radius", "半径 mm", cadParams.fillet.radius, 0.5, 0.01, 500)}</div><p class="note">直線どうしの角を円弧（3次ベジェ）にします。長方形・多角形・パス、端点で接する2本の線分に使えます。</p>`;
+  else if (t === "chamfer") body = `<div class="fields">${cadField("distance", "距離 mm", cadParams.chamfer.distance, 0.5, 0.01, 500)}</div><p class="note">角から両側に同じ距離の点を取り、直線で結びます（Equal distance）。</p>`;
+  else if (t === "measure") {
+    const r = cad.result,
+      box = chosen.length ? measureItem({ type: "outline", contours: chosen.flatMap((i) => worldContours(i)), x: 0, y: 0, rotation: 0 }) : null;
+    body = `<dl class="measure">${
+      r?.distance !== undefined
+        ? `<dt>Distance</dt><dd>${r.distance.toFixed(2)} mm</dd><dt>ΔX</dt><dd>${r.dx.toFixed(2)} mm</dd><dt>ΔY</dt><dd>${r.dy.toFixed(2)} mm</dd><dt>Angle</dt><dd>${r.angle.toFixed(2)}°</dd>`
+        : r?.kind === "line"
+          ? `<dt>${esc(r.item)}</dt><dd>線分</dd><dt>Length</dt><dd>${r.length.toFixed(2)} mm</dd><dt>Angle</dt><dd>${r.angle.toFixed(2)}°</dd>`
+          : r?.kind === "circle"
+            ? `<dt>${esc(r.item)}</dt><dd>円</dd><dt>Radius</dt><dd>${r.radius.toFixed(2)} mm</dd><dt>Diameter</dt><dd>${r.diameter.toFixed(2)} mm</dd>`
+            : r?.kind === "ellipse"
+              ? `<dt>${esc(r.item)}</dt><dd>楕円</dd><dt>Rx</dt><dd>${r.rx.toFixed(2)} mm</dd><dt>Ry</dt><dd>${r.ry.toFixed(2)} mm</dd>`
+              : `<dt>計測</dt><dd>${cad.points.length ? "2点目をクリック" : "1点目をクリック"}</dd>`
+    }${box ? `<dt>選択の幅</dt><dd>${box.width.toFixed(2)} mm</dd><dt>選択の高さ</dt><dd>${box.height.toFixed(2)} mm</dd>` : ""}</dl><div class="cad-actions"><button id="cad-clear">クリア</button></div><p class="note">頂点の近くをクリックすると頂点に吸着します。Esc または計測の終了で表示を消します。</p>`;
+  } else if (t === "dimension")
+    body = `<label class="full-label">種類<select data-cad="type">${DIMENSION_TYPES.map((k) => `<option value="${k}" ${cadParams.dimension.type === k ? "selected" : ""}>${DIMENSION_LABELS[k]}</option>`).join("")}</select></label><p class="note">${cad.points.length ? `${cad.points.length} 点目まで指定。` : ""}${cadParams.dimension.type === "angle" ? "頂点、次に2本の方向の点をクリック" : ["radius", "diameter"].includes(cadParams.dimension.type) ? "中心、次に円周上の点をクリック" : "2点をクリック"}。参照寸法です：値を変えても形状は変わらず、加工用SVGには含まれません。寸法は左の一覧から削除できます（Delete）。</p>`;
+  return `<section class="cad-panel"><div class="object-type">${esc(info.group)} / 2D CAD</div><h3>${esc(info.label)}</h3>${body}${cad.error ? `<p class="cad-error">${esc(cad.error)}</p>` : ""}<div class="cad-actions">${["mirror", "rpattern", "cpattern", "offset"].includes(t) ? `<button id="cad-confirm" class="primary" ${confirmable ? "" : "disabled"}>確定</button>` : ""}<button id="cad-cancel">${["trim", "extend", "fillet", "chamfer", "measure", "dimension"].includes(t) ? "終了" : "キャンセル"}</button></div><p class="note">${esc(info.hint)}</p></section>`;
+}
+// Ghost previews, tool markers and reference dimensions on the canvas.
+function cadOverlay(scale) {
+  if (!cad) return "";
+  const sw = 0.25,
+    r = 3 / scale;
+  let out = "";
+  const ghost = (item) =>
+    item.type === "bridge"
+      ? `<rect x="${-item.w / 2}" y="${-item.h / 2}" width="${item.w}" height="${item.h}" transform="translate(${item.x} ${item.y}) rotate(${item.rotation})" class="ghost" fill="#faad53" fill-opacity=".35" stroke="#df7b21" stroke-width="${sw}" stroke-dasharray="1 .6" pointer-events="none"/>`
+      : `<path d="${pathData(worldContours(item))}" class="ghost" fill="#3b85b5" fill-opacity=".1" stroke="#3b85b5" stroke-width="${sw}" stroke-dasharray="1 .6" pointer-events="none"/>`;
+  if (["mirror", "rpattern", "cpattern", "offset"].includes(cad.tool)) out += cadPreview().map(ghost).join("");
+  const marker = (p, color = "#c27a45") => `<g pointer-events="none"><circle cx="${p.x}" cy="${p.y}" r="${r}" fill="white" stroke="${color}" stroke-width="${sw}"/><path d="M${p.x - r * 2} ${p.y} H${p.x + r * 2} M${p.x} ${p.y - r * 2} V${p.y + r * 2}" stroke="${color}" stroke-width="${sw}"/></g>`;
+  if (cad.tool === "mirror" && cad.points.length) {
+    const [a, b] = cad.points;
+    if (b) {
+      const dx = b.x - a.x,
+        dy = b.y - a.y,
+        l = Math.hypot(dx, dy) || 1,
+        k = 400 / l;
+      out += `<path d="M${a.x - dx * k} ${a.y - dy * k} L${b.x + dx * k} ${b.y + dy * k}" stroke="#c27a45" stroke-width="${sw}" stroke-dasharray="2 1" pointer-events="none"/>`;
+    }
+    out += cad.points.map((p) => marker(p)).join("");
+  }
+  if (cad.tool === "cpattern" && cad.points.length) out += marker(cad.points[0]);
+  if (cad.tool === "measure" && cad.points.length) {
+    out += cad.points.map((p) => marker(p, "#276c9c")).join("");
+    if (cad.points.length === 2 && cad.result) {
+      const [a, b] = cad.points,
+        m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      out += `<path d="M${a.x} ${a.y} L${b.x} ${b.y}" stroke="#276c9c" stroke-width="${sw}" pointer-events="none"/><path d="M${a.x} ${a.y} H${b.x} V${b.y}" stroke="#276c9c" stroke-width="${sw / 2}" stroke-dasharray="1 .8" pointer-events="none"/>${labelBox(m.x, m.y, `${cad.result.distance.toFixed(2)} mm · ΔX ${cad.result.dx.toFixed(2)} · ΔY ${cad.result.dy.toFixed(2)}`, scale)}`;
+    }
+  }
+  if (cad.tool === "dimension" && cad.points.length) out += cad.points.map((p) => marker(p, "#276c9c")).join("");
+  return out;
+}
+function labelBox(x, y, text, scale, color = "#1f4f74") {
+  const fs = 11 / scale,
+    w = (text.length * 0.62 + 1) * fs,
+    h = fs * 1.5;
+  return `<g pointer-events="none"><rect x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="${fs * 0.3}" fill="white" fill-opacity=".92" stroke="${color}" stroke-width="${0.5 / scale}"/><text x="${x}" y="${y + fs * 0.36}" font-size="${fs}" text-anchor="middle" fill="${color}" font-family="Inter, sans-serif">${esc(text)}</text></g>`;
+}
+function annotationsOverlay(scale) {
+  const list = project.annotations ?? [];
+  if (!list.length || preview) return "";
+  const sw = 0.2,
+    tick = 1.2;
+  return list
+    .map((d) => {
+      const g = dimensionGeometry(d),
+        color = d.id === selectedAnnotation ? "#c27a45" : "#1f4f74",
+        label = dimensionLabel(d);
+      let body = "";
+      if (g.kind === "linear") {
+        const [p, q] = g.line,
+          ang = (g.angle * Math.PI) / 180,
+          tx = Math.cos(ang + Math.PI / 2) * tick,
+          ty = Math.sin(ang + Math.PI / 2) * tick;
+        body = `<path d="M${p.x} ${p.y} L${q.x} ${q.y}" stroke="${color}" stroke-width="${sw}"/><path d="M${p.x - tx} ${p.y - ty} L${p.x + tx} ${p.y + ty} M${q.x - tx} ${q.y - ty} L${q.x + tx} ${q.y + ty}" stroke="${color}" stroke-width="${sw}"/>${g.extensions.map(([a, b]) => `<path d="M${a.x} ${a.y} L${b.x} ${b.y}" stroke="${color}" stroke-width="${sw / 2}"/>`).join("")}${labelBox(g.label.x, g.label.y, label, scale, color)}`;
+      } else if (g.kind === "angle") {
+        const { cx, cy, r: rr, start, sweep } = g.arc,
+          e = start + sweep;
+        body = `${g.rays.map(([a, b]) => `<path d="M${a.x} ${a.y} L${b.x} ${b.y}" stroke="${color}" stroke-width="${sw / 2}" stroke-dasharray="1 .8"/>`).join("")}<path d="M${cx + Math.cos(start) * rr} ${cy + Math.sin(start) * rr} A${rr} ${rr} 0 ${Math.abs(sweep) > Math.PI ? 1 : 0} ${sweep > 0 ? 1 : 0} ${cx + Math.cos(e) * rr} ${cy + Math.sin(e) * rr}" fill="none" stroke="${color}" stroke-width="${sw}"/>${labelBox(g.label.x, g.label.y, label, scale, color)}`;
+      } else {
+        const [a, b] = g.line;
+        body = `<path d="M${a.x} ${a.y} L${b.x} ${b.y}" stroke="${color}" stroke-width="${sw}"/><circle cx="${b.x}" cy="${b.y}" r="${tick / 2}" fill="${color}"/>${labelBox(g.label.x, g.label.y, label, scale, color)}`;
+      }
+      return `<g data-annotation="${esc(d.id)}" class="dimension ${d.id === selectedAnnotation ? "selected" : ""}" style="cursor:pointer">${body}<path d="M${g.line ? `${g.line[0].x} ${g.line[0].y} L${g.line[1].x} ${g.line[1].y}` : `${g.rays[0][0].x} ${g.rays[0][0].y} L${g.rays[0][1].x} ${g.rays[0][1].y}`}" stroke="transparent" stroke-width="${8 / scale}" fill="none"/></g>`;
+    })
+    .join("");
+}
+function annotationRows() {
+  const list = project.annotations ?? [];
+  if (!list.length) return "";
+  return `<div class="dimension-list"><div class="panel-subheading">寸法 <span class="eyebrow">REFERENCE</span></div>${list
+    .map(
+      (d) =>
+        `<div class="dimension-row ${d.id === selectedAnnotation ? "selected" : ""}"><button data-annotation="${esc(d.id)}" class="layer">⊢⊣ ${esc(DIMENSION_LABELS[d.dimensionType])} ${esc(dimensionLabel(d))}</button><button data-annotation-delete="${esc(d.id)}" title="寸法を削除" aria-label="寸法を削除">×</button></div>`,
+    )
+    .join("")}</div>`;
+}
+function removeAnnotation(id) {
+  if (!project.annotations?.some((d) => d.id === id)) return;
+  checkpoint();
+  project.annotations = project.annotations.filter((d) => d.id !== id);
+  if (!project.annotations.length) delete project.annotations;
+  selectedAnnotation = null;
+  commit();
+}
+$("#layers").addEventListener("click", (e) => {
+  const del = e.target.closest("[data-annotation-delete]");
+  if (del) return removeAnnotation(del.dataset.annotationDelete);
+  const row = e.target.closest("[data-annotation]");
+  if (row) {
+    selectItem(null);
+    selectedAnnotation = row.dataset.annotation;
+    render();
+  }
+});
 $("#add-text").onclick = () => addItem("text");
 $("#preview").onclick = togglePreview;
 $("#snap").onchange = (e) => (snap = e.target.checked);
 $("#undo").onclick = undo;
 $("#redo").onclick = redo;
 function remove() {
+  if (selectedAnnotation) return removeAnnotation(selectedAnnotation);
   const ids = selectedItems().map((i) => i.id);
   if (!ids.length) return;
   checkpoint();
@@ -2215,7 +2653,20 @@ $("#canvas").addEventListener("pointerdown", (e) => {
   // On a Mac, Ctrl+click is a right click and opens the menu instead.
   if (isMac && e.ctrlKey && e.pointerType === "mouse") return;
   const p = canvasPoint(e);
-  if (tool !== "select") {
+  const annotation = e.target.closest("[data-annotation]");
+  if (annotation && !cad) {
+    selectItem(null);
+    selectedAnnotation = annotation.dataset.annotation;
+    render();
+    return;
+  }
+  if (cad && !CAD_TOOLS[cad.tool].panelOnly) {
+    const hit = e.target.closest("[data-object]")?.dataset.object ?? null;
+    cadPointerDown(p, hit, 1 / $("#canvas").getScreenCTM().a);
+    e.preventDefault();
+    return;
+  }
+  if (tool !== "select" && !CAD_TOOLS[tool]) {
     if (e.pointerType === "touch") {
       drag = { kind: "place", start: p, tool, moved: false };
       $("#canvas").setPointerCapture(e.pointerId);
@@ -2902,6 +3353,20 @@ window.addEventListener("keydown", (e) => {
     return;
   const mod = e.metaKey || e.ctrlKey,
     key = e.key.toLowerCase();
+  if (cad) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      return cadCancel();
+    }
+    if (e.key === "Enter" && ["mirror", "rpattern", "cpattern", "offset"].includes(cad.tool)) {
+      e.preventDefault();
+      return cadConfirm();
+    }
+  }
+  if (selectedAnnotation && (e.key === "Delete" || e.key === "Backspace")) {
+    e.preventDefault();
+    return removeAnnotation(selectedAnnotation);
+  }
   if (pathItem()) {
     if (e.key === "Escape" || e.key === "Enter") {
       e.preventDefault();

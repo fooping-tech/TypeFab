@@ -47,6 +47,7 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | `src/path.js` | パスのノード編集モデル：サブパス＋ノード（アンカー・in/outハンドル・smooth）、SVG path dの解析（MLHVCSQTZ）と出力（M/L/C/Z）、グリフ命令・長方形・楕円からの変換、輪郭のベジェ近似（Schneider）、ノード操作。固定パスは `item.path` に保持し、`contours` はその平坦化 |
 | `src/svgimport.js` | SVGファイルの読み込み：要素（path/rect/circle/ellipse/line/polyline/polygon）、transform・viewBox・単位のmm換算、Inkscapeレイヤー。ブラウザはDOMParser、Nodeのテストは同梱の簡易XMLパーサーを使う |
 | `src/edit.js` | 重ね順（最前面へ／前面へ／背面へ／最背面へ）、複製・貼り付け用のコピー |
+| `src/cad.js` | 拘束なしの2D CAD：正多角形、ミラー、矩形／円形パターン、オフセット（Clipper）、トリム・延長（交点計算）、フィレット・面取り（パスのノード置換）、計測、参照寸法（`project.annotations`、SVGには出さない） |
 | `src/project.js` | プロジェクトJSONの入力検証、v1→v2移行 |
 | `src/fonts.js` / `src/font-previews.js` | 同梱フォントのカタログ（`FONT_CATALOG`）、遅延読み込み（`createFontLoader`）、ユーザー追加フォント規約（バージョン付き）。プレビューは `scripts/font-previews.mjs` で生成 |
 | `public/fonts/` / `THIRD_PARTY_FONTS.md` | 同梱書体8種（すべてOFL-1.1）とOFL本文。追加時はライセンス本文を確認し、カタログと一覧を更新する |

@@ -175,6 +175,9 @@ export function validateProject(p) {
         ))
     )
       throw Error("ブリッジの対象が不正です。");
+  // Reference dimensions (issue #4) live beside the geometry and never reach
+  // the cut output. Older files simply have none.
+  const annotations = validateAnnotations(p.annotations);
   return ensureLayers({
     version: 2,
     layers: p.layers,
@@ -182,5 +185,34 @@ export function validateProject(p) {
     width: p.width,
     height: p.height,
     items: p.items,
+    ...(annotations.length ? { annotations } : {}),
   });
+}
+const DIMENSIONS = ["linear", "horizontal", "vertical", "angle", "radius", "diameter"];
+export function validateAnnotations(list) {
+  if (list === undefined || list === null) return [];
+  if (!Array.isArray(list) || list.length > 500) throw Error("寸法データが不正です。");
+  const ok = (n) => Number.isFinite(n) && Math.abs(n) <= 10000;
+  for (const d of list) {
+    if (
+      !d ||
+      d.type !== "dimension" ||
+      typeof d.id !== "string" ||
+      !DIMENSIONS.includes(d.dimensionType) ||
+      !Array.isArray(d.points) ||
+      d.points.length !== (d.dimensionType === "angle" ? 3 : 2) ||
+      d.points.some((q) => !q || !ok(q.x) || !ok(q.y)) ||
+      !ok(d.value) ||
+      !ok(d.offset ?? 0)
+    )
+      throw Error("寸法データが不正です。");
+  }
+  return list.map((d) => ({
+    id: d.id,
+    type: "dimension",
+    dimensionType: d.dimensionType,
+    points: d.points.map((q) => ({ x: q.x, y: q.y })),
+    offset: d.offset ?? 6,
+    value: d.value,
+  }));
 }

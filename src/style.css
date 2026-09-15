@@ -1430,3 +1430,114 @@ dialog .primary {
 .rotate-handle:active {
   cursor: grabbing;
 }
+
+/* 2D CAD toolbar, previews and dimensions (issue #4) */
+.cad-toolbar {
+  height: auto;
+  min-height: 56px;
+  padding: 6px 20px;
+  gap: 12px;
+  background: #f8f9fb;
+  flex-wrap: wrap;
+}
+.cad-toolbar .tool-group {
+  padding-right: 12px;
+  gap: 2px;
+}
+.tool-group-label {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: #97a3ad;
+  font-weight: 650;
+  margin-right: 6px;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+.cad-tool {
+  min-width: 52px;
+  height: 46px;
+  gap: 3px;
+  font-size: 9.5px;
+}
+.cad-tool .tool-icon {
+  font-size: 18px;
+  height: 20px;
+  line-height: 20px;
+}
+.cad-note {
+  margin-left: auto;
+  font-size: 10px;
+}
+.cad-panel .cad-actions {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+.cad-panel .cad-actions button {
+  flex: 1;
+  border: 1px solid #d6dce2;
+  font-size: 11px;
+}
+.cad-panel .cad-actions button.primary {
+  border-color: transparent;
+}
+.cad-error {
+  color: #b83a2c;
+  font-size: 11px;
+  background: #fff1ef;
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.measure {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+  margin: 8px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.measure dt {
+  color: #8d9aa5;
+}
+.measure dd {
+  margin: 0;
+  color: #253748;
+  font-weight: 600;
+}
+.dimension-list {
+  margin-top: 14px;
+  border-top: 1px solid #e3e7eb;
+  padding-top: 8px;
+}
+.panel-subheading {
+  font-size: 11px;
+  font-weight: 650;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 12px 6px;
+  color: #253748;
+}
+.dimension-row {
+  display: flex;
+  align-items: center;
+}
+.dimension-row .layer {
+  flex: 1;
+}
+.dimension-row.selected .layer {
+  background: #eef4fa;
+  color: #255c82;
+}
+.dimension-row button[data-annotation-delete] {
+  padding: 4px 10px;
+  color: #8d9aa5;
+}
+@media (max-width: 800px) {
+  .cad-toolbar {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+  .cad-note {
+    display: none;
+  }
+}
