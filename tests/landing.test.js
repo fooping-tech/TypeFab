@@ -59,6 +59,23 @@ test("landing page HTML has the required SEO metadata, CTA and Coming Soon label
   assert.ok(fs.existsSync("public/landing/og.png"));
 });
 
+test("landing page describes the current feature set: 8 fonts, Smart Connect, 2D CAD, bookmark mock-up", () => {
+  const html = fs.readFileSync("index.html", "utf8");
+  for (const tab of ["text", "fonts", "layout", "vector", "bridge", "connect", "cad", "shapes", "export"]) {
+    assert.match(html, new RegExp(`data-tab="${tab}"`), tab);
+    assert.match(html, new RegExp(`data-panel="${tab}"`), tab);
+  }
+  assert.match(html, /日本語フォント8書体/);
+  for (const name of ["Zen Kaku Gothic New", "しっぽり明朝", "Zen Maru Gothic", "Dela Gothic One", "RocknRoll One", "Kaisei Decol", "Zen Kurenaido", "DotGothic16"])
+    assert.ok(html.includes(name), name);
+  assert.match(html, /スマート接続/);
+  assert.match(html, /2D CAD/);
+  assert.match(html, /完成イメージ/);
+  for (const img of ["smart-connect.webp", "cad.webp", "fonts.webp", "bookmark.webp", "toolbar.webp"]) assert.ok(html.includes(`/landing/${img}`), img);
+  // No stale references to removed screenshots.
+  assert.doesNotMatch(html, /inspector\.webp/);
+});
+
 test("Vite config builds both pages under the /TypeFab/ base", async () => {
   const config = (await import("../vite.config.js")).default;
   assert.equal(config.base, "/TypeFab/");

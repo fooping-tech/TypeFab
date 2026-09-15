@@ -50,7 +50,7 @@
           <h1>Turn words into laser-cuttable designs.</h1>
           <p class="lede">
             <strong>文字を、切れるデザインへ。</strong>
-            入力した文字を、レーザー加工可能なSVGへ。日本語フォント、レイアウト、ブリッジ、ベクター編集まで、ブラウザだけで完結します。
+            入力した文字を、レーザー加工可能なSVGへ。日本語フォント8書体、レイアウト、ブリッジ、スマート接続、ベクター編集、2D CADまで、ブラウザだけで完結します。
           </p>
           <div class="cta-row">
             <a class="button primary" href="./app/" data-editor>TypeFabを開く <span aria-hidden="true">→</span></a>
@@ -61,9 +61,9 @@
         <div class="wrap wide">
           <figure class="window hero-window">
             <div class="window-bar"><span></span><span></span><span></span><em>fooping-tech.github.io/TypeFab/app/</em></div>
-            <img src="/landing/hero.webp" width="2880" height="1800" alt="TypeFabのエディタ画面。「つくる、を自由に。」という文字に自動ブリッジが付き、右側のプロパティでフォントとサイズを編集している" fetchpriority="high" decoding="async" />
+            <img src="/landing/hero.webp" width="2880" height="1800" alt="TypeFabのエディタ画面。「つくる、を自由に。」という文字に自動ブリッジが付き、上部に作成・ブリッジ・スマート接続・ワープ・パス編集と2D CADのツールバー、右側のプロパティでフォントを編集している" fetchpriority="high" decoding="async" />
           </figure>
-          <figcaption class="caption">実際のTypeFabの画面（Chromium・1440 px）。文字「自」「由」「る」の閉じた部分に、自動ブリッジ（オレンジ）が追加されています。</figcaption>
+          <figcaption class="caption">実際のTypeFabの画面（Chromium・1440 px、2026-09-15）。文字「自」「由」「る」の閉じた部分に自動ブリッジ（オレンジ）が追加され、2段目のツールバーに2D CADツールが並んでいます。</figcaption>
         </div>
       </section>
 
@@ -98,17 +98,19 @@
               <button role="tab" aria-selected="false" data-tab="layout">Layout</button>
               <button role="tab" aria-selected="false" data-tab="vector">Vector Editing</button>
               <button role="tab" aria-selected="false" data-tab="bridge">Bridge</button>
+              <button role="tab" aria-selected="false" data-tab="connect">Smart Connect</button>
+              <button role="tab" aria-selected="false" data-tab="cad">2D CAD</button>
               <button role="tab" aria-selected="false" data-tab="shapes">Shapes</button>
               <button role="tab" aria-selected="false" data-tab="export">SVG Export</button>
             </div>
             <div class="panels">
               <article class="panel" role="tabpanel" data-panel="text">
                 <figure class="shot"><img src="/landing/hero.webp" width="2880" height="1800" alt="文字を入力して編集しているTypeFabの画面" loading="lazy" decoding="async" /></figure>
-                <div class="panel-text"><h3>文字を打つだけ</h3><p>テキストを入力すると、その場で輪郭になります。ダブルクリックでキャンバス上の編集、サイズ・字間・長体・平体、縦書き（OpenType vert/vrt2）に対応。</p></div>
+                <div class="panel-text"><h3>文字を打つだけ</h3><p>テキストを入力すると、その場で輪郭になります。ダブルクリックでキャンバス上の編集、サイズ・字間・長体・平体、縦書き（OpenType vert/vrt2）に対応。1文字ずつ・部位ごとのグループ化解除で、文字の一部だけを動かすこともできます。</p></div>
               </article>
               <article class="panel" role="tabpanel" data-panel="fonts" hidden>
-                <figure class="shot portrait"><img src="/landing/inspector.webp" width="1040" height="2672" alt="フォント選択と文字設定のプロパティパネル" loading="lazy" decoding="async" /></figure>
-                <div class="panel-text"><h3>日本語フォントを同梱</h3><p>Zen Kaku Gothic New と しっぽり明朝 を同梱（SIL OFL）。手元の TTF / OTF / WOFF も追加できます。フォントは端末の外に送信しません。</p></div>
+                <figure class="shot portrait"><img src="/landing/fonts.webp" width="1440" height="2124" alt="フォント一覧ダイアログ。ゴシック・明朝・丸ゴシック・ディスプレイ・手書き・ドットの8書体が、それぞれ実際の字形でプレビューされている" loading="lazy" decoding="async" /></figure>
+                <div class="panel-text"><h3>日本語フォント8書体を同梱</h3><p>Zen Kaku Gothic New、しっぽり明朝、Zen Maru Gothic、Dela Gothic One、RocknRoll One、Kaisei Decol、Zen Kurenaido、DotGothic16。すべて SIL Open Font License 1.1 で、ライセンス本文を同梱しています。選んだフォントだけを読み込み、一覧は各フォントの実際の字形でプレビュー。手元の TTF / OTF / WOFF も追加できます。フォントは端末の外に送信しません。</p></div>
               </article>
               <article class="panel" role="tabpanel" data-panel="layout" hidden>
                 <figure class="shot"><img src="/landing/warp.webp" width="3820" height="2672" alt="文字にArc Upのワープを掛けているキャンバス" loading="lazy" decoding="async" /></figure>
@@ -122,9 +124,17 @@
                 <figure class="shot"><img src="/landing/bridge-sketch.webp" width="1440" height="520" alt="る・自・由の閉じた部分にオレンジ色のブリッジが付いた状態" loading="lazy" decoding="async" /></figure>
                 <div class="panel-text"><h3>ブリッジ</h3><p>「選択にブリッジ」で穴を検出し、島と外側をつなぐ帯を自動追加。手動ブリッジは任意の位置・角度で置けます。幅・高さ・回転を後から調整できます。</p></div>
               </article>
+              <article class="panel" role="tabpanel" data-panel="connect" hidden>
+                <figure class="shot"><img src="/landing/smart-connect.webp" width="2428" height="1274" alt="スマート接続のプレビュー。「つくる、を自由に。」の文字どうしがオレンジの接続形状でつながり、右側のパネルに幅・最大距離・スタイルと「部品 11 → 1」の表示" loading="lazy" decoding="async" /></figure>
+                <div class="panel-text"><h3>スマート接続</h3><p>ステンシルとは逆に、文字そのものを1枚で切り出したいときに。離れた文字や文字内の部位を接続形状でつなぎ、1つの閉じた輪郭にします。幅・最大距離、Smooth / Tapered / Rounded / Straight のスタイル、日本語の筆画方向を優先する候補選び。確定前に接続の移動・削除・追加・候補の切り替えができ、確定後は通常のパスとして編集できます。</p></div>
+              </article>
+              <article class="panel" role="tabpanel" data-panel="cad" hidden>
+                <figure class="shot"><img src="/landing/cad.webp" width="2428" height="1274" alt="円形パターンのプレビュー。六角形を中心のまわりに6個並べるゴーストが表示され、右側のパネルに中心・個数・角度の入力" loading="lazy" decoding="async" /></figure>
+                <div class="panel-text"><h3>2D CAD</h3><p>正多角形、ミラー、矩形／円形パターン、オフセット、トリム・延長、フィレット・面取り、計測、参照寸法。拘束なしの2D編集で、結果は通常のパスになります。寸法は図面上の参照のみで、SVGには出力しません。</p></div>
+              </article>
               <article class="panel" role="tabpanel" data-panel="shapes" hidden>
-                <figure class="shot strip"><img src="/landing/toolbar.webp" width="2880" height="166" alt="選択・文字・長方形・楕円・線分・ブリッジ・アウトライン化・ワープ・パス編集のツールバー" loading="lazy" decoding="async" /></figure>
-                <div class="panel-text"><h3>図形と図形演算</h3><p>長方形（フィレット付き）、楕円、線分。結合・切り抜き・交差・XOR で文字と図形を組み合わせ、1つのカット形状にします。SVGファイルの読み込みにも対応。</p></div>
+                <figure class="shot strip"><img src="/landing/toolbar.webp" width="2880" height="294" alt="選択・文字・長方形・楕円・多角形・線分・ブリッジ・スマート接続・アウトライン化・ワープ・パス編集と、オフセット・トリム・延長・フィレット・面取り・ミラー・パターン・計測・寸法のツールバー" loading="lazy" decoding="async" /></figure>
+                <div class="panel-text"><h3>図形と図形演算</h3><p>長方形（フィレット付き）、楕円、正多角形、線分。結合・切り抜き・交差・XOR で文字と図形を組み合わせ、1つのカット形状にします。SVGファイルの読み込み（path / rect / circle / ellipse / line / polyline / polygon、transform、Inkscapeレイヤー）にも対応。</p></div>
               </article>
               <article class="panel" role="tabpanel" data-panel="export" hidden>
                 <figure class="shot"><img src="/landing/preview.webp" width="3820" height="2672" alt="加工プレビューで赤いカット線を表示したキャンバス" loading="lazy" decoding="async" /></figure>
@@ -142,10 +152,10 @@
           <ol class="workflow">
             <li><span class="num">01</span><h3>TYPE</h3><p>文字を入力する</p></li>
             <li><span class="num">02</span><h3>DESIGN</h3><p>フォントを選び、レイアウトを整える</p></li>
-            <li><span class="num">03</span><h3>BRIDGE</h3><p>閉じた形をレーザーカットできる形にする</p></li>
+            <li><span class="num">03</span><h3>BRIDGE / CONNECT</h3><p>閉じた形にブリッジを付ける。文字自体を切り出すならスマート接続で一体化する</p></li>
             <li><span class="num">04</span><h3>PREVIEW</h3><p>最終的なカット線を確認する</p></li>
             <li><span class="num">05</span><h3>EXPORT</h3><p>クリーンなSVGを書き出す</p></li>
-            <li class="soon"><span class="num">06</span><h3>ORDER <span class="badge">Coming Soon</span></h3><p>そのまま加工を依頼する（注文ページは実装済み。加工サービスの提供開始まで利用できません）</p></li>
+            <li class="soon"><span class="num">06</span><h3>ORDER <span class="badge">Coming Soon</span></h3><p>そのまま加工を依頼する（注文ページは完成イメージのプレビュー付きで実装済み。加工サービスの提供開始まで決済はできません）</p></li>
           </ol>
         </div>
       </section>
@@ -161,6 +171,19 @@
             <figure class="shot"><img src="/landing/bridge-cut.webp" width="1440" height="520" alt="加工プレビュー。赤いカット線がブリッジの位置で途切れ、帯の側面を含む輪郭になっている" loading="lazy" decoding="async" /><figcaption>加工プレビュー：赤線がSVGに出力されるカット線です。</figcaption></figure>
           </div>
           <p class="fine">「切り残しなし」の検査は、閉じた輪郭にブリッジの隙間があるかを確認するものです。材料の連結性や物理的な強度を保証するものではありません。材料・厚さに応じて幅を調整し、テスト加工してください。</p>
+          <div class="two-col align connect">
+            <div>
+              <h3>ステンシルではなく、文字を切り出すなら。</h3>
+              <p class="lede">ブリッジは「文字の形に穴をあける」ための機能です。文字そのものを1枚の板として切り出したいときは、<strong>スマート接続</strong>が離れた文字や部位を接続形状でつなぎ、1つの閉じた輪郭にします。</p>
+              <ul class="feature-list">
+                <li><b>接続の候補</b> 最短距離だけでなく、画の端や向きを見て自然な位置を選びます。日本語は筆画の延長を優先</li>
+                <li><b>スタイル</b> Smooth・Tapered・Rounded・Straight を自動または手動で。幅と最大距離は数値で指定</li>
+                <li><b>確定前の調整</b> 接続の移動・両端の変更・幅・曲率・削除・次の候補・手動追加。未接続があれば確定できません</li>
+                <li><b>結果</b> 1つの固定パス。Undo 1回で元の文字に戻り、パス編集・ワープ・SVG出力はそのまま</li>
+              </ul>
+            </div>
+            <figure class="shot"><img src="/landing/smart-connect.webp" width="2428" height="1274" alt="スマート接続で「つくる、を自由に。」が10本の接続で1つの部品になったプレビュー" loading="lazy" decoding="async" /><figcaption>スマート接続：最大距離 20 mm で 11 部品が 1 つに。オレンジが追加される接続形状です。</figcaption></figure>
+          </div>
         </div>
       </section>
 
@@ -176,6 +199,7 @@
               <li><b>パス編集</b> ノードの追加・削除、直線化、SVG path d の直接編集（M L H V C S Q T A Z）</li>
               <li><b>ワープ</b> 4辺のベジェによるエンベロープ変形。Arc・Arch・Wave・Flag・Perspective など</li>
               <li><b>図形演算</b> 結合・切り抜き・交差・XOR。結果は編集できるパス</li>
+              <li><b>2D CAD</b> オフセット、トリム・延長、フィレット・面取り、ミラー、矩形／円形パターン、計測、参照寸法</li>
             </ul>
             <div class="stack">
               <figure class="shot"><img src="/landing/path.webp" width="1440" height="520" alt="パス編集モードのアンカーとハンドル" loading="lazy" decoding="async" /></figure>
@@ -199,6 +223,7 @@
               <tr><td>デザイナー</td><td>展示用の切り文字、モックアップ</td><td>アクリル 3 mm</td></tr>
               <tr><td>学校・教育</td><td>日本語タイポグラフィの教材、表札づくり</td><td>MDF 2.5 mm</td></tr>
               <tr><td>ワークショップ主催者</td><td>参加者ごとの文字入りキット</td><td>MDF、革</td></tr>
+              <tr><td>本が好きな人</td><td>名前や一節を切り抜いた文庫本のしおり</td><td>黒クラフトペーパー、革</td></tr>
               <tr><td>小さな加工事業者</td><td>注文に応じた文字パーツの量産データ</td><td>用途に応じて</td></tr>
             </tbody>
           </table>
@@ -214,7 +239,14 @@
             <li>DESIGN</li><li>SVG</li><li class="soon">ORDER</li><li class="soon">LASER CUT</li><li class="soon">SHIP</li>
           </ol>
           <p class="lede">TypeFabで作ったデザインをそのまま加工注文し、切り出した板を受け取れる流れを準備しています。エディタの「このデザインを加工注文する」から注文ページ（SVGの確認・材料・厚さ・数量・納期・料金・Stripe決済）へ進めますが、<strong>加工サービスの提供開始まで決済はできません。</strong>それまではSVGを書き出し、お手持ちの加工機や加工サービスで切り出してください。</p>
-          <div class="cta-row"><a class="button ghost" href="./order/" data-order>注文ページを見る（プレビュー）</a></div>
+          <div class="two-col align">
+            <figure class="shot portrait"><img src="/landing/bookmark.webp" width="826" height="1612" alt="注文ページの完成イメージ。黒いクラフトペーパーのしおりが文庫本に挟まれ、上部 20 mm が見えている。単体・本に挟む・サイズ比較のタブと、文庫本 105 × 148 mm・しおり 50 × 148 mm の寸法" loading="lazy" decoding="async" /><figcaption>注文ページの完成イメージ（本に挟む）。切断線から求めた形を黒クラフトペーパー風に描いた目安です。</figcaption></figure>
+            <div>
+              <h3>注文前に、使うところまで想像できる。</h3>
+              <p class="lede">注文ページでは、SVGの検査と概算に加えて、黒いクラフトペーパーで作るしおりの<strong>完成イメージ</strong>を確認できます。単体、105 × 148 mm の文庫本に挟んだ状態（上部 20 mm）、同じ縮尺でのサイズ比較を実寸比率で描き、幅 50 mm 超や長さ 90 mm 未満・160 mm 超には注意を表示します。</p>
+              <div class="cta-row"><a class="button ghost" href="./order/" data-order>注文ページを見る（プレビュー）</a></div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -245,7 +277,7 @@
       <div class="wrap foot-inner">
         <span>TypeFab · 文字を、かたちに。</span>
         <nav aria-label="フッター"><a href="./app/" data-editor>Editor</a><a href="https://github.com/fooping-tech/TypeFab" rel="noopener">GitHub</a><a href="https://github.com/fooping-tech/TypeFab/blob/main/README.md" rel="noopener">README</a></nav>
-        <small>同梱フォント Zen Kaku Gothic New / Shippori Mincho は SIL Open Font License 1.1。</small>
+        <small>同梱フォント8書体（Zen Kaku Gothic New、しっぽり明朝、Zen Maru Gothic、Dela Gothic One、RocknRoll One、Kaisei Decol、Zen Kurenaido、DotGothic16）はすべて SIL Open Font License 1.1。</small>
       </div>
     </footer>
     <script type="module" src="/src/landing.js"></script>

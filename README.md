@@ -342,6 +342,8 @@ Stripeのテストモードでは `stripe listen --forward-to 127.0.0.1:8787/api
 
 https://fooping-tech.github.io/TypeFab/ はプロダクト紹介ページ（`index.html`、`src/landing.js`、`src/landing.css`）、エディタは https://fooping-tech.github.io/TypeFab/app/ （`app/index.html`）です。画面写真は `public/landing/` にある実際のエディタのスクリーンショット、Before / After の図は `scripts/landing-glyphs.mjs` が同梱フォントと `src/geometry.js` から生成した実際の輪郭と自動ブリッジ（`src/landing-glyphs.js`）です。フォントを更新したら `node scripts/landing-glyphs.mjs` で再生成してください。
 
+紹介ページの内容は 2026-09-15 に最新の仕様（同梱フォント8書体、スマート接続、2D CAD、注文ページのしおり完成イメージ）に合わせて更新し、画面写真（`hero.webp`・`toolbar.webp`・`fonts.webp`・`smart-connect.webp`・`cad.webp`・`bookmark.webp`・`og.png`）は本番ビルド（`npm run build` → `npx vite preview`）を Playwright で操作して撮り直したものです。機能を追加したら、同じ手順で該当する画面写真と本文を更新してください。
+
 以前の `/TypeFab/` はエディタでしたが、Issue #2 の Phase 2 で `/` を紹介ページ、`/app/` をエディタに切り替えました。ブラウザの自動保存はオリジン単位なので、以前のURLで編集していたデザインは `/app/` でそのまま復元されます。編集中のデータがあるブラウザで紹介ページを開くと、`/app/` への案内を表示します。ページの配置は `vite.config.js` の `rollupOptions.input` と `src/landing.js` の `EDITOR_URL` で決まります。加工注文の機能は実装済みですが、加工サービス側（Cloudflare Workers / Stripe）の設定が完了するまで公開サイトでは決済できないため、ページ上では Coming Soon と表示しています。
 
 ## GitHub Pages

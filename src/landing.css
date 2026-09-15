@@ -439,6 +439,15 @@ button:focus-visible {
   border-color: var(--line-2);
   color: var(--text);
 }
+.connect {
+  margin-top: 48px;
+  padding-top: 40px;
+  border-top: 1px solid var(--line);
+}
+.connect h3 {
+  font-size: 24px;
+  margin: 0 0 12px;
+}
 .panel[hidden] {
   display: none;
 }

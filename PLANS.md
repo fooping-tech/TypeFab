@@ -445,3 +445,16 @@
 - 実ブラウザ（Chromium、production preview、Playwright 35項目）: エディタ受け渡し SVG で表示、既定タブ、105×148 の本、情報欄、SVG実寸の別表示、2D プレビューと料金の維持、タブ切替と `aria-labelledby`、単体の質感フィルタと evenodd、サイズ比較の画面上の幅比 = 38/105（0.3619）、矢印・Home キー、60×180（幅広＋はみ出し警告、下部はみ出し 12 mm、注文検査は不変）、20×80（短い警告のみ）、50×148（警告なし）、横長 118×36（回転トグル既定 ON、OFF で警告2件）、px SVG（案内表示・タブ無効・描画なし → 38 mm 適用で 38×120 を表示）、script 入り SVG（拒否・非表示）、文字のみ（非表示）、iPad 820px / iPhone 390px（横スクロールなし、タブ高さ 40/44 px、シーン幅）、console error なし。WebKit でも描画・console error なし。スクリーンショットで Desktop / iPad / iPhone の見た目を確認。
 - 既知事項: TypeFab の自動ブリッジ（ステンシル）の「A」頂点付近に細い切れ端が出るのは既存の書き出し形状で、プレビューはそれを忠実に描く。太い画（ブリッジ幅の約4倍超）の隙間式ブリッジでは接続部を描かず穴を閉じた形になる場合がある。文庫本サイズ・上部表示量は固定で、本の厚さは考慮しない。実物の紙色・表面・加工結果は未検証。
 - 公開: コミット `ab9c814` を `main` へ push。Actions https://github.com/fooping-tech/TypeFab/actions/runs/34973188598 は success。`https://fooping-tech.github.io/TypeFab/` と `/order/` が HTTP 200 を返し、公開ページに完成イメージのタブが含まれることを確認（2026-09-15）。
+
+## 紹介ページを最新仕様に更新（2026-09-15）
+
+### 要求
+- 紹介ページ（`index.html`、`src/landing.js`、`src/landing.css`、`public/landing/`）を、Issue #3〜#7 で追加された機能（同梱フォント8書体・遅延読み込み・フォント一覧、2D CAD、スマート接続、注文ページのしおり完成イメージ）に合わせて更新する。画面写真は実際の製品出力のみを使う。加工注文は加工サービス未提供のため Coming Soon のまま。
+- 完了条件: 既存テスト・新規テスト・ビルド成功、Desktop / iPad / iPhone の実ブラウザで画像の読み込み・タブ・横スクロールなし・console error なしを確認、GitHub Pages に反映して確認。
+
+### 実装結果（2026-09-15）
+- `index.html`: ヒーローの説明文に「日本語フォント8書体・スマート接続・2D CAD」を追加し、画面写真を現在のUI（2段目の2D CADツールバー、フォントプレビュー付きのプロパティ）で撮り直し。機能タブを Text / Japanese Fonts / Layout / Vector Editing / Bridge / **Smart Connect** / **2D CAD** / Shapes / SVG Export の9つに拡張（Japanese Fonts はフォント一覧ダイアログの写真と8書体の列挙・OFL 1.1、Smart Connect はプレビュー画面、2D CAD は円形パターンのプレビュー、Shapes は2段のツールバーとSVG読み込み対応要素）。ワークフロー 03 を「BRIDGE / CONNECT」、06 の説明を「完成イメージのプレビュー付きで実装済み、決済は提供開始まで不可」に変更（Coming Soon 表示は維持）。ブリッジ節に「ステンシルではなく、文字を切り出すなら」（スマート接続との使い分け・候補・スタイル・確定前調整・結果）を追加。ベクター編集一覧に 2D CAD、想定利用者の表に「本が好きな人 / 文庫本のしおり / 黒クラフトペーパー、革」を追加。「FROM BROWSER TO PHYSICAL OBJECT」節に注文ページの完成イメージ（本に挟む）の写真と説明を追加。フッターの書体表記を8書体に更新。`src/landing.css` に `.connect` を追加。
+- 画面写真（`public/landing/`）: `hero.webp`（2880×1800）、`toolbar.webp`（2880×294、2段）、`fonts.webp`（フォント一覧ダイアログ）、`smart-connect.webp`（最大距離 20 mm、部品 11 → 1）、`cad.webp`（六角形の円形パターン 6 個のプレビュー）、`bookmark.webp`（注文ページの完成イメージ）、`og.png`（1440×756 のヒーローを 1200×630 に縮小）を本番ビルドの `vite preview` を Playwright で操作して撮影（cwebp q84）。`inspector.webp` は削除。`bridge-*.webp`・`warp.webp`・`path.webp`・`preview.webp` はキャンバスの拡大で現状と変わらないため据え置き。
+- テスト: `tests/landing.test.js` に「8書体・Smart Connect・2D CAD・完成イメージ・新しい画像参照・削除した画像を参照しない」の1件を追加。`npm test`: 176 passed。`npm run build` 成功。
+- 実ブラウザ（本番ビルドの preview、Chromium 1440×900 / 1024×1366 / 390×844、WebKit 390×844、68項目）: タイトル、横スクロールなし、9タブすべて表示と画像読み込み、全16画像の読み込み、しおり・スマート接続の図、Coming Soon 表示の維持、エディタCTA、console error / warning なし、失敗リクエストなし — すべて通過。Desktop / iPhone のスクリーンショットで新節の見た目を確認。
+- 気づき: エディタを Playwright で操作中（スマート接続の最大距離入力→change 送出、または CAD ツールのクリック）に1回 `NotFoundError: Failed to set the 'innerHTML' property ... moved in a 'blur' event handler` の page error が出た。紹介ページとは無関係のエディタ側の事象で、手動操作での再現は未確認。今回は対応していない。
