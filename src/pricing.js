@@ -10,13 +10,15 @@ export const CATALOG = {
   currency: "JPY",
   baseFee: 500, // per order
   bulkThreshold: 10, // quantity at or above this needs an inquiry first
-  // Orderable design size: one A4 sheet (210 × 297 mm) minus a 10 mm margin
-  // on every side. Either orientation is accepted (277 × 190 or 190 × 277).
-  sheet: { name: "A4", widthMm: 210, heightMm: 297, marginMm: 10 },
+  // Orderable design size: a 長形3号 envelope (120 × 235 mm, the largest
+  // 定形郵便 size) minus a 10 mm margin on every side. Either orientation is
+  // accepted (215 × 100 or 100 × 215). Change `sheet` to use another envelope;
+  // `limits` and `sizeNote` below must match it.
+  sheet: { name: "長形3号封筒", widthMm: 120, heightMm: 235, marginMm: 10 },
   limits: {
-    maxWidthMm: 277,
-    maxHeightMm: 190,
-    sizeNote: "A4 用紙（210 × 297 mm）から周囲 10 mm のマージンを除いた範囲",
+    maxWidthMm: 215,
+    maxHeightMm: 100,
+    sizeNote: "長形3号封筒（120 × 235 mm）から周囲 10 mm のマージンを除いた範囲",
     minSizeMm: 5,
     maxSvgBytes: 2 * 1024 * 1024,
     maxQuantity: 999,

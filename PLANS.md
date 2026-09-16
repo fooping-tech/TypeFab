@@ -556,3 +556,19 @@
 - 未変更・未検証: 送料区分（コンパクト便 200 × 150 mm・3 個まで）は変えていないため、A4 近くの紙は宅配便扱いになる。料金係数（材料費 0.3 円/cm²、加工費 0.1 円/mm、下限 100 円）は仮の値。既存注文の `material` 列に残る `mdf` などは表示上 ID のまま出る。
 - 公開: コミット `60c5dc1` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/35141804008 は success。https://fooping-tech.github.io/TypeFab/order/ は HTTP 200 で新しい案内文（最大サイズ 277 × 190 mm）を含む。Worker 側の料金再計算は同じ `src/pricing.js` を使うため、利用者が `cd worker && npm run deploy` した時点で本番 API にも反映される。
 
+## 上限サイズを A4 から封筒サイズ（長形3号）へ変更（2026-09-17）
+
+### 要求
+- 発注できる SVG の上限サイズを A4 ではなく封筒サイズにする。
+
+### 判断
+- 「封筒サイズ」の規格は指定がなかったため、日本で最も一般的で定形郵便の最大サイズでもある**長形3号（120 × 235 mm）**を採用した。周囲 10 mm のマージンは前回の要求どおり差し引き、上限は **215 × 100 mm**（縦横どちらの向きでも可）。別の封筒（角形2号 240 × 332 mm、洋形2号 114 × 162 mm など）にする場合は `src/pricing.js` の `CATALOG.sheet` と `limits`（`maxWidthMm`/`maxHeightMm`/`sizeNote`）、`src/svganalyze.js` の既定値、`order/index.html`・`index.html`・README の文言を変える。
+
+### 実装
+- `src/pricing.js`: `CATALOG.sheet = { name: "長形3号封筒", widthMm: 120, heightMm: 235, marginMm: 10 }`、`limits.maxWidthMm = 215`、`maxHeightMm = 100`、`sizeNote` を「長形3号封筒（120 × 235 mm）から周囲 10 mm のマージンを除いた範囲」に。`src/svganalyze.js` の既定値も同じ。
+- 注文ページの案内文（`order/index.html`）、紹介ページ（`index.html`）、README を更新。テスト（`tests/pricing.test.js`、`tests/svganalyze.test.js`）の境界値を 215 × 100 に更新（215 × 100・100 × 215・82.3 × 142 は可、215.1 × 100・101 × 101・120 × 235・190 × 277 は不可）。
+### 検証結果
+- `npm test`: 190 件すべて成功。`npm run build`: 成功。
+- `vite preview` + Chromium（Playwright）で注文ページを確認: 案内文が「最大サイズは 215 × 100 mm（長形3号封筒 120 × 235 mm から周囲 10 mm のマージンを除いた範囲）」になり、215 × 100・100 × 215・50 × 148 mm の SVG は検査を通り概算が出る。220 × 100 mm と 120 × 235 mm（封筒そのもの）は「サイズが大きすぎます（… 最大 215 × 100 mm、長形3号封筒（120 × 235 mm）から周囲 10 mm のマージンを除いた範囲）」で注文不可。console error なし。
+- 未変更: 送料区分（コンパクト便 200 × 150 mm・3 個まで）は据え置きのため、長さ 200 mm 超のデザインは宅配便扱いになる。封筒で発送するなら送料表の見直しが必要。
+

@@ -117,7 +117,8 @@ test("malformed, oversized and too-large files are rejected with messages", () =
   assert.equal(analyzeSVG("hello").ok, false);
   const big = analyzeSVG(svg('width="400mm" height="100mm"', rect));
   assert.match(big.errors[0], /大きすぎます/);
-  assert.ok(analyzeSVG(svg('width="100mm" height="250mm"', rect)).ok, "rotated fit");
+  assert.ok(analyzeSVG(svg('width="100mm" height="215mm"', rect)).ok, "rotated fit (default limit: 長形3号 envelope minus 10 mm)");
+  assert.match(analyzeSVG(svg('width="100mm" height="250mm"', rect)).errors[0], /最大 215 × 100 mm、長形3号封筒/);
   const huge = analyzeSVG(svg('width="10mm" height="10mm"', rect), { limits: { maxSvgBytes: 100 } });
   assert.match(huge.errors[0], /ファイルが大きすぎます/);
 });

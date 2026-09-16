@@ -9,7 +9,7 @@ test("normal order: base + material + processing + quantity, shipping separate",
   assert.ok(q.ok);
   assert.equal(q.inquiryRequired, false);
   assert.equal(q.materialFee, Math.max(100, Math.round((82.3 * 142) / 100 * 0.3)), "material fee has a ¥100 floor");
-  assert.equal(quote({ ...base, widthMm: 277, heightMm: 190 }).materialFee, Math.round((277 * 190) / 100 * 0.3), "a full sheet is above the floor");
+  assert.equal(quote({ ...base, widthMm: 215, heightMm: 100 }).materialFee, 100, "even a full-size piece (215 cm² × ¥0.3 = ¥65) is charged the ¥100 floor");
   assert.equal(q.processingFee, Math.round(3428 * 0.1));
   assert.equal(q.quantityFee, 0);
   assert.equal(q.fabricationPrice, 500 + q.materialFee + q.processingFee);
@@ -64,19 +64,19 @@ test("materials, thicknesses, size limits and delivery types are validated", () 
   assert.equal(q.thicknessMm, 0.3);
 });
 
-test("size limit: A4 minus a 10 mm margin (277 × 190 mm) in either orientation", () => {
-  assert.deepEqual(CATALOG.sheet, { name: "A4", widthMm: 210, heightMm: 297, marginMm: 10 });
+test("size limit: a 長形3号 envelope minus a 10 mm margin (215 × 100 mm) in either orientation", () => {
+  assert.deepEqual(CATALOG.sheet, { name: "長形3号封筒", widthMm: 120, heightMm: 235, marginMm: 10 });
   assert.equal(CATALOG.limits.maxWidthMm, CATALOG.sheet.heightMm - 2 * CATALOG.sheet.marginMm);
   assert.equal(CATALOG.limits.maxHeightMm, CATALOG.sheet.widthMm - 2 * CATALOG.sheet.marginMm);
-  assert.ok(quote({ ...base, widthMm: 277, heightMm: 190 }).ok, "exactly the limit fits");
-  assert.ok(quote({ ...base, widthMm: 190, heightMm: 277 }).ok, "portrait fits");
+  assert.ok(quote({ ...base, widthMm: 215, heightMm: 100 }).ok, "exactly the limit fits");
+  assert.ok(quote({ ...base, widthMm: 100, heightMm: 215 }).ok, "portrait fits");
   assert.ok(quote({ ...base, widthMm: 82.3, heightMm: 142 }).ok, "a bookmark fits");
-  const wide = quote({ ...base, widthMm: 277.1, heightMm: 100 });
+  const wide = quote({ ...base, widthMm: 215.1, heightMm: 100 });
   assert.equal(wide.ok, false);
-  assert.match(wide.errors[0], /最大 277 × 190 mm、A4 用紙（210 × 297 mm）から周囲 10 mm のマージン/);
-  assert.equal(quote({ ...base, widthMm: 200, heightMm: 200 }).ok, false, "200 × 200 does not fit in either orientation");
-  assert.equal(quote({ ...base, widthMm: 210, heightMm: 297 }).ok, false, "a full A4 sheet is too big");
-  assert.equal(quote({ ...base, widthMm: 300, heightMm: 100 }).ok, false, "the old 300 mm limit no longer applies");
+  assert.match(wide.errors[0], /最大 215 × 100 mm、長形3号封筒（120 × 235 mm）から周囲 10 mm のマージン/);
+  assert.equal(quote({ ...base, widthMm: 101, heightMm: 101 }).ok, false, "101 × 101 does not fit in either orientation");
+  assert.equal(quote({ ...base, widthMm: 120, heightMm: 235 }).ok, false, "the whole envelope is too big");
+  assert.equal(quote({ ...base, widthMm: 190, heightMm: 277 }).ok, false, "the former A4-based limit no longer applies");
 });
 
 test("shipping rule: compact for small boards and up to 3 pieces, parcel otherwise", () => {
@@ -101,8 +101,8 @@ test("ship-by date adds the configured lead time", () => {
 test("public catalogue is JSON-serialisable and statuses/transitions are consistent", () => {
   const p = JSON.parse(JSON.stringify(publicCatalog()));
   assert.equal(p.materials.length, 1);
-  assert.equal(p.limits.maxWidthMm, 277);
-  assert.equal(p.sheet.name, "A4");
+  assert.equal(p.limits.maxWidthMm, 215);
+  assert.equal(p.sheet.name, "長形3号封筒");
   assert.equal(p.bulkThreshold, 10);
   for (const [from, tos] of Object.entries(TRANSITIONS)) {
     assert.ok(ORDER_STATUSES.includes(from));
