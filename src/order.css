@@ -144,6 +144,15 @@ header.top .right {
   gap: 14px;
   align-items: center;
   font-size: 14px;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+header.top .right .badge {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40vw;
 }
 main.page {
   width: min(1120px, 100% - 32px);
@@ -598,6 +607,63 @@ main.page {
   color: var(--red);
   font-weight: 700;
 }
+.order .detail {
+  grid-column: 1 / -1;
+  border-top: 1px dashed var(--line);
+  padding-top: 10px;
+  font-size: 13.5px;
+}
+.order .detail .address {
+  color: #253748;
+}
+.order .detail .overdue {
+  color: var(--red);
+  font-weight: 700;
+}
+.order .detail button {
+  padding: 6px 10px;
+  font-size: 13px;
+  margin-top: 4px;
+}
+details.card summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+.privacy h2 {
+  font-size: 18px;
+  margin: 28px 0 8px;
+}
+.privacy h3 {
+  font-size: 15px;
+  margin: 18px 0 6px;
+}
+.privacy table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+.privacy th,
+.privacy td {
+  border: 1px solid var(--line);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.privacy th {
+  background: #f1f4f7;
+  white-space: nowrap;
+}
+.privacy pre {
+  background: #f1f4f7;
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 13px;
+}
+.privacy .updated {
+  color: var(--muted);
+  font-size: 13px;
+}
 @media (max-width: 860px) {
   .columns {
     grid-template-columns: 1fr;
@@ -615,6 +681,12 @@ main.page {
 @media (max-width: 520px) {
   .fields {
     grid-template-columns: 1fr;
+  }
+  header.top .right {
+    gap: 8px;
+  }
+  header.top #api-label {
+    display: none;
   }
   .tabs {
     width: 100%;

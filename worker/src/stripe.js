@@ -48,6 +48,26 @@ export async function createCheckoutSession(
     throw Error(body.error?.message || `Stripe error ${res.status}`);
   return body;
 }
+// GET a Stripe object (e.g. /v1/payment_intents/pi_x?expand[]=latest_charge).
+export async function stripeGet({ secretKey, apiBase = "https://api.stripe.com" }, path, fetchImpl = fetch) {
+  const res = await fetchImpl(`${apiBase}${path}`, { headers: { Authorization: `Bearer ${secretKey}` } });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw Error(body.error?.message || `Stripe error ${res.status}`);
+  return body;
+}
+// Receipt of a paid PaymentIntent: { chargeId, receiptUrl } or null when
+// Stripe has no charge yet.
+export async function fetchReceipt(auth, paymentIntentId, fetchImpl = fetch) {
+  if (!paymentIntentId) return null;
+  const pi = await stripeGet(auth, `/v1/payment_intents/${encodeURIComponent(paymentIntentId)}?expand[]=latest_charge`, fetchImpl);
+  const charge = pi.latest_charge;
+  if (!charge) return null;
+  if (typeof charge === "string") {
+    const c = await stripeGet(auth, `/v1/charges/${encodeURIComponent(charge)}`, fetchImpl);
+    return { chargeId: c.id, receiptUrl: c.receipt_url ?? null };
+  }
+  return { chargeId: charge.id, receiptUrl: charge.receipt_url ?? null };
+}
 // Builds a Stripe-Signature header for a payload (tests and local mocks).
 export async function signStripePayload(payload, secret, t = Math.floor(Date.now() / 1000)) {
   return `t=${t},v1=${await hmac(secret, `${t}.${payload}`)}`;

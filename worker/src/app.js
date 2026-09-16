@@ -1,13 +1,20 @@
 // Request handlers for the TypeFab order API. Everything that touches the
-// outside world (D1, R2, Stripe, time, randomness) comes in through `deps`
-// so the flow can be tested end to end without Cloudflare.
+// outside world (D1, R2, Stripe, mail, Access, time, randomness) comes in
+// through `deps` so the flow can be tested end to end without Cloudflare.
 import { quote, publicCatalog, shipByDate, TRANSITIONS, CATALOG } from "../../src/pricing.js";
 import { analyzeSVG, withPhysicalSize } from "../../src/svganalyze.js";
-import { createCheckoutSession, verifyStripeSignature, timingSafeEqual } from "./stripe.js";
+import { createCheckoutSession, verifyStripeSignature, timingSafeEqual, fetchReceipt } from "./stripe.js";
+import { createAccessVerifier } from "./access.js";
+import { sendMail, customerPaidMail, adminPaidMail } from "./mail.js";
+import { PERSONAL_DATA_FIELDS, NOTIFICATION_TYPES } from "./store.js";
 
 const MAX_BODY = 3 * 1024 * 1024;
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 const ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+// Statuses in which a payment exists (receipt available) and in which the
+// shipping details are still needed by the admin page.
+const PAID_STATUSES = ["PAID", "PROCESSING", "READY", "SHIPPED", "COMPLETED"];
+const SHIPPING_VISIBLE_STATUSES = ["PAID", "PROCESSING", "READY", "SHIPPED"];
 const json = (data, status = 200, headers = {}) =>
   new Response(JSON.stringify(data), {
     status,
@@ -35,7 +42,8 @@ export function catalogFromConfig(config = {}) {
   if (config.expressLeadTimeDays > 0) c.delivery.EXPRESS.leadTimeDays = Number(config.expressLeadTimeDays);
   return c;
 }
-// Customer-facing view of an order (no address, no tokens).
+// Customer-facing view of an order (no address, no e-mail, no tokens, no
+// Stripe ids). The receipt link only exists once the order was paid.
 export const customerView = (o) => ({
   id: o.id,
   status: o.status,
@@ -55,10 +63,24 @@ export const customerView = (o) => ({
   currency: o.currency,
   trackingNumber: o.shippingTrackingNumber,
   carrier: o.shippingCarrier,
+  receiptUrl: PAID_STATUSES.includes(o.status) && o.receiptUrl ? o.receiptUrl : null,
 });
-const adminView = (o) => {
-  const { accessToken, ...rest } = o;
-  return rest;
+// Admin list view: what the order board needs, without contact details.
+const ADMIN_LIST_FIELDS = [
+  "id", "status", "createdAt", "updatedAt", "paidAt", "shipBy", "customerName", "originalFileName", "svgBytes", "widthMm", "heightMm",
+  "pathCount", "cutLengthMm", "estimatedProcessingMinutes", "material", "thicknessMm", "quantity", "deliveryType", "basePrice", "processingPrice",
+  "shippingPrice", "totalPrice", "currency", "shippingTrackingNumber", "shippingCarrier", "notes", "personalDataDeletedAt",
+];
+export const adminListView = (o) => Object.fromEntries(ADMIN_LIST_FIELDS.map((k) => [k, o[k] ?? null]));
+// Admin detail view: adds Stripe ids and the receipt; shipping details only
+// while the order still needs to be produced or shipped (issue #8 §5).
+export const adminDetailView = (o) => {
+  const v = { ...adminListView(o), stripeCheckoutSessionId: o.stripeCheckoutSessionId, stripePaymentIntentId: o.stripePaymentIntentId, stripeChargeId: o.stripeChargeId, receiptUrl: o.receiptUrl, shippingVisible: false };
+  if (SHIPPING_VISIBLE_STATUSES.includes(o.status) && !o.personalDataDeletedAt) {
+    v.shippingVisible = true;
+    for (const k of PERSONAL_DATA_FIELDS) v[k] = o[k] ?? null;
+  } else v.customerName = null;
+  return v;
 };
 
 export function createApp(deps) {
@@ -70,28 +92,48 @@ export function createApp(deps) {
     now = () => new Date(),
     makeOrderId = newOrderId,
     makeToken = newToken,
+    log = (msg) => console.error(msg),
   } = deps;
   const catalog = catalogFromConfig(config);
-  const allowedOrigins = (config.allowedOrigins ?? []).map((o) => o.replace(/\/$/, ""));
+  const trim = (o) => o.replace(/\/$/, "");
+  const allowedOrigins = (config.allowedOrigins ?? []).map(trim);
+  const adminAllowedOrigins = (config.adminAllowedOrigins ?? []).map(trim);
   const stripeConfigured = Boolean(config.stripeSecretKey && config.stripeWebhookSecret);
+  const stripeAuth = { secretKey: config.stripeSecretKey, apiBase: config.stripeApiBase };
+  const mailConfigured = Boolean(config.mailApiKey && config.mailFrom);
+  const accessConfigured = Boolean(config.accessTeamDomain && config.accessAud);
+  const verifyAccess = accessConfigured
+    ? createAccessVerifier({ teamDomain: config.accessTeamDomain, aud: config.accessAud, fetch: fetchImpl, now: () => now().getTime() })
+    : null;
   const siteUrl = (config.siteUrl ?? "").replace(/\/?$/, "/");
+  const retentionDays = Number(config.personalDataRetentionDays) > 0 ? Number(config.personalDataRetentionDays) : 90;
 
-  const cors = (request) => {
+  // Public endpoints answer the site origins; admin endpoints answer only
+  // the explicitly configured admin origins (none in production, where the
+  // admin page is served by this Worker and is same-origin).
+  const cors = (request, isAdminPath) => {
     const origin = request.headers.get("Origin");
-    const headers = {
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      "Access-Control-Expose-Headers": "Content-Disposition",
-      "Access-Control-Max-Age": "600",
-      Vary: "Origin",
-    };
-    if (origin && allowedOrigins.includes(origin.replace(/\/$/, ""))) headers["Access-Control-Allow-Origin"] = origin;
+    const list = isAdminPath ? adminAllowedOrigins : allowedOrigins;
+    const headers = { Vary: "Origin" };
+    if (origin && list.includes(trim(origin))) {
+      headers["Access-Control-Allow-Origin"] = origin;
+      headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
+      headers["Access-Control-Allow-Headers"] = isAdminPath ? "Content-Type, Authorization" : "Content-Type";
+      headers["Access-Control-Max-Age"] = "600";
+      if (isAdminPath) headers["Access-Control-Expose-Headers"] = "Content-Disposition";
+    }
     return headers;
   };
-  const isAdmin = (request) => {
+  // Admin identity: Cloudflare Access JWT when Access is configured, else
+  // the ADMIN_TOKEN bearer (local development). Never both.
+  const adminIdentity = async (request) => {
+    if (accessConfigured) {
+      const who = await verifyAccess(request.headers.get("Cf-Access-Jwt-Assertion"));
+      return who ? { mode: "access", email: who.email } : null;
+    }
     const auth = request.headers.get("Authorization") ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-    return Boolean(config.adminToken && token && timingSafeEqual(token, config.adminToken));
+    return config.adminToken && token && timingSafeEqual(token, config.adminToken) ? { mode: "token", email: null } : null;
   };
   const readJson = async (request) => {
     const length = Number(request.headers.get("Content-Length") ?? 0);
@@ -104,6 +146,7 @@ export function createApp(deps) {
       throw Object.assign(Error("JSONを読み取れません。"), { status: 400 });
     }
   };
+  const orderUrl = (o) => `${siteUrl}order/?order=${o.id}&token=${o.accessToken}`;
 
   async function createOrder(body) {
     let svg = typeof body.svg === "string" ? body.svg : "";
@@ -189,26 +232,31 @@ export function createApp(deps) {
       currency: q.currency,
       stripeCheckoutSessionId: null,
       stripePaymentIntentId: null,
+      stripeChargeId: null,
+      receiptUrl: null,
       shippingTrackingNumber: null,
       shippingCarrier: null,
       accessToken,
       notes: null,
+      personalDataDeletedAt: null,
     };
     await store.insertOrder(order);
     await store.addOrderEvent({ orderId: id, fromStatus: null, toStatus: "PAYMENT_PENDING", at, note: "order created" });
-    const orderUrl = `${siteUrl}order/?order=${id}&token=${accessToken}`;
+    const url = orderUrl(order);
     let session;
     try {
       session = await createCheckoutSession(
-        { secretKey: config.stripeSecretKey, apiBase: config.stripeApiBase },
+        stripeAuth,
         {
           mode: "payment",
           client_reference_id: id,
           customer_email: email,
-          success_url: `${orderUrl}&result=success&session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${orderUrl}&result=cancel`,
+          success_url: `${url}&result=success&session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${url}&result=cancel`,
           metadata: { orderId: id },
-          payment_intent_data: { metadata: { orderId: id } },
+          // receipt_email makes Stripe send its receipt to the customer when
+          // "Successful payments" e-mails are enabled in the dashboard (#10).
+          payment_intent_data: { metadata: { orderId: id }, receipt_email: email },
           line_items: [
             {
               quantity: 1,
@@ -232,6 +280,63 @@ export function createApp(deps) {
     }
     await store.updateOrder(id, { stripeCheckoutSessionId: session.id, updatedAt: now().toISOString() });
     return json({ orderId: id, accessToken, checkoutUrl: session.url, quote: q, order: customerView(await store.getOrder(id)) }, 201);
+  }
+
+  // Looks the receipt up at Stripe and caches it. Best effort: returns the
+  // (possibly unchanged) order and never throws.
+  async function cacheReceipt(order) {
+    if (!order.stripePaymentIntentId || order.receiptUrl || !stripeConfigured) return order;
+    try {
+      const r = await fetchReceipt(stripeAuth, order.stripePaymentIntentId, fetchImpl);
+      if (r?.receiptUrl) return await store.updateOrder(order.id, { stripeChargeId: r.chargeId, receiptUrl: r.receiptUrl });
+    } catch (e) {
+      log(`receipt lookup failed for ${order.id}: ${e.message}`);
+    }
+    return order;
+  }
+
+  // Sends the PAID notifications that have not been sent yet. Each type is
+  // recorded separately; failures are stored and never thrown (#9 §4, §5).
+  async function sendPaidNotifications(order, { retry = false } = {}) {
+    const results = {};
+    const existing = Object.fromEntries((await store.listNotifications(order.id)).map((n) => [n.type, n]));
+    for (const type of NOTIFICATION_TYPES) {
+      const prev = existing[type];
+      if (prev?.sentAt) {
+        results[type] = { status: "already-sent", sentAt: prev.sentAt };
+        continue;
+      }
+      if (prev && !retry) {
+        results[type] = { status: "failed", error: prev.error };
+        continue;
+      }
+      const at = now().toISOString();
+      let to, mail;
+      if (type === "customer_paid") {
+        to = order.customerEmail;
+        mail = customerPaidMail(order, { orderUrl: orderUrl(order), contactUrl: config.contactUrl ?? siteUrl });
+      } else {
+        to = config.adminNotificationEmail;
+        mail = adminPaidMail(order, { adminUrl: config.adminUrl ?? `${siteUrl}admin/` });
+      }
+      if (!mailConfigured || !to) {
+        const reason = !mailConfigured ? "mail not configured" : "no recipient configured";
+        await store.recordNotification({ orderId: order.id, type, error: reason, at });
+        results[type] = { status: "skipped", error: reason };
+        continue;
+      }
+      try {
+        const { id } = await sendMail({ apiKey: config.mailApiKey, apiBase: config.mailApiBase, from: config.mailFrom, replyTo: config.mailReplyTo }, { to, ...mail }, fetchImpl);
+        await store.recordNotification({ orderId: order.id, type, sentAt: at, providerId: id, error: null, at });
+        results[type] = { status: "sent", sentAt: at };
+      } catch (e) {
+        const msg = String(e.message).slice(0, 300);
+        await store.recordNotification({ orderId: order.id, type, error: msg, at });
+        log(`notification ${type} failed for ${order.id}: ${msg}`);
+        results[type] = { status: "failed", error: msg };
+      }
+    }
+    return results;
   }
 
   async function webhook(request) {
@@ -259,7 +364,9 @@ export function createApp(deps) {
         const notes = session.amount_total !== undefined && Number(session.amount_total) !== Number(order.totalPrice)
           ? `amount mismatch: stripe ${session.amount_total} / order ${order.totalPrice}`
           : order.notes;
-        await store.updateOrder(order.id, {
+        // 1. Commit PAID. Everything after this is best effort and must not
+        //    make Stripe retry the event.
+        let paid = await store.updateOrder(order.id, {
           status: "PAID",
           paidAt: at,
           updatedAt: at,
@@ -269,6 +376,15 @@ export function createApp(deps) {
           notes,
         });
         await store.addOrderEvent({ orderId: order.id, fromStatus: order.status, toStatus: "PAID", at, note: event.type });
+        // 2. Receipt (#10) and notifications (#9).
+        paid = await cacheReceipt(paid);
+        let notifications = null;
+        try {
+          notifications = await sendPaidNotifications(paid);
+        } catch (e) {
+          log(`notifications failed for ${order.id}: ${e.message}`);
+        }
+        return json({ received: true, notifications });
       }
       return json({ received: true });
     }
@@ -282,7 +398,7 @@ export function createApp(deps) {
     return json({ received: true, ignored: event.type });
   }
 
-  async function adminStatus(request, order) {
+  async function adminStatus(request, order, who) {
     const body = await readJson(request);
     const to = clean(body.status, 20);
     if (!TRANSITIONS[order.status]?.includes(to))
@@ -293,19 +409,46 @@ export function createApp(deps) {
     if (body.carrier !== undefined) patch.shippingCarrier = clean(body.carrier, 40) || null;
     if (body.note) patch.notes = clean(body.note, 500);
     const updated = await store.updateOrder(order.id, patch);
-    await store.addOrderEvent({ orderId: order.id, fromStatus: order.status, toStatus: to, at, note: clean(body.note, 200) || null });
-    return json({ order: adminView(updated) });
+    const note = [clean(body.note, 200), who?.email ? `by ${who.email}` : ""].filter(Boolean).join(" · ") || null;
+    await store.addOrderEvent({ orderId: order.id, fromStatus: order.status, toStatus: to, at, note });
+    return json({ order: adminDetailView(updated) });
   }
 
-  return async function handle(request) {
+  // Retention purge (#8 §2): closed orders older than the retention period
+  // lose their personal data and their SVG. Returns what was purged.
+  async function purgeExpiredData({ dryRun = false } = {}) {
+    const before = new Date(now().getTime() - retentionDays * 86400000).toISOString();
+    const candidates = await store.listPurgeCandidates(before);
+    const purged = [];
+    for (const o of candidates) {
+      if (dryRun) {
+        purged.push(o.id);
+        continue;
+      }
+      const at = now().toISOString();
+      try {
+        if (o.svgObjectKey) await bucket.delete(o.svgObjectKey);
+      } catch (e) {
+        log(`svg delete failed for ${o.id}: ${e.message}`);
+        continue;
+      }
+      await store.updateOrder(o.id, { ...Object.fromEntries(PERSONAL_DATA_FIELDS.map((k) => [k, null])), personalDataDeletedAt: at });
+      await store.addOrderEvent({ orderId: o.id, fromStatus: o.status, toStatus: o.status, at, note: `personal data and SVG deleted after ${retentionDays} days` });
+      purged.push(o.id);
+    }
+    return { before, retentionDays, candidates: candidates.length, purged, dryRun };
+  }
+
+  async function handle(request) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, "") || "/";
-    const headers = cors(request);
+    const isAdminPath = path.startsWith("/api/admin");
+    const headers = cors(request, isAdminPath);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
     const respond = async () => {
-      if (path === "/api/health") return json({ ok: true, stripeConfigured, time: now().toISOString() });
+      if (path === "/api/health") return json({ ok: true, stripeConfigured, mailConfigured, accessConfigured, time: now().toISOString() });
       if (path === "/api/config" && request.method === "GET")
-        return json({ catalog: publicCatalog(catalog), stripeConfigured, contactUrl: config.contactUrl ?? null, siteUrl });
+        return json({ catalog: publicCatalog(catalog), stripeConfigured, contactUrl: config.contactUrl ?? null, siteUrl, privacyUrl: `${siteUrl}privacy/`, personalDataRetentionDays: retentionDays });
       if (path === "/api/quote" && request.method === "POST") {
         const body = await readJson(request);
         const q = quote(body, catalog);
@@ -315,25 +458,34 @@ export function createApp(deps) {
       if (path === "/api/stripe/webhook" && request.method === "POST") return webhook(request);
       let m = /^\/api\/orders\/([A-Z0-9-]+)$/.exec(path);
       if (m && request.method === "GET") {
-        const order = await store.getOrder(m[1]);
+        let order = await store.getOrder(m[1]);
         const token = url.searchParams.get("token") ?? "";
         if (!order || !token || !timingSafeEqual(token, order.accessToken)) return error("注文が見つかりません。", 404);
+        if (PAID_STATUSES.includes(order.status)) order = await cacheReceipt(order);
         return json({ order: customerView(order) });
       }
-      if (path.startsWith("/api/admin/")) {
-        if (!isAdmin(request)) return error("管理者トークンが必要です。", 401);
+      if (isAdminPath) {
+        const who = await adminIdentity(request);
+        if (!who) return error(accessConfigured ? "Cloudflare Access の認証が必要です。" : "管理者トークンが必要です。", 401, { authMode: accessConfigured ? "access" : "token" });
+        if (path === "/api/admin/session" && request.method === "GET") return json({ mode: who.mode, email: who.email, mailConfigured, retentionDays });
         if (path === "/api/admin/orders" && request.method === "GET") {
           const filter = url.searchParams.get("status");
           const statuses = filter === "open" ? ["PAID", "PROCESSING", "READY"] : filter ? filter.split(",") : null;
           const orders = await store.listOrders({ statuses });
-          return json({ orders: orders.map(adminView) });
+          return json({ orders: orders.map(adminListView) });
         }
-        m = /^\/api\/admin\/orders\/([A-Z0-9-]+)(\/svg|\/status)?$/.exec(path);
+        if (path === "/api/admin/maintenance/purge" && request.method === "POST") {
+          const body = await readJson(request).catch(() => ({}));
+          return json(await purgeExpiredData({ dryRun: body?.dryRun === true }));
+        }
+        m = /^\/api\/admin\/orders\/([A-Z0-9-]+)(\/svg|\/status|\/notify)?$/.exec(path);
         if (!m) return error("Not found", 404);
         const order = await store.getOrder(m[1]);
         if (!order) return error("注文が見つかりません。", 404);
-        if (!m[2] && request.method === "GET") return json({ order: adminView(order), events: await store.listOrderEvents(order.id) });
+        if (!m[2] && request.method === "GET")
+          return json({ order: adminDetailView(order), events: await store.listOrderEvents(order.id), notifications: await store.listNotifications(order.id) });
         if (m[2] === "/svg" && request.method === "GET") {
+          if (order.personalDataDeletedAt) return error("保持期間を過ぎたため、このSVGは削除されています。", 410);
           const obj = await bucket.get(order.svgObjectKey);
           if (!obj) return error("SVGが見つかりません。", 404);
           const name = (order.originalFileName || "design.svg").replace(/"/g, "");
@@ -341,7 +493,14 @@ export function createApp(deps) {
             headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Content-Disposition": `attachment; filename="${order.id}-${encodeURIComponent(name)}"`, "Cache-Control": "no-store" },
           });
         }
-        if (m[2] === "/status" && request.method === "POST") return adminStatus(request, order);
+        if (m[2] === "/status" && request.method === "POST") return adminStatus(request, order, who);
+        if (m[2] === "/notify" && request.method === "POST") {
+          if (!PAID_STATUSES.includes(order.status)) return error("決済済みの注文にのみ送信できます。", 409);
+          if (order.personalDataDeletedAt) return error("保持期間を過ぎたため、送信先がありません。", 410);
+          const withReceipt = await cacheReceipt(order);
+          const results = await sendPaidNotifications(withReceipt, { retry: true });
+          return json({ results, notifications: await store.listNotifications(order.id) });
+        }
       }
       return error("Not found", 404);
     };
@@ -349,9 +508,12 @@ export function createApp(deps) {
     try {
       res = await respond();
     } catch (e) {
+      if (!e.status) log(`unhandled error on ${request.method} ${path}: ${e.message}`);
       res = error(e.status ? e.message : "サーバーエラーが発生しました。", e.status ?? 500);
     }
     for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
     return res;
-  };
+  }
+  handle.purgeExpiredData = purgeExpiredData;
+  return handle;
 }

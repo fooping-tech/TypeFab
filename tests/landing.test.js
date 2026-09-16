@@ -76,11 +76,30 @@ test("landing page describes the current feature set: 8 fonts, Smart Connect, 2D
   assert.doesNotMatch(html, /inspector\.webp/);
 });
 
-test("Vite config builds both pages under the /TypeFab/ base", async () => {
+test("Vite config builds the public pages under the /TypeFab/ base; the admin page is a separate Worker build", async () => {
   const config = (await import("../vite.config.js")).default;
   assert.equal(config.base, "/TypeFab/");
   const input = config.build.rollupOptions.input;
   assert.ok(input.editor.endsWith("/app/index.html"));
   assert.ok(input.landing.endsWith("/TypeFab/index.html"));
-  assert.ok(input.order.endsWith("/order/index.html") && input.admin.endsWith("/admin/index.html"));
+  assert.ok(input.order.endsWith("/order/index.html") && input.privacy.endsWith("/privacy/index.html"));
+  assert.equal(input.admin, undefined, "admin page is not published on GitHub Pages (issue #8)");
+  const admin = (await import("../vite.admin.config.js")).default;
+  assert.equal(admin.base, "/");
+  assert.equal(admin.publicDir, false);
+  assert.ok(admin.build.outDir.endsWith("/worker/admin-dist"));
+  assert.ok(admin.build.rollupOptions.input.admin.endsWith("/admin/index.html"));
+  // Landing page links to the privacy policy.
+  const html = fs.readFileSync("index.html", "utf8");
+  assert.match(html, /href="\.\/privacy\/"/);
+});
+
+test("privacy policy page states the collected data, Stripe, Cloudflare, retention and the contact window", () => {
+  const html = fs.readFileSync("privacy/index.html", "utf8");
+  for (const s of ["氏名", "メールアドレス", "住所", "電話番号", "SVG", "Stripe", "Cloudflare", "90日", "保持", "第三者", "削除", "お問い合わせ"]) assert.ok(html.includes(s), s);
+  assert.match(html, /カード番号.*当サービスは受け取らず、保持しません/s);
+  assert.match(html, /github\.com\/fooping-tech\/TypeFab\/issues/);
+  const order = fs.readFileSync("order/index.html", "utf8");
+  assert.match(order, /href="\.\.\/privacy\/"/, "order page links to the privacy policy");
+  assert.match(order, /領収書/, "order page explains receipts");
 });

@@ -1,24 +1,53 @@
-# TypeFab order API — Cloudflare Workers + D1 + R2 + Stripe Checkout.
-# Deploy from the repository root:  npx wrangler deploy -c worker/wrangler.toml
+# TypeFab order API — Cloudflare Workers + D1 + R2 + Stripe Checkout + Resend.
+# Deploy from worker/:  npm run deploy   (builds the admin page first)
 name = "typefab-orders"
 main = "src/index.js"
 compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
 
+# The admin page (/admin/) is served by this Worker so that it and
+# /api/admin/* sit behind the same Cloudflare Access application.
+# `npm run build:admin` (repository root) writes it to worker/admin-dist.
+[assets]
+directory = "./admin-dist"
+binding = "ASSETS"
+html_handling = "auto-trailing-slash"
+not_found_handling = "none"
+
+# Retention purge (issue #8): 18:00 UTC = 03:00 JST every day.
+[triggers]
+crons = ["0 18 * * *"]
+
 [vars]
-# Public site (success/cancel URLs point back here).
+# Public site (success/cancel URLs and the customer order page point back here).
 SITE_URL = "https://fooping-tech.github.io/TypeFab/"
-# Browser origins allowed to call the API (comma separated).
+# Browser origins allowed to call the public order API (comma separated). Never "*".
 ALLOWED_ORIGINS = "https://fooping-tech.github.io,http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173"
+# Browser origins allowed to call /api/admin/*. Empty in production: the admin
+# page is served by this Worker (same origin). Local development sets it in .dev.vars.
+ADMIN_ALLOWED_ORIGINS = ""
+# Cloudflare Access (Zero Trust) protecting /admin* and /api/admin*:
+# team domain and the Application Audience (AUD) tag. Leave both empty to
+# fall back to the ADMIN_TOKEN bearer (local development only).
+ACCESS_TEAM_DOMAIN = ""
+ACCESS_AUD = ""
+# Days after COMPLETED/CANCELLED before name, e-mail, address, phone and the SVG are deleted.
+PERSONAL_DATA_RETENTION_DAYS = "90"
+# Mail (Resend): sender and the address that receives new-order notifications.
+MAIL_FROM = ""
+MAIL_REPLY_TO = ""
+ADMIN_NOTIFICATION_EMAIL = ""
+# Link in the admin notification mail. Defaults to <Worker origin>/admin/ when empty.
+ADMIN_URL = ""
 # Bulk-order threshold and lead times (days). Prices live in src/pricing.js.
 BULK_THRESHOLD = "10"
 NORMAL_LEAD_TIME_DAYS = "7"
 EXPRESS_LEAD_TIME_DAYS = "3"
-# Where "大量注文について問い合わせる" sends people.
+# Where "大量注文について問い合わせる" and the mails' contact line send people.
 CONTACT_URL = "https://github.com/fooping-tech/TypeFab/issues/new?title=%E5%A4%A7%E9%87%8F%E6%B3%A8%E6%96%87%E3%81%AE%E5%95%8F%E3%81%84%E5%90%88%E3%82%8F%E3%81%9B"
 
-# Secrets (never in this file):  npx wrangler secret put <NAME> -c worker/wrangler.toml
-#   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, ADMIN_TOKEN
+# Secrets (never in this file):  npx wrangler secret put <NAME>   (run in worker/)
+#   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, MAIL_API_KEY, ADMIN_TOKEN (local only)
 # Local development reads them from worker/.dev.vars (see .dev.vars.example).
 
 [[d1_databases]]

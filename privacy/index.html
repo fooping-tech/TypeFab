@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f5f7" />
+    <meta name="description" content="TypeFab の加工注文で取得する個人情報とその取り扱い、保持期間、Stripe・Cloudflare の利用、問い合わせ窓口について。" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href="https://fooping-tech.github.io/TypeFab/privacy/" />
+    <title>TypeFab — プライバシーポリシー</title>
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand" href="../"><span class="brand-mark">t<span>f</span></span>TypeFab</a>
+      <h1>プライバシーポリシー</h1>
+      <div class="right"><a href="../order/">加工注文へ</a></div>
+    </header>
+    <main class="page">
+      <article class="card privacy">
+        <p class="updated">最終更新: 2026-09-16</p>
+        <p>TypeFab（運営: fooping-tech、以下「当サービス」）は、レーザー加工向けのSVGエディタと、作成したデザインの加工注文を提供しています。このページでは、加工注文に際して当サービスが取得する個人情報とその取り扱いを説明します。</p>
+
+        <h2>1. エディタは個人情報を送信しません</h2>
+        <p>エディタ（<code>/app/</code>）で入力した文字、読み込んだフォント、編集中のプロジェクトは、お使いのブラウザの中だけで処理し、当サービスのサーバーを含む外部へ送信しません。編集内容の自動保存とフォントの利用同意はブラウザの保存領域（localStorage）に置かれ、ブラウザの設定から削除できます。</p>
+
+        <h2>2. 加工注文で取得する情報</h2>
+        <table>
+          <tr><th>取得する情報</th><th>利用目的</th></tr>
+          <tr><td>氏名</td><td>配送伝票の宛名、注文に関する連絡</td></tr>
+          <tr><td>メールアドレス</td><td>注文受付メールの送信、決済（Stripe）の領収書送付、注文に関する連絡</td></tr>
+          <tr><td>郵便番号・都道府県・住所（建物名・部屋番号を含む）</td><td>製作物の配送</td></tr>
+          <tr><td>電話番号（任意）</td><td>配送会社からの連絡、配送に関する連絡</td></tr>
+          <tr><td>注文したSVGデータ、ファイル名、材料・厚さ・数量・納期の指定</td><td>加工注文の受付、料金計算、製作</td></tr>
+          <tr><td>注文番号、金額、注文・決済の日時、注文の状態、追跡番号</td><td>決済の確認、製作・配送の管理、会計</td></tr>
+        </table>
+        <p>クレジットカード番号・有効期限・セキュリティコードは、決済代行の Stripe が提供する決済ページ（Stripe Checkout）で入力され、<strong>当サービスは受け取らず、保持しません</strong>。</p>
+
+        <h2>3. 利用する外部サービス</h2>
+        <table>
+          <tr><th>サービス</th><th>渡す情報</th><th>用途</th></tr>
+          <tr><td>Stripe（Stripe, Inc. / Stripe Japan）</td><td>メールアドレス、注文番号、金額、注文内容の要約（材料・サイズ・数量）</td><td>決済、領収書メールの送付、返金</td></tr>
+          <tr><td>Cloudflare（Cloudflare, Inc.）</td><td>第2項の注文情報（Cloudflare D1）、SVGデータ（Cloudflare R2）</td><td>注文の受付・保存・管理API（Cloudflare Workers）の実行、管理画面の保護（Cloudflare Access）</td></tr>
+          <tr><td>メール送信サービス（Resend）</td><td>メールアドレス、注文番号、注文内容、金額、発送予定</td><td>注文受付メールの送信</td></tr>
+          <tr><td>GitHub（GitHub, Inc.）</td><td>ページの表示に伴うアクセス情報（IPアドレス等、GitHub Pagesのログ）</td><td>エディタ・注文ページ・このページの配信</td></tr>
+          <tr><td>配送会社</td><td>氏名、住所、電話番号（任意）</td><td>製作物の配送</td></tr>
+        </table>
+        <p>それぞれの事業者における取り扱いは各社のプライバシーポリシーに従います。上記以外の第三者へ個人情報を提供することはありません。法令に基づく開示の求めがある場合を除きます。</p>
+
+        <h2>4. データの流れ</h2>
+<pre>ブラウザ（GitHub Pages: 注文ページ）
+  │ 氏名・メールアドレス・住所・電話番号（任意）・SVG
+  ▼
+Cloudflare Workers（注文API）
+  ├── Cloudflare D1 …… 注文情報（個人情報は保持期間内のみ）
+  ├── Cloudflare R2 …… SVGデータ
+  ├── Stripe …………… メールアドレス・注文番号・金額（カード情報はStripeのみ）
+  └── Resend …………… 注文受付メール</pre>
+        <p>注文ページの入力内容はブラウザに保存しません（ページを離れると消えます）。ブラウザの保存領域に残るのは、エディタから注文ページへ渡すSVGデータだけで、注文の作成後に削除します。</p>
+
+        <h2>5. 保持期間と削除</h2>
+        <ul>
+          <li>氏名・メールアドレス・住所・電話番号と、注文したSVGデータは、注文が<strong>完了（発送後に完了扱い）またはキャンセルになってから90日</strong>を過ぎると自動的に削除します。</li>
+          <li>注文番号、金額、注文・決済の日時、注文の状態、加工内容（材料・厚さ・サイズ・数量）、Stripeの決済ID は、会計と決済の照合のため、削除後も保持します。これらから個人を特定することはできません。</li>
+          <li>Stripe が保持する決済記録・領収書、メール送信サービスの送信ログは、各社の保持方針に従います。</li>
+          <li>管理画面では、発送が必要な状態（決済完了〜発送済み）の注文についてのみ配送先を表示します。完了・キャンセル後は表示しません。</li>
+        </ul>
+
+        <h2>6. 安全管理</h2>
+        <ul>
+          <li>注文の受付から管理まで、通信はすべて HTTPS です。</li>
+          <li>注文情報を扱う管理画面と管理APIは Cloudflare Access により、許可された管理者だけがログインして利用できます。</li>
+          <li>公開ページから注文APIを呼び出せるのは、当サービスの公開URLからのみに限定しています。</li>
+          <li>注文状況の確認ページは注文ごとの確認用URLで表示します。このページには配送先やメールアドレスは表示されません。URLは注文受付メールに記載しますので、第三者に共有しないでください。</li>
+        </ul>
+
+        <h2>7. お問い合わせ・削除の依頼</h2>
+        <p>ご自身の注文情報の確認、訂正、削除をご希望の場合や、この方針についてのお問い合わせは、下記の窓口へ<strong>注文番号を添えて</strong>ご連絡ください。ご本人であることを確認のうえ、保持期間の到来前でも、製作・配送・返金などの手続きに必要な範囲を除き削除します。</p>
+        <p>窓口: <a href="https://github.com/fooping-tech/TypeFab/issues/new?title=%E5%80%8B%E4%BA%BA%E6%83%85%E5%A0%B1%E3%81%AB%E3%81%A4%E3%81%84%E3%81%A6%E3%81%AE%E3%81%8A%E5%95%8F%E3%81%84%E5%90%88%E3%82%8F%E3%81%9B" rel="noopener">GitHub の問い合わせフォーム（Issue）</a>。注文に関する個人情報を Issue の本文に書かないでください。注文番号だけを記載していただければ、当方から注文時のメールアドレスへ連絡します。</p>
+
+        <h2>8. 変更</h2>
+        <p>この方針を変更する場合は、このページで公開します。重要な変更がある場合は、注文ページにも案内を表示します。</p>
+        <div class="actions"><a href="../order/"><button>加工注文ページへ戻る</button></a><a href="../"><button>TypeFab について</button></a></div>
+      </article>
+    </main>
+    <script type="module" src="/src/privacy.js"></script>
+  </body>
+</html>

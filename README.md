@@ -268,7 +268,8 @@ TypeFabで作ったSVG、または手元のSVGをそのままレーザー加工�
 3. TypeFab内部では **1 SVGユーザー単位 = 1 mm** とし、書き出すSVGには `width="240mm" height="160mm" viewBox="0 0 240 160"` のように物理サイズを明示します。width/heightが px や単位なしで実寸が決まらないSVGは「実寸の幅 (mm)」の入力を求め、確定するまで注文できません。
 4. 材料（MDF / アクリル / その他＝要相談）、厚さ（材料ごと）、数量、通常／特急を選ぶと概算を表示します。料金は `src/pricing.js` の設定値（仮）で `基本料金 + 材料費 + 加工費 + 数量加算`、特急は加工料金×2（送料は2倍にしない）です。**最終金額はWorker側で必ず再計算**し、ブラウザから送られた金額は使いません。
 5. 数量が閾値（初期値10個、`BULK_THRESHOLD`）以上、または「その他」材料は事前問い合わせとし、「大量注文について問い合わせる」（`CONTACT_URL`）へ案内します。
-6. 配送先を入力し、確認画面の「Stripeで支払う」でStripe Checkoutへ移動します。決済後は注文ページに戻り、注文番号とステータスを表示します。決済完了はリダイレクトではなく **Stripe Webhook（`checkout.session.completed`）** で確定し、同じイベントを複数回受け取っても1回だけ処理します。
+6. 配送先を入力し、確認画面の「Stripeで支払う」でStripe Checkoutへ移動します。決済後は注文ページに戻り、注文番号とステータスを表示します。決済完了はリダイレクトではなく **Stripe Webhook（`checkout.session.completed`）** で確定し、同じイベントを複数回受け取っても1回だけ処理します。確定後に注文受付メール（下記）を送り、注文状況ページに「領収書を表示（Stripe）」を出します。
+7. 注文フォームに入力した氏名・メールアドレス・住所・電話番号はブラウザに保存しません（材料・厚さ・数量・納期の選択だけをタブ内の `sessionStorage` に保持）。エディタから渡したSVG（`localStorage` の `typefab-order`）は注文作成時に削除します。注文状況ページのURLに含まれる確認用トークンは表示後にアドレスバーから取り除きます。個人情報の取り扱いは [プライバシーポリシー](https://fooping-tech.github.io/TypeFab/privacy/)（`privacy/index.html`）に記載し、注文フォームと確認画面からリンクしています。
 
 ### 完成イメージ（文庫本しおりのプレビュー）
 
@@ -280,9 +281,57 @@ TypeFabで作ったSVG、または手元のSVGをそのままレーザー加工�
 
 紙片の大きさは、すべての切断線を囲む閉じた外形があればその外形、なければ SVG 全体（用紙）とします。TypeFab から渡した SVG は加工エリア全体が用紙になるため、「SVG実寸」を別に表示します。横長のデザインは 90° 回転して縦向きに表示し、チェックボックスで元の向きに戻せます。幅 50 mm 超、長さ 90 mm 未満、160 mm 超は文庫本のしおりとして不自然な目安として注意を出しますが、注文は止めません（閾値は `BOOKMARK_THRESHOLDS`）。表示は目安で、材料の色・表面・仕上がりは実物と異なります。
 
-### 管理画面
+### 注文通知メール（Issue #9）
 
-`/admin/` でWorkerの `ADMIN_TOKEN` を入力すると注文一覧を表示します（未処理＝PAID・PROCESSING・READY、状態別、すべて）。各注文に注文日・決済日・通常／特急・発送期限（決済日＋リードタイム）を表示し、特急は赤い帯、期限超過は赤字です。「SVGを表示」「SVGをダウンロード」（R2から取得）、「加工開始」「加工完了」「発送済みにする」（追跡番号・配送会社を任意入力）、「完了にする」「キャンセル」で状態を変えます。状態遷移は `NEW → PAYMENT_PENDING → PAID → PROCESSING → READY → SHIPPED → COMPLETED`（各段階から `CANCELLED`）で、許可されない遷移はWorkerが拒否します。返金はStripeダッシュボードで行います。
+Stripe Webhook で注文が初めて `PAID` になった時点で、Worker が2通のメールを送ります（注文作成時・未決済・期限切れ・決済失敗では送りません）。
+
+| 宛先 | 内容 | 含めないもの |
+| --- | --- | --- |
+| 購入者（`customer_email`） | 件名「【TypeFab】ご注文を承りました（注文番号）」。注文番号、決済日時、材料・厚さ・サイズ・数量・納期、加工料金・送料・合計、発送予定日、注文状況ページのURL（確認用トークン付き）、領収書の案内、問い合わせ先（`CONTACT_URL`） | 配送先住所、電話番号 |
+| 管理者（`ADMIN_NOTIFICATION_EMAIL`） | 件名「新規注文 注文番号 ¥金額」（特急は「【特急】」を先頭に付け、本文にも強調）。購入者名、金額、決済日時、発送期限、注文内容、カット長、管理画面のURL（`ADMIN_URL`） | 住所、電話番号、メールアドレス（Access で保護された管理画面で確認） |
+
+送信サービスは **Resend** を使います。理由: Worker から HTTPS の JSON API だけで送れる、API キーを Cloudflare Secret にできる、独自ドメインで SPF / DKIM / DMARC を設定できる、UTF-8 の日本語件名・本文に対応、少量なら無料枠で運用できる、です。送信結果は D1 の `order_notifications`（注文ID × 種別で1行、`sent_at` / `provider_id` / `error` / `attempts`）に記録し、同じ注文に同じ種別を二重送信しません。Webhook の再送は `stripe_events` で弾き、別イベントで `PAID` 済みの注文も再通知しません。送信に失敗しても注文は `PAID` のまま確定し（Webhook は 200 を返す）、失敗理由を記録して Worker のログに注文番号と理由だけを出します。管理画面の「詳細を表示」に送信状況が出て、「未送信の通知メールを再送」で再送できます（送信済みの種別は再送しません）。`MAIL_API_KEY` / `MAIL_FROM` が未設定の環境では送信をスキップして「mail not configured」と記録します。状態変更（加工開始・発送済みなど）の通知は未実装です。
+
+### 領収書（Issue #10）
+
+- **Stripe の領収書メール**: Stripe ダッシュボードの Settings → Emails（「Customer emails」）で **Successful payments** を有効にします。Worker は Checkout Session に `payment_intent_data[receipt_email]`（注文者のメールアドレス）を渡すので、決済成功時に Stripe から領収書メールが届きます。テストモードでは Stripe は領収書メールを送らないため、本番モードでも一度確認してください。
+- **注文状況ページ**: `PAID` 確定時に Worker が PaymentIntent（`expand[]=latest_charge`）から Charge ID と `receipt_url` を取得して D1（`stripe_charge_id`、`receipt_url`）に保存し、購入者API（`GET /api/orders/:id?token=`）は領収書URLだけを返します（Stripe の内部IDは返しません）。取得に失敗した場合は購入者が注文状況ページを開いたときに再取得します。「領収書を表示（Stripe）」は `PAID` 以降（PAID・PROCESSING・READY・SHIPPED・COMPLETED）にだけ表示し、未決済・`CANCELLED` では表示しません。管理画面の詳細にも同じリンクを出します。
+- **返金**: 返金は Stripe ダッシュボードで行い、管理画面で `CANCELLED` にします。「返金済み」の独立した状態や返金情報の同期は未実装で、`CANCELLED` になると領収書リンクは非表示になります。
+- **適格請求書（インボイス）**: Stripe の領収書は日本の適格請求書ではありません。TypeFab は適格請求書発行事業者として登録していないため、適格請求書として表示・発行しません。注文確認画面にその旨を記載しています。法人向け対応が必要になった場合は、登録番号・税率別の対象額と消費税額・宛名などを含む書式を Stripe Invoicing か TypeFab 側で用意する別要件とします。
+
+### 管理画面（Cloudflare Access 配下）
+
+管理画面は GitHub Pages には置かず、注文 API と同じ Cloudflare Worker が `/admin/` で配信します（`npm run build:admin` → `worker/admin-dist`、`wrangler.toml` の `[assets]`）。これにより管理画面と `/api/admin/*` を同じオリジンで **Cloudflare Access** の対象にでき、ブラウザの Access ログイン Cookie がそのまま管理 API に付きます。
+
+- 注文一覧（未処理＝PAID・PROCESSING・READY、状態別、すべて）には注文日・決済日・通常／特急・発送期限・購入者名・加工内容・金額を表示し、**メールアドレス・住所・電話番号は含めません**（`GET /api/admin/orders` も返しません）。
+- 「詳細を表示（配送先・通知・領収書）」で `GET /api/admin/orders/:id` を呼び、配送先（発送が必要な PAID・PROCESSING・READY・SHIPPED のときだけ）、Stripe の ID と領収書リンク、通知メールの送信状況と再送ボタン、状態の履歴を表示します。`COMPLETED` / `CANCELLED` の注文と保持期限で削除済みの注文では、詳細を開いても個人情報を返しません。
+- 「SVGを表示」「SVGをダウンロード」（R2から取得）、「加工開始」「加工完了」「発送済みにする」（追跡番号・配送会社を任意入力）、「完了にする」「キャンセル」で状態を変えます。状態遷移は `NEW → PAYMENT_PENDING → PAID → PROCESSING → READY → SHIPPED → COMPLETED`（各段階から `CANCELLED`）で、許可されない遷移はWorkerが拒否します。Access でログインした管理者のメールアドレスは状態履歴に残ります。返金はStripeダッシュボードで行います。
+- 「保持期限切れの個人情報・SVGの削除」から、削除対象の確認（dry run）と手動実行ができます（下記「個人情報の保持期間」）。
+
+Access が設定されていない環境（ローカル開発）では従来どおり `ADMIN_TOKEN` の入力欄が出ます。`ACCESS_TEAM_DOMAIN` と `ACCESS_AUD` を設定すると Bearer トークンは受け付けなくなり、Access の JWT だけで認証します（併用はしません）。
+
+### 個人情報の保持期間と自動削除（Issue #8）
+
+注文が `COMPLETED` または `CANCELLED` になってから `PERSONAL_DATA_RETENTION_DAYS`（既定 90）日を過ぎると、Worker が `customer_name`・`customer_email`・`shipping_postal_code`・`shipping_prefecture`・`shipping_address1`・`shipping_address2`・`shipping_phone` を NULL にし、R2 の SVG を削除して `personal_data_deleted_at` を記録します。注文番号、金額、日付、Stripe の Checkout Session / PaymentIntent / Charge ID、加工内容、状態、追跡番号は会計と決済照合のため残します。`wrangler.toml` の `[triggers] crons = ["0 18 * * *"]`（毎日 03:00 JST）で自動実行し、管理画面と `POST /api/admin/maintenance/purge`（`{"dryRun":true}` で確認のみ）からも実行できます。メールアドレスの用途は受付メール・領収書・注文に関する連絡なので、配送用の個人情報と同じ期限で削除します。Stripe 側の決済記録（メールアドレスを含む）は Stripe の保持方針に従います。
+
+### データフロー
+
+```text
+Browser / GitHub Pages（紹介ページ・エディタ・注文ページ・プライバシーポリシー）
+  │  氏名・メールアドレス・住所・電話番号（任意）・SVG   ※HTTPS、CORS は公開サイトの origin だけ許可
+  ▼
+Cloudflare Workers（注文API /api/*、管理画面 /admin/、管理API /api/admin/*）
+  ├── Cloudflare D1 …… 注文情報（個人情報は完了／キャンセルから90日で削除）、通知の送信記録、Webhook のイベントID
+  ├── Cloudflare R2 …… SVG（同じ期限で削除）
+  ├── Stripe ……………… メールアドレス・注文番号・金額・注文内容の要約。カード情報は Stripe のみ
+  ├── Resend …………… 購入者への受付メール、管理者への新規注文通知（住所・電話番号は含めない）
+  └── Cloudflare Access … 管理画面と管理API のログイン（許可したメールアドレス、MFA）
+```
+
+- GitHub Pages は静的ファイルだけを配信し、秘密鍵や個人情報を持ちません。エディタはフォント・文字・プロジェクトを外部へ送りません。
+- 公開 API（`/api/config`・`/api/quote`・`/api/orders`・`/api/orders/:id`）の CORS は `ALLOWED_ORIGINS` に限定し、`*` は使いません。管理 API は `ADMIN_ALLOWED_ORIGINS`（本番は空＝同一オリジンのみ）と別のポリシーで、preflight を含めてテストしています。
+- 購入者API は住所・メールアドレス・Stripe の ID を返しません。Worker のログとエラーメッセージに個人情報を出しません。
+- 本番とローカルの違い: 本番は Access で管理画面を保護し、Resend と Stripe 本番キーを使います。ローカルは `ADMIN_TOKEN`、Stripe テストモード（またはモック）、`MAIL_API_KEY` 未設定なら送信スキップです。
 
 ### アーキテクチャ
 
@@ -290,11 +339,13 @@ TypeFabで作ったSVG、または手元のSVGをそのままレーザー加工�
 | --- | --- |
 | フロントエンド | GitHub Pages（`order/`・`admin/`・エディタの注文ボタン。`src/order.js`、`src/admin.js`、`src/order.css`） |
 | 料金・SVG解析 | `src/pricing.js`（カタログ・料金・リードタイム・状態遷移）、`src/svganalyze.js`（寸法・カット長・検査・サニタイズ）。フロントとWorkerで共用 |
-| Backend API | Cloudflare Workers（`worker/src/`）。`GET /api/config`、`POST /api/quote`、`POST /api/orders`、`POST /api/stripe/webhook`、`GET /api/orders/:id?token=`、`GET /api/admin/orders`、`GET /api/admin/orders/:id`、`GET /api/admin/orders/:id/svg`、`POST /api/admin/orders/:id/status` |
-| Database | Cloudflare D1（`worker/schema.sql`: `orders`、`stripe_events`、`order_events`）。SVG本体は保存しない |
-| SVG Storage | Cloudflare R2（キーは `orders/<注文ID>/<ハッシュ>.svg`。ファイル名はメタデータのみ） |
-| Payment | Stripe Checkout（JPY）＋ Webhook。秘密鍵はWorkerのSecretのみ |
-| Mail | 未実装（Resend等を後から `worker/src/app.js` の状態変更箇所に追加できる構造） |
+| Backend API | Cloudflare Workers（`worker/src/`）。公開: `GET /api/health`、`GET /api/config`、`POST /api/quote`、`POST /api/orders`、`POST /api/stripe/webhook`、`GET /api/orders/:id?token=`。管理（Access）: `GET /api/admin/session`、`GET /api/admin/orders`（一覧・個人情報なし）、`GET /api/admin/orders/:id`（詳細）、`GET /api/admin/orders/:id/svg`、`POST /api/admin/orders/:id/status`、`POST /api/admin/orders/:id/notify`（再送）、`POST /api/admin/maintenance/purge`。Cron: `scheduled()` が保持期限切れを削除 |
+| 管理画面 | 同じ Worker の Static Assets（`worker/admin-dist`、`vite.admin.config.js`）。`/admin/` |
+| Database | Cloudflare D1（`worker/schema.sql`: `orders`、`stripe_events`、`order_events`、`order_notifications`）。SVG本体は保存しない。既存DBは `worker/migrations/0002_privacy_mail_receipt.sql` を適用 |
+| SVG Storage | Cloudflare R2（キーは `orders/<注文ID>/<ハッシュ>.svg`。ファイル名はメタデータのみ。保持期限で削除） |
+| Payment | Stripe Checkout（JPY）＋ Webhook。秘密鍵はWorkerのSecretのみ。領収書は Stripe の `receipt_url` |
+| Mail | Resend（`worker/src/mail.js`）。API キーは Secret |
+| Admin auth | Cloudflare Access（`worker/src/access.js` が `Cf-Access-Jwt-Assertion` を JWKS で検証） |
 
 GitHub Pages側には秘密鍵や決済処理を置きません。
 
@@ -309,9 +360,17 @@ npx wrangler login
 1. **D1**: `npx wrangler d1 create typefab-orders` を実行し、表示された `database_id` を `worker/wrangler.toml` に書きます。スキーマを適用します: `npm run db:remote`（ローカル開発は `npm run db:local`）。
 2. **R2**: `npx wrangler r2 bucket create typefab-order-svgs`（名前を変えた場合は `wrangler.toml` の `bucket_name` も変更）。
 3. **Stripe**: ダッシュボードで秘密鍵（`sk_live_…` / `sk_test_…`）を取得します。Webhookエンドポイントに `https://<worker>.workers.dev/api/stripe/webhook` を登録し、イベント `checkout.session.completed`、`checkout.session.async_payment_succeeded`、`checkout.session.async_payment_failed`、`checkout.session.expired` を選び、署名シークレット（`whsec_…`）を控えます。
-4. **Secrets**（`worker/` で実行）: `npx wrangler secret put STRIPE_SECRET_KEY`、`npx wrangler secret put STRIPE_WEBHOOK_SECRET`、`npx wrangler secret put ADMIN_TOKEN`（長いランダム文字列）。
-5. **環境変数**（`worker/wrangler.toml` の `[vars]`）: `SITE_URL`（決済後に戻る公開サイト）、`ALLOWED_ORIGINS`（APIを呼べるオリジン）、`BULK_THRESHOLD`、`NORMAL_LEAD_TIME_DAYS`、`EXPRESS_LEAD_TIME_DAYS`、`CONTACT_URL`。料金表は `src/pricing.js` の `CATALOG` を編集します。
-6. **デプロイ**: `cd worker && npm run deploy`。`https://<worker>.workers.dev/api/health` が `{"ok":true,"stripeConfigured":true}` を返せば準備完了です。
+4. **Stripe の領収書メール**: ダッシュボードの Settings → Emails で「Successful payments」を有効にします（Issue #10）。
+5. **Resend**（Issue #9）: https://resend.com でアカウントを作り、送信ドメインを追加して表示された SPF / DKIM（必要なら DMARC）の DNS レコードを設定し、API キーを発行します。`MAIL_FROM`（例 `TypeFab <orders@example.com>`、検証済みドメインのアドレス）、`ADMIN_NOTIFICATION_EMAIL`（新規注文通知の宛先）、任意で `MAIL_REPLY_TO` と `ADMIN_URL`（管理画面のURL。空なら `<SITE_URL>admin/`）を `wrangler.toml` の `[vars]` に書きます。
+6. **Secrets**（`worker/` で実行）: `npx wrangler secret put STRIPE_SECRET_KEY`、`npx wrangler secret put STRIPE_WEBHOOK_SECRET`、`npx wrangler secret put MAIL_API_KEY`。`ADMIN_TOKEN` は Access を使わないローカル開発用で、本番では設定不要です。
+7. **環境変数**（`worker/wrangler.toml` の `[vars]`）: `SITE_URL`（決済後に戻る公開サイト）、`ALLOWED_ORIGINS`（公開APIを呼べるオリジン）、`ADMIN_ALLOWED_ORIGINS`（本番は空）、`PERSONAL_DATA_RETENTION_DAYS`、`BULK_THRESHOLD`、`NORMAL_LEAD_TIME_DAYS`、`EXPRESS_LEAD_TIME_DAYS`、`CONTACT_URL`。料金表は `src/pricing.js` の `CATALOG` を編集します。
+8. **デプロイ**: `cd worker && npm run deploy`（先に `npm run build:admin` が走り、管理画面を `worker/admin-dist` に生成します）。`https://<worker>.workers.dev/api/health` が `{"ok":true,"stripeConfigured":true,"mailConfigured":true,"accessConfigured":true}` を返せば準備完了です。Cron Trigger はデプロイ時に登録されます。
+9. **Cloudflare Access**（Issue #8、デプロイ後）:
+   1. Cloudflare ダッシュボード → Zero Trust でチーム名を決めます（チームドメイン `https://<team>.cloudflareaccess.com`）。
+   2. Access → Applications → Add an application → **Self-hosted**。Application domain に Worker のホスト名（`typefab-orders.<subdomain>.workers.dev`、独自ドメインなら `api.example.com`）を入れ、パスに `admin` を指定します。同じアプリケーションに **Add public hostname / path** で `/api/admin` を追加します（`/api/orders` などの公開APIは含めません）。Worker の「Access」タブの「Protect this Worker behind Access」は Worker 全体（公開APIを含む）を保護してしまうため使いません。
+   3. ポリシー: Allow、Include に管理者のメールアドレス（`Emails`）だけを列挙します。Require に **Authentication method: mfa**（または OTP 以外の IdP で MFA 必須）を追加して MFA を要求します。
+   4. アプリケーションの Overview に表示される **Application Audience (AUD) Tag** を `wrangler.toml` の `ACCESS_AUD` に、チームドメイン（`<team>.cloudflareaccess.com`）を `ACCESS_TEAM_DOMAIN` に書いて再デプロイします。Worker は `Cf-Access-Jwt-Assertion` を `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs` の公開鍵で検証し、`aud`・`iss`・有効期限を確認します。
+   5. ブラウザで `https://<worker>/admin/` を開き、Access のログイン画面 → 管理画面の順に表示され、ヘッダーに `Access: <メールアドレス>` が出ることを確認します。
 
 ### GitHub Pages 側の設定
 
@@ -320,23 +379,24 @@ npx wrangler login
 ### ローカル開発
 
 ```sh
-cp worker/.dev.vars.example worker/.dev.vars   # テスト用の鍵と管理者トークン、SITE_URL=http://127.0.0.1:4173/TypeFab/
-cd worker && npm run db:local && npm run dev      # http://127.0.0.1:8787（D1・R2はローカルエミュレーション）
+cp worker/.dev.vars.example worker/.dev.vars   # テスト用の鍵・ADMIN_TOKEN・SITE_URL・ADMIN_ALLOWED_ORIGINS・メール設定
+cd worker && npm run db:local && npm run dev      # http://127.0.0.1:8787（D1・R2はローカルエミュレーション。predev で管理画面をビルド）
 VITE_ORDER_API_URL=http://127.0.0.1:8787 npm run build && npm run preview
 ```
 
-Stripeのテストモードでは `stripe listen --forward-to 127.0.0.1:8787/api/stripe/webhook` でWebhookを転送します。`.dev.vars` の `STRIPE_API_BASE` でStripe APIの向き先を差し替えられるため、モックサーバーでも一連の流れを確認できます。秘密情報（`.env`、`worker/.dev.vars`）はコミットしません。
+管理画面は `http://127.0.0.1:8787/admin/` です。Access を設定していないので `ADMIN_TOKEN` を入力します（`npm run dev` の Vite 開発サーバーの `/TypeFab/admin/` からも、`.dev.vars` の `ADMIN_ALLOWED_ORIGINS` に含まれるオリジンなら同じ Worker を呼べます）。Stripeのテストモードでは `stripe listen --forward-to 127.0.0.1:8787/api/stripe/webhook` でWebhookを転送します。`.dev.vars` の `STRIPE_API_BASE` / `MAIL_API_BASE` でStripe API・Resend API の向き先を差し替えられるため、モックサーバーでも注文→決済→通知→領収書の流れを確認できます。`MAIL_API_KEY` を空にすると送信をスキップします。保持期限の削除は `curl -X POST -H "Authorization: Bearer <ADMIN_TOKEN>" -d '{"dryRun":true}' http://127.0.0.1:8787/api/admin/maintenance/purge` で試せます。秘密情報（`.env`、`worker/.dev.vars`）はコミットしません。
 
 ### 本番環境の構築手順（まとめ）
 
-1. 上記のD1・R2・Stripe・Secretsを設定し、`SITE_URL` と `ALLOWED_ORIGINS` を公開サイトに合わせてWorkerをデプロイする。
-2. Stripeダッシュボードで本番のWebhookを登録し、署名シークレットをSecretに設定する。
-3. GitHubのリポジトリ変数 `ORDER_API_URL` にWorkerのURLを設定し、`main` へpushしてPagesを再ビルドする。
-4. `/order/` でテスト注文（Stripeテストカード）→ `/admin/` で PAID の表示 → SVGダウンロード → 状態変更 → 追跡番号入力を確認する。
+1. 上記のD1・R2・Stripe・Resend・Secretsを設定し、`SITE_URL` と `ALLOWED_ORIGINS` を公開サイトに合わせてWorkerをデプロイする。既存のD1には `migrations/0002_privacy_mail_receipt.sql` を適用する。
+2. Stripeダッシュボードで本番のWebhookを登録し、署名シークレットをSecretに設定する。領収書メール（Successful payments）を有効にする。
+3. Cloudflare Access のアプリケーション（`/admin`・`/api/admin`）を作り、`ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` を設定して再デプロイする。
+4. GitHubのリポジトリ変数 `ORDER_API_URL` にWorkerのURLを設定し、`main` へpushしてPagesを再ビルドする。
+5. `/order/` でテスト注文（Stripeテストカード）→ 購入者・管理者へのメール到着 → 注文状況ページの領収書リンク → `https://<worker>/admin/`（Access ログイン）で PAID の表示 → 詳細で配送先・通知状況 → SVGダウンロード → 状態変更 → 追跡番号入力 → COMPLETED 後に詳細で個人情報が消えることを確認する。
 
 ### MVPで行わないこと
 
-配送会社API連携（追跡番号は手入力）、高精度な加工時間シミュレーション（`estimatedProcessingMinutes` は材料ごとの速度から算出した目安）、自動レーザー加工・機器制御、在庫管理、クーポン、会員、ポイント、AI見積もり、メール送信。
+配送会社API連携（追跡番号は手入力）、高精度な加工時間シミュレーション（`estimatedProcessingMinutes` は材料ごとの速度から算出した目安）、自動レーザー加工・機器制御、在庫管理、クーポン、会員、ポイント、AI見積もり、状態変更（加工開始・発送済みなど）のメール通知、返金状態の同期、適格請求書、D1 全カラムの独自暗号化、独自ドメイン。
 
 ## ランディングページ
 

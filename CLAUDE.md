@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 TypeFab — GitHub Pagesで動く、日本語対応のレーザー加工向けタイポグラフィSVGエディタ。
-公開URL: https://fooping-tech.github.io/TypeFab/ （紹介ページ）、エディタは https://fooping-tech.github.io/TypeFab/app/ 、加工注文は `/order/`、注文管理は `/admin/`。
+公開URL: https://fooping-tech.github.io/TypeFab/ （紹介ページ）、エディタは https://fooping-tech.github.io/TypeFab/app/ 、加工注文は `/order/`、プライバシーポリシーは `/privacy/`。注文管理画面は GitHub Pages ではなく Cloudflare Worker（注文API）が `/admin/` で配信し、Cloudflare Access で保護する。
 
 ## 作業の進め方（必須）
 
@@ -31,12 +31,13 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 
 | ファイル | 役割 |
 | --- | --- |
-| `index.html` / `app/index.html` / `order/index.html` / `admin/index.html` | Viteのマルチページ入口：紹介ページ・エディタ・加工注文・注文管理（`vite.config.js` の `rollupOptions.input`） |
+| `index.html` / `app/index.html` / `order/index.html` / `privacy/index.html` | Viteのマルチページ入口：紹介ページ・エディタ・加工注文・プライバシーポリシー（`vite.config.js` の `rollupOptions.input`） |
+| `admin/index.html` / `vite.admin.config.js` | 注文管理画面。`npm run build:admin` で `worker/admin-dist` に別ビルドし、Worker の Static Assets として `/admin/` で配信（GitHub Pages には含めない） |
 | `src/main.js` | 編集UI全体（ツールバー、キャンバス操作、プロパティ、Undo/Redo、自動保存、「このデザインを加工注文する」） |
 | `src/landing.js` / `src/landing.css` / `src/landing-glyphs.js` | 紹介ページ。`landing-glyphs.js` は `scripts/landing-glyphs.mjs` が同梱フォントと `geometry.js` から生成 |
 | `src/pricing.js` / `src/svganalyze.js` | 加工注文の料金カタログ・状態遷移、SVGの寸法・カット長・検査・サニタイズ（フロントと `worker/` で共用） |
-| `src/order.js` / `src/admin.js` / `src/order.css` | 加工注文ページと注文管理ページ |
-| `worker/` | Cloudflare Workers（D1・R2・Stripe Checkout・Webhook）。`npm test` はルートから `worker/src` を直接テストする |
+| `src/order.js` / `src/admin.js` / `src/order.css` / `src/privacy.js` | 加工注文ページ（個人情報はブラウザ保存なし、領収書リンク）、注文管理ページ（Access／トークン、一覧は個人情報なし・詳細で配送先、通知再送、保持期限削除）、プライバシーポリシー |
+| `worker/` | Cloudflare Workers（D1・R2・Stripe Checkout・Webhook・Resend メール・Cloudflare Access JWT 検証・Cron の保持期限削除）。`src/app.js` 本体、`src/access.js`、`src/mail.js`、`src/stripe.js`、`src/store.js`、`schema.sql`、`migrations/`。`npm test` はルートから `worker/src` を直接テストする |
 | `src/geometry.js` | 輪郭化、ブリッジ（線の途切れ／矩形差分）、加工チェック、SVG出力 |
 | `src/operations.js` | 拡縮ハンドル、ブーリアン演算（結合・切り抜き・交差・XOR） |
 | `src/layers.js` | レイヤー |
@@ -59,6 +60,10 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 - SVGはmm単位・`viewBox`付き・パスのみ（text/mask/clipPath/imageを残さない）。
 - 保存済みプロジェクト（v1/v2 JSON）の互換性を壊さない。旧データの輪郭を勝手に作り直さない。
 - フォント・入力テキスト・プロジェクトを外部に送信しない。
+- 注文フォームの氏名・メールアドレス・住所・電話番号を `localStorage` / `sessionStorage` に保存しない。購入者API・注文状況ページ・メール本文・Worker のログに住所・電話番号を出さない。管理APIの一覧は個人情報を返さず、詳細は発送が必要な状態（PAID〜SHIPPED）でのみ配送先を返す。
+- 個人情報と SVG の保持期限（完了／キャンセルから `PERSONAL_DATA_RETENTION_DAYS` 日）と自動削除を壊さない。削除後も注文番号・金額・日付・Stripe の ID・加工内容は残す。
+- 公開APIの CORS は `ALLOWED_ORIGINS` に限定し `*` を使わない。管理APIは別の origin リスト（本番は空）。Access 設定時は `ADMIN_TOKEN` を受け付けない。
+- 通知メールは `PAID` に初めて遷移した時だけ送り、`order_notifications` で種別ごとに冪等にする。送信失敗で Webhook を失敗させない。
 - 「切り残しなし」などの検査は材料強度や連結性を保証するものではない。そう読める表現をUIやドキュメントに書かない。
 - 形状処理を変えたらテストを追加し、両方の同梱書体で確認する。
 - アイテムの `contours` は常に最終形状（ワープ・長体・フィレット適用後）にする。SVG出力・図形演算・ブリッジはこれを使う。変形をCSS/SVGの `transform` だけで表現しない。

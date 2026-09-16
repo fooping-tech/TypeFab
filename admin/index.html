@@ -4,27 +4,38 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4f5f7" />
-    <meta name="robots" content="noindex" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23263b4d'/%3E%3Ctext x='16' y='22' font-family='sans-serif' font-size='16' font-weight='700' text-anchor='middle' fill='%23fff'%3Etf%3C/text%3E%3C/svg%3E" />
     <title>TypeFab — 注文管理</title>
   </head>
   <body>
     <header class="top">
-      <a class="brand" href="../"><span class="brand-mark">t<span>f</span></span>TypeFab</a>
+      <span class="brand"><span class="brand-mark">t<span>f</span></span>TypeFab</span>
       <h1>注文管理</h1>
-      <div class="right"><span id="api-label" class="badge"></span><button id="logout" class="hidden">ログアウト</button></div>
+      <div class="right"><span id="who" class="badge"></span><span id="api-label" class="badge"></span><button id="logout" class="hidden">ログアウト</button></div>
     </header>
     <main class="page">
       <div id="alert" class="banner error hidden" role="alert"></div>
-      <section class="card" id="login">
+      <section class="card hidden" id="login">
         <h2>管理者トークン</h2>
-        <p class="note" style="margin:0 0 10px">Cloudflare Workers の <code>ADMIN_TOKEN</code> を入力します。このブラウザのセッションにのみ保存します。</p>
+        <p class="note" style="margin:0 0 10px">Cloudflare Access が設定されていない環境（ローカル開発）です。Workers の <code>ADMIN_TOKEN</code> を入力します。このブラウザのタブにのみ保存します。</p>
         <div class="fields"><label>トークン<input id="token" type="password" autocomplete="current-password" /></label><div class="field"><span>&nbsp;</span><button class="primary" id="enter">注文を表示</button></div></div>
+      </section>
+      <section class="card hidden" id="access-required">
+        <h2>Cloudflare Access のログインが必要です</h2>
+        <p class="note" style="margin:0">この管理画面と <code>/api/admin/*</code> は Cloudflare Access で保護されています。ページを再読み込みして Access にログインしてください。Access アプリケーションの対象パスに <code>/admin</code> と <code>/api/admin</code> の両方が含まれていることを確認してください。</p>
+        <div class="actions"><button id="retry">再読み込み</button></div>
       </section>
       <section id="list-view" class="hidden">
         <div class="toolbar" id="filters"></div>
         <p class="note" id="count" style="margin:0 0 10px"></p>
         <div class="orders" id="orders"></div>
+        <details class="card" id="maintenance" style="margin-top:16px">
+          <summary>保持期限切れの個人情報・SVGの削除</summary>
+          <p class="note">完了（COMPLETED）またはキャンセル（CANCELLED）から <b id="retention-days">90</b> 日を過ぎた注文の氏名・メールアドレス・住所・電話番号を消去し、R2 の SVG を削除します。注文番号・金額・日付・Stripe の ID・加工内容・状態は残ります。毎日 03:00（JST）に Cron Trigger で自動実行され、ここから手動でも実行できます。</p>
+          <div class="actions"><button id="purge-dry">対象を確認（削除しない）</button><button id="purge-run" class="danger">今すぐ削除する</button></div>
+          <pre class="note" id="purge-result" style="white-space:pre-wrap"></pre>
+        </details>
       </section>
     </main>
     <script type="module" src="/src/admin.js"></script>

@@ -35,11 +35,31 @@ export const ORDER_COLUMNS = {
   currency: "currency",
   stripeCheckoutSessionId: "stripe_checkout_session_id",
   stripePaymentIntentId: "stripe_payment_intent_id",
+  stripeChargeId: "stripe_charge_id",
+  receiptUrl: "receipt_url",
   shippingTrackingNumber: "shipping_tracking_number",
   shippingCarrier: "shipping_carrier",
   accessToken: "access_token",
   notes: "notes",
+  personalDataDeletedAt: "personal_data_deleted_at",
 };
+// Columns cleared by the retention purge (issue #8). Everything else —
+// order id, amounts, dates, Stripe ids, specs, status — is kept for
+// accounting.
+export const PERSONAL_DATA_FIELDS = [
+  "customerName",
+  "customerEmail",
+  "shippingPostalCode",
+  "shippingPrefecture",
+  "shippingAddress1",
+  "shippingAddress2",
+  "shippingPhone",
+];
+// Orders in these states no longer change; retention counts from their last
+// update (the transition into the state).
+export const CLOSED_STATUSES = ["COMPLETED", "CANCELLED"];
+export const NOTIFICATION_TYPES = ["customer_paid", "admin_paid"];
+
 const toRow = (order) =>
   Object.fromEntries(
     Object.entries(ORDER_COLUMNS)
@@ -50,6 +70,7 @@ const fromRow = (row) =>
   row
     ? Object.fromEntries(Object.entries(ORDER_COLUMNS).map(([k, col]) => [k, row[col] ?? null]))
     : null;
+const notificationFromRow = (r) => ({ orderId: r.order_id, type: r.type, sentAt: r.sent_at ?? null, providerId: r.provider_id ?? null, error: r.error ?? null, attempts: r.attempts ?? 0, updatedAt: r.updated_at ?? null });
 
 export function d1Store(db) {
   return {
@@ -83,6 +104,14 @@ export function d1Store(db) {
         .all();
       return results.map(fromRow);
     },
+    // Closed orders whose personal data is still present and older than `before`.
+    async listPurgeCandidates(before, limit = 100) {
+      const { results } = await db
+        .prepare(`SELECT * FROM orders WHERE status IN (${CLOSED_STATUSES.map(() => "?").join(",")}) AND personal_data_deleted_at IS NULL AND updated_at < ? ORDER BY updated_at LIMIT ?`)
+        .bind(...CLOSED_STATUSES, before, limit)
+        .all();
+      return results.map(fromRow);
+    },
     // Returns false when the Stripe event was already recorded (idempotency).
     async recordStripeEvent(id, type, receivedAt) {
       try {
@@ -109,16 +138,32 @@ export function d1Store(db) {
         .all();
       return results.map((r) => ({ fromStatus: r.from_status, toStatus: r.to_status, at: r.at, note: r.note }));
     },
+    async listNotifications(orderId) {
+      const { results } = await db.prepare("SELECT * FROM order_notifications WHERE order_id = ? ORDER BY type").bind(orderId).all();
+      return results.map(notificationFromRow);
+    },
+    // Upserts the delivery record of one notification (sent or failed).
+    async recordNotification({ orderId, type, sentAt = null, providerId = null, error = null, at }) {
+      await db
+        .prepare(
+          `INSERT INTO order_notifications (order_id, type, sent_at, provider_id, error, attempts, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?)
+           ON CONFLICT(order_id, type) DO UPDATE SET sent_at = COALESCE(excluded.sent_at, order_notifications.sent_at), provider_id = COALESCE(excluded.provider_id, order_notifications.provider_id), error = excluded.error, attempts = order_notifications.attempts + 1, updated_at = excluded.updated_at`,
+        )
+        .bind(orderId, type, sentAt, providerId, error, at)
+        .run();
+    },
   };
 }
 
 export function memoryStore() {
   const orders = new Map(),
     events = new Set(),
-    log = [];
+    log = [],
+    notifications = new Map();
   return {
     orders,
     log,
+    notifications,
     async insertOrder(order) {
       if (orders.has(order.id)) throw Error("duplicate order id");
       orders.set(order.id, { ...fromRow(toRow(order)) });
@@ -140,6 +185,13 @@ export function memoryStore() {
         .slice(0, limit)
         .map((o) => ({ ...o }));
     },
+    async listPurgeCandidates(before, limit = 100) {
+      return [...orders.values()]
+        .filter((o) => CLOSED_STATUSES.includes(o.status) && !o.personalDataDeletedAt && o.updatedAt < before)
+        .sort((a, b) => (a.updatedAt < b.updatedAt ? -1 : 1))
+        .slice(0, limit)
+        .map((o) => ({ ...o }));
+    },
     async recordStripeEvent(id) {
       if (events.has(id)) return false;
       events.add(id);
@@ -150,6 +202,22 @@ export function memoryStore() {
     },
     async listOrderEvents(orderId) {
       return log.filter((e) => e.orderId === orderId);
+    },
+    async listNotifications(orderId) {
+      return [...notifications.values()].filter((n) => n.orderId === orderId).map((n) => ({ ...n }));
+    },
+    async recordNotification({ orderId, type, sentAt = null, providerId = null, error = null, at }) {
+      const key = `${orderId}/${type}`;
+      const prev = notifications.get(key);
+      notifications.set(key, {
+        orderId,
+        type,
+        sentAt: sentAt ?? prev?.sentAt ?? null,
+        providerId: providerId ?? prev?.providerId ?? null,
+        error,
+        attempts: (prev?.attempts ?? 0) + 1,
+        updatedAt: at,
+      });
     },
   };
 }
@@ -166,6 +234,9 @@ export function memoryBucket() {
       return o
         ? { key, body: o.body, httpMetadata: o.opts.httpMetadata, text: async () => o.body, arrayBuffer: async () => new TextEncoder().encode(o.body).buffer }
         : null;
+    },
+    async delete(key) {
+      objects.delete(key);
     },
   };
 }

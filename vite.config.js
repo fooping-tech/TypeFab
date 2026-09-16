@@ -7,12 +7,13 @@ export default defineConfig({
     target: "esnext",
     rollupOptions: {
       // Multi-page (issue #2 Phase 2): "/" is the landing page, "/app/" the
-      // editor, plus the order and admin pages.
+      // editor, plus the order and privacy pages. The admin page is built
+      // separately (vite.admin.config.js) and served by the Worker (#8).
       input: {
         landing: page("index.html"),
         editor: page("app/index.html"),
         order: page("order/index.html"),
-        admin: page("admin/index.html"),
+        privacy: page("privacy/index.html"),
       },
     },
   },

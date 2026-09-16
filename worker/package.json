@@ -4,10 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:admin": "npm --prefix .. run build:admin",
+    "predev": "npm run build:admin",
     "dev": "wrangler dev --port 8787",
+    "predeploy": "npm run build:admin",
     "deploy": "wrangler deploy",
     "db:local": "wrangler d1 execute typefab-orders --local --file=schema.sql",
-    "db:remote": "wrangler d1 execute typefab-orders --remote --file=schema.sql"
+    "db:remote": "wrangler d1 execute typefab-orders --remote --file=schema.sql",
+    "purge:dry": "wrangler d1 execute typefab-orders --remote --command \"SELECT id, status, updated_at FROM orders WHERE status IN ('COMPLETED','CANCELLED') AND personal_data_deleted_at IS NULL ORDER BY updated_at\""
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

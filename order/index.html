@@ -78,6 +78,7 @@
               <label class="full">建物名・部屋番号（任意）<input id="address2" autocomplete="address-line2" maxlength="200" /></label>
               <label>電話番号（任意）<input id="phone" type="tel" autocomplete="tel" maxlength="30" /></label>
             </div>
+            <p class="note">入力した氏名・住所・メールアドレスはこのブラウザに保存しません。注文の受付・製作・配送・連絡にのみ使い、完了またはキャンセルから <span data-retention-days>90</span> 日後に削除します。詳しくは <a href="../privacy/" target="_blank" rel="noopener">プライバシーポリシー</a> をご覧ください。</p>
             <div class="actions"><button class="primary" id="review">注文内容を確認する</button></div>
           </section>
         </div>
@@ -85,7 +86,9 @@
       <section class="card hidden" id="confirm-view">
         <h2><span>05</span>加工注文の確認</h2>
         <dl class="summary" id="summary"></dl>
-        <p class="note">「Stripeで支払う」を押すと、Stripeの決済ページに移動します。決済完了後にこのページへ戻り、注文番号を表示します。決済完了はStripeからの通知（Webhook）で確定します。</p>
+        <p class="note">「Stripeで支払う」を押すと、Stripeの決済ページに移動します。決済完了後にこのページへ戻り、注文番号を表示します。決済完了はStripeからの通知（Webhook）で確定し、確定後に注文受付メールをお送りします。</p>
+        <p class="note">領収書は決済後に Stripe からメールで届きます。注文状況ページの「領収書を表示」からも確認できます。適格請求書（インボイス）の発行には対応していません。</p>
+        <p class="note">個人情報の取り扱いは <a href="../privacy/" target="_blank" rel="noopener">プライバシーポリシー</a> のとおりです。「Stripeで支払う」を押すと、これに同意したものとします。</p>
         <div class="actions"><button id="edit">内容を修正する</button><button class="primary" id="pay">Stripeで支払う</button></div>
       </section>
     </main>

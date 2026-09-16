@@ -1,6 +1,17 @@
 # Copy to worker/.dev.vars for `wrangler dev`. Never commit the real file.
 STRIPE_SECRET_KEY=sk_test_xxx
 STRIPE_WEBHOOK_SECRET=whsec_xxx
+# Local admin login (used only while ACCESS_TEAM_DOMAIN / ACCESS_AUD are empty).
 ADMIN_TOKEN=change-me-to-a-long-random-string
-# Optional: point Stripe API calls at a mock during local tests
+# Local site and admin page (production values live in wrangler.toml [vars]).
+SITE_URL=http://127.0.0.1:4173/TypeFab/
+ADMIN_URL=http://127.0.0.1:8787/admin/
+# Let the Vite dev/preview admin page call the local Worker cross-origin.
+ADMIN_ALLOWED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173
+# Mail (Resend). Leave MAIL_API_KEY empty to skip sending (recorded as "mail not configured").
+MAIL_API_KEY=
+MAIL_FROM=TypeFab <orders@example.com>
+ADMIN_NOTIFICATION_EMAIL=you@example.com
+# Optional: point Stripe / mail API calls at mocks during local tests
 # STRIPE_API_BASE=http://127.0.0.1:4242
+# MAIL_API_BASE=http://127.0.0.1:4243

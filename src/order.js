@@ -5,7 +5,11 @@ import { BOOK_WIDTH_MM, BOOK_HEIGHT_MM, bookmarkPiece, bookmarkOrientation, book
 
 const API = (import.meta.env.VITE_ORDER_API_URL || "").replace(/\/$/, "");
 const HANDOFF_KEY = "typefab-order";
-const DRAFT_KEY = "typefab-order-draft";
+// Only the fabrication options are remembered, and only for this tab
+// (sessionStorage). Name, e-mail, address and phone stay in the form and are
+// never written to browser storage (issue #8).
+const DRAFT_KEY = "typefab-order-options";
+const LEGACY_KEYS = ["typefab-order-draft", "typefab-order-last"];
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const yen = (n) => (n === null || n === undefined ? "—" : `¥${Number(n).toLocaleString("ja-JP")}`);
@@ -261,22 +265,23 @@ function validateCustomer() {
 }
 function saveDraft() {
   try {
-    const { customer: c, shipping: s } = customer();
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ material: state.material, thicknessMm: state.thicknessMm, quantity: state.quantity, deliveryType: state.deliveryType, c, s }));
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ material: state.material, thicknessMm: state.thicknessMm, quantity: state.quantity, deliveryType: state.deliveryType }));
   } catch {}
 }
 function loadDraft() {
   try {
-    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+    // Drafts written by earlier versions held the address in localStorage.
+    for (const k of LEGACY_KEYS) localStorage.removeItem(k);
+    const d = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null");
     if (!d) return;
     Object.assign(state, { material: d.material ?? state.material, thicknessMm: d.thicknessMm ?? state.thicknessMm, quantity: d.quantity ?? 1, deliveryType: d.deliveryType ?? "NORMAL" });
-    $("#name").value = d.c?.name ?? "";
-    $("#email").value = d.c?.email ?? "";
-    $("#postal").value = d.s?.postalCode ?? "";
-    $("#prefecture").value = d.s?.prefecture ?? "";
-    $("#address1").value = d.s?.address1 ?? "";
-    $("#address2").value = d.s?.address2 ?? "";
-    $("#phone").value = d.s?.phone ?? "";
+  } catch {}
+}
+function clearDraft() {
+  try {
+    sessionStorage.removeItem(DRAFT_KEY);
+    localStorage.removeItem(HANDOFF_KEY);
+    for (const k of LEGACY_KEYS) localStorage.removeItem(k);
   } catch {}
 }
 
@@ -328,8 +333,10 @@ async function pay() {
       const details = body.details?.length ? ` ${body.details.join(" ")}` : "";
       throw Error((body.error || `注文を作成できませんでした (${res.status})`) + details + (body.inquiryRequired && body.contactUrl ? ` お問い合わせ: ${body.contactUrl}` : ""));
     }
-    localStorage.setItem("typefab-order-last", JSON.stringify({ orderId: body.orderId, accessToken: body.accessToken, at: Date.now() }));
-    localStorage.removeItem(HANDOFF_KEY);
+    // Nothing about the order stays in the browser: Stripe redirects back to
+    // the order page with the order id and token in the URL.
+    clearDraft();
+    for (const id of fields) $(`#${id}`).value = "";
     location.assign(body.checkoutUrl);
   } catch (e) {
     alertMsg(e.message);
@@ -339,7 +346,9 @@ async function pay() {
 }
 
 // ---- order status view (after Stripe redirects back) ------------------------
+const PAID_LIKE = ["PAID", "PROCESSING", "READY", "SHIPPED", "COMPLETED"];
 async function showStatus(orderId, token, result) {
+  clearDraft();
   $("#form-view").classList.add("hidden");
   $("#confirm-view").classList.add("hidden");
   const view = $("#status-view");
@@ -347,9 +356,11 @@ async function showStatus(orderId, token, result) {
   const render = (order, note) => {
     view.innerHTML = `<h2>注文 ${esc(orderId)}</h2>${note ? `<div class="banner ${order?.status === "PAID" ? "ok" : ""}">${note}</div>` : ""}${
       order
-        ? `<dl class="summary"><dt>ステータス</dt><dd><span class="badge status-${esc(order.status)}">${esc(STATUS_LABEL[order.status] ?? order.status)}</span></dd><dt>SVG</dt><dd>${esc(order.fileName)}（${Number(order.widthMm).toFixed(1)} × ${Number(order.heightMm).toFixed(1)} mm）</dd><dt>内容</dt><dd>${esc(order.material)} ${esc(order.thicknessMm)} mm × ${esc(order.quantity)} · ${order.deliveryType === "EXPRESS" ? "特急" : "通常"}</dd><dt>合計</dt><dd>${yen(order.totalPrice)}</dd>${order.shipBy ? `<dt>発送予定</dt><dd>${new Date(order.shipBy).toLocaleDateString("ja-JP")} まで</dd>` : ""}${order.trackingNumber ? `<dt>追跡番号</dt><dd>${esc(order.trackingNumber)}${order.carrier ? `（${esc(order.carrier)}）` : ""}</dd>` : ""}</dl>`
+        ? `<dl class="summary"><dt>ステータス</dt><dd><span class="badge status-${esc(order.status)}">${esc(STATUS_LABEL[order.status] ?? order.status)}</span></dd><dt>SVG</dt><dd>${esc(order.fileName)}（${Number(order.widthMm).toFixed(1)} × ${Number(order.heightMm).toFixed(1)} mm）</dd><dt>内容</dt><dd>${esc(order.material)} ${esc(order.thicknessMm)} mm × ${esc(order.quantity)} · ${order.deliveryType === "EXPRESS" ? "特急" : "通常"}</dd><dt>合計</dt><dd>${yen(order.totalPrice)}</dd>${order.shipBy ? `<dt>発送予定</dt><dd>${new Date(order.shipBy).toLocaleDateString("ja-JP")} まで</dd>` : ""}${order.trackingNumber ? `<dt>追跡番号</dt><dd>${esc(order.trackingNumber)}${order.carrier ? `（${esc(order.carrier)}）` : ""}</dd>` : ""}${
+            order.receiptUrl ? `<dt>領収書</dt><dd><a href="${esc(order.receiptUrl)}" target="_blank" rel="noopener" id="receipt-link"><button>領収書を表示（Stripe）</button></a><span class="note" style="display:block;margin:4px 0 0">Stripe が発行する領収書です。決済時のメールアドレスにも Stripe から領収書メールが届きます。</span></dd>` : PAID_LIKE.includes(order.status) ? `<dt>領収書</dt><dd><span class="note" style="margin:0">領収書を準備しています。しばらくしてからこのページを再読み込みしてください。</span></dd>` : ""
+          }</dl>`
         : ""
-    }<div class="actions"><a href="../app/"><button>エディタに戻る</button></a><a href="./"><button>別のSVGを注文する</button></a></div>`;
+    }<p class="note">このページには配送先やメールアドレスを表示しません。注文受付メールに記載した確認用URLは第三者に共有しないでください。お問い合わせは注文番号を添えて <a href="${esc(state.contactUrl)}" target="_blank" rel="noopener">問い合わせ窓口</a> へ。 <a href="../privacy/">プライバシーポリシー</a></p><div class="actions"><a href="../app/"><button>エディタに戻る</button></a><a href="./"><button>別のSVGを注文する</button></a></div>`;
   };
   const fetchOrder = async () => {
     const res = await fetch(`${API}/api/orders/${encodeURIComponent(orderId)}?token=${encodeURIComponent(token)}`);
@@ -360,11 +371,13 @@ async function showStatus(orderId, token, result) {
     let order = await fetchOrder();
     if (result === "cancel") render(order, "決済はキャンセルされました。内容を変えて再度注文できます（この注文は未決済のまま残り、支払いは発生しません）。");
     else if (result === "success") {
-      render(order, order.status === "PAID" ? "決済を受け付けました。ありがとうございます。" : "決済結果を確認しています…（Stripeからの通知を待っています）");
-      for (let i = 0; i < 20 && !["PAID", "PROCESSING", "READY", "SHIPPED", "COMPLETED", "CANCELLED"].includes(order.status); i++) {
+      const paidNote = "決済を受け付けました。ありがとうございます。注文受付メールをお送りしました（届かない場合は迷惑メールフォルダーもご確認ください）。";
+      render(order, order.status === "PAID" ? paidNote : "決済結果を確認しています…（Stripeからの通知を待っています）");
+      // Wait for the webhook (status) and then, briefly, for the receipt.
+      for (let i = 0; i < 20 && (!["PAID", "PROCESSING", "READY", "SHIPPED", "COMPLETED", "CANCELLED"].includes(order.status) || (PAID_LIKE.includes(order.status) && !order.receiptUrl && i < 3)); i++) {
         await new Promise((r) => setTimeout(r, 3000));
         order = await fetchOrder();
-        render(order, order.status === "PAID" ? "決済を受け付けました。ありがとうございます。" : "決済結果を確認しています…（Stripeからの通知を待っています）");
+        render(order, order.status === "PAID" ? paidNote : "決済結果を確認しています…（Stripeからの通知を待っています）");
       }
       if (order.status === "PAYMENT_PENDING") render(order, "まだ決済の確定通知が届いていません。しばらくしてからこのページを再読み込みしてください。");
     } else render(order, "");
@@ -409,12 +422,10 @@ function wire() {
   $("#thickness").onchange = (e) => { state.thicknessMm = Number(e.target.value); updateQuote(); };
   $("#quantity").oninput = (e) => { state.quantity = Math.max(1, Math.floor(Number(e.target.value) || 1)); updateQuote(); };
   $("#delivery").onchange = (e) => { state.deliveryType = e.target.value; updateQuote(); };
-  for (const id of fields) $(`#${id}`).addEventListener("change", saveDraft);
   $("#review").onclick = () => {
     const errors = validateCustomer();
     if (errors.length) return alertMsg(errors.join(" "));
     alertMsg("");
-    saveDraft();
     showConfirm();
   };
   $("#edit").onclick = () => { $("#confirm-view").classList.add("hidden"); $("#form-view").classList.remove("hidden"); };
@@ -431,6 +442,7 @@ async function loadConfig() {
     const cfg = await res.json();
     state.catalog = cfg.catalog;
     state.contactUrl = cfg.contactUrl || state.contactUrl;
+    if (cfg.personalDataRetentionDays) for (const el of document.querySelectorAll("[data-retention-days]")) el.textContent = cfg.personalDataRetentionDays;
     state.online = Boolean(cfg.stripeConfigured);
     if (!cfg.stripeConfigured) banner("決済（Stripe）の設定が完了していないため、現在は概算の表示のみで、注文はできません。");
     else banner("");
@@ -443,6 +455,12 @@ async function init() {
   const params = new URLSearchParams(location.search);
   if (params.get("order") && params.get("token")) {
     if (!API) return banner("注文APIのURLが設定されていません。", "error");
+    // The token is only needed for the API call; drop it from the address
+    // bar so it is not kept in history or copied by accident.
+    try {
+      history.replaceState(null, "", location.pathname);
+    } catch {}
+    await loadConfig();
     return showStatus(params.get("order"), params.get("token"), params.get("result"));
   }
   loadDraft();

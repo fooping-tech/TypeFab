@@ -1,5 +1,7 @@
 -- TypeFab order API (Cloudflare D1). Apply with:
 --   npx wrangler d1 execute typefab-orders --file=schema.sql [--local | --remote]
+-- Databases created before 2026-09-16 need migrations/0002_privacy_mail_receipt.sql
+-- instead (it adds the columns and table introduced for issues #8/#9/#10).
 CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
   status TEXT NOT NULL,
@@ -7,8 +9,9 @@ CREATE TABLE IF NOT EXISTS orders (
   updated_at TEXT NOT NULL,
   paid_at TEXT,
   ship_by TEXT,
+  -- Personal data: cleared by the retention purge once the order is closed.
   customer_name TEXT,
-  customer_email TEXT NOT NULL,
+  customer_email TEXT,
   shipping_postal_code TEXT,
   shipping_prefecture TEXT,
   shipping_address1 TEXT,
@@ -34,13 +37,18 @@ CREATE TABLE IF NOT EXISTS orders (
   currency TEXT NOT NULL DEFAULT 'JPY',
   stripe_checkout_session_id TEXT,
   stripe_payment_intent_id TEXT,
+  stripe_charge_id TEXT,
+  receipt_url TEXT,
   shipping_tracking_number TEXT,
   shipping_carrier TEXT,
   access_token TEXT NOT NULL,
-  notes TEXT
+  notes TEXT,
+  -- Set when the personal data columns were cleared and the SVG deleted.
+  personal_data_deleted_at TEXT
 );
 CREATE INDEX IF NOT EXISTS orders_status ON orders (status, created_at);
 CREATE INDEX IF NOT EXISTS orders_session ON orders (stripe_checkout_session_id);
+CREATE INDEX IF NOT EXISTS orders_retention ON orders (status, personal_data_deleted_at, updated_at);
 
 -- Processed Stripe webhook events; the primary key makes handling idempotent.
 CREATE TABLE IF NOT EXISTS stripe_events (
@@ -58,3 +66,17 @@ CREATE TABLE IF NOT EXISTS order_events (
   note TEXT
 );
 CREATE INDEX IF NOT EXISTS order_events_order ON order_events (order_id, id);
+
+-- One row per order and notification type (customer_paid / admin_paid):
+-- sent_at is set once the provider accepted the message; error keeps the
+-- last failure so the admin page can resend. No message bodies are stored.
+CREATE TABLE IF NOT EXISTS order_notifications (
+  order_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  sent_at TEXT,
+  provider_id TEXT,
+  error TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (order_id, type)
+);
