@@ -75,6 +75,10 @@ async function start() {
     // a token-mode page shows the form without a failing request first.
     if (!token) {
       const health = await (await fetch(`${API}/api/health`)).json().catch(() => null);
+      if (health?.adminAuth === "none") {
+        unauthenticated("access");
+        return alertMsg("この Worker は本番モード（APP_ENV=production）ですが Cloudflare Access が設定されていません。ACCESS_TEAM_DOMAIN / ACCESS_AUD を設定して再デプロイしてください（ADMIN_TOKEN は本番では使えません）。");
+      }
       if (health && !health.accessConfigured) return unauthenticated("token");
     }
     session = await (await api("/api/admin/session")).json();

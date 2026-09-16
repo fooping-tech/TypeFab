@@ -18,4 +18,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: { exclude: ["harfbuzzjs"] },
+  // The Worker's build output and local D1/R2 state (worker/admin-dist,
+  // worker/.wrangler) change while `npm run dev` runs; do not reload for them.
+  server: { watch: { ignored: ["**/worker/admin-dist/**", "**/worker/.wrangler/**", "**/worker/node_modules/**"] } },
 });

@@ -83,6 +83,13 @@ export function adminPaidMail(order, { adminUrl }) {
   return { subject, text };
 }
 
+// MAIL_MODE=console (development, issue #11): the text printed to the
+// Worker log instead of calling Resend.
+export function consoleMailText({ type, orderId, from, to, subject, text }) {
+  const rule = "=".repeat(60);
+  return [rule, `[mail:console] ${type} for order ${orderId}`, `From: ${from}`, `To: ${to}`, `Subject: ${subject}`, "", text, rule].join("\n");
+}
+
 // Sends one message through Resend. Resolves with { id }; throws on failure.
 export async function sendMail({ apiKey, apiBase = "https://api.resend.com", from, replyTo }, { to, subject, text }, fetchImpl = fetch) {
   if (!apiKey || !from) throw Error("mail not configured");

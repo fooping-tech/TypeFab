@@ -17,11 +17,14 @@ Node.js 22以降。
 
 ```sh
 npm ci
-npm run dev      # http://127.0.0.1:5173/TypeFab/ （紹介ページ） · /TypeFab/app/ （エディタ）
+npm run dev      # Vite（http://127.0.0.1:5173/TypeFab/ 紹介ページ · /TypeFab/app/ エディタ · /TypeFab/order/）+ 注文API Worker（http://127.0.0.1:8787、ローカル D1/R2、/admin/）
+npm run dev:web  # Vite だけ
 npm test         # node --test tests/*.test.js
 npm run build    # dist/ を生成
 npm run preview
 ```
+
+Worker をローカルで動かす初回準備は `cd worker && npm ci`、`cp worker/.dev.vars.example worker/.dev.vars`（Stripe のテストキーのみ。`sk_live_` は拒否される）、`npm run db:local`。`.dev.vars` が無ければ `npm run dev` は Vite だけを起動する。dev/prod の分離（`APP_ENV`、`MAIL_MODE=console`、本番では `ADMIN_TOKEN` 無効）は README「開発環境と本番環境（Issue #11）」を参照。`worker/.dev.vars` は読んでも内容（鍵）を出力しない。
 
 プレビューサーバーの起動にはサンドボックスのネットワーク待ち受け許可が必要な場合がある。ブラウザ確認は `@playwright/cli` を直接使った実績がある（`.playwright-cli/` と `output/` は `.gitignore` 済み）。
 
@@ -37,7 +40,8 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | `src/landing.js` / `src/landing.css` / `src/landing-glyphs.js` | 紹介ページ。`landing-glyphs.js` は `scripts/landing-glyphs.mjs` が同梱フォントと `geometry.js` から生成 |
 | `src/pricing.js` / `src/svganalyze.js` | 加工注文の料金カタログ・状態遷移、SVGの寸法・カット長・検査・サニタイズ（フロントと `worker/` で共用） |
 | `src/order.js` / `src/admin.js` / `src/order.css` / `src/privacy.js` | 加工注文ページ（個人情報はブラウザ保存なし、領収書リンク）、注文管理ページ（Access／トークン、一覧は個人情報なし・詳細で配送先、通知再送、保持期限削除）、プライバシーポリシー |
-| `worker/` | Cloudflare Workers（D1・R2・Stripe Checkout・Webhook・Resend メール・Cloudflare Access JWT 検証・Cron の保持期限削除）。`src/app.js` 本体、`src/access.js`、`src/mail.js`、`src/stripe.js`、`src/store.js`、`schema.sql`、`migrations/`。`npm test` はルートから `worker/src` を直接テストする |
+| `worker/` | Cloudflare Workers（D1・R2・Stripe Checkout・Webhook・Resend メール・Cloudflare Access JWT 検証・Cron の保持期限削除）。`src/index.js` が環境変数→設定（`configFromEnv`）と設定検証（`validateConfig`: development で `sk_live_` 拒否、production で `MAIL_MODE=console` 拒否）、`src/app.js` 本体、`src/access.js`、`src/mail.js`、`src/stripe.js`、`src/store.js`、`schema.sql`、`migrations/`、`.dev.vars.example`（ローカル設定の雛形）。`npm test` はルートから `worker/src` を直接テストする |
+| `scripts/dev.mjs` / `.env.development` | `npm run dev` の一括起動（Vite + `wrangler dev`）と、開発サーバーだけが読む `VITE_ORDER_API_URL=http://127.0.0.1:8787` |
 | `src/geometry.js` | 輪郭化、ブリッジ（線の途切れ／矩形差分）、加工チェック、SVG出力 |
 | `src/operations.js` | 拡縮ハンドル、ブーリアン演算（結合・切り抜き・交差・XOR） |
 | `src/layers.js` | レイヤー |
@@ -62,7 +66,8 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 - フォント・入力テキスト・プロジェクトを外部に送信しない。
 - 注文フォームの氏名・メールアドレス・住所・電話番号を `localStorage` / `sessionStorage` に保存しない。購入者API・注文状況ページ・メール本文・Worker のログに住所・電話番号を出さない。管理APIの一覧は個人情報を返さず、詳細は発送が必要な状態（PAID〜SHIPPED）でのみ配送先を返す。
 - 個人情報と SVG の保持期限（完了／キャンセルから `PERSONAL_DATA_RETENTION_DAYS` 日）と自動削除を壊さない。削除後も注文番号・金額・日付・Stripe の ID・加工内容は残す。
-- 公開APIの CORS は `ALLOWED_ORIGINS` に限定し `*` を使わない。管理APIは別の origin リスト（本番は空）。Access 設定時は `ADMIN_TOKEN` を受け付けない。
+- 公開APIの CORS は `ALLOWED_ORIGINS` に限定し `*` を使わない。管理APIは別の origin リスト（本番は空）。Access 設定時は `ADMIN_TOKEN` を受け付けない。`APP_ENV=production` では `ADMIN_TOKEN` を常に無視する（Access 未設定なら管理APIは 503）。
+- dev/prod 分離を壊さない: 本番の値は `worker/wrangler.toml` と `wrangler secret`、ローカルの値は `worker/.dev.vars`（git 管理外）。`MAIL_MODE=console`・`STRIPE_API_BASE`・`MAIL_API_BASE` は development 専用。
 - 通知メールは `PAID` に初めて遷移した時だけ送り、`order_notifications` で種別ごとに冪等にする。送信失敗で Webhook を失敗させない。
 - 「切り残しなし」などの検査は材料強度や連結性を保証するものではない。そう読める表現をUIやドキュメントに書かない。
 - 形状処理を変えたらテストを追加し、両方の同梱書体で確認する。

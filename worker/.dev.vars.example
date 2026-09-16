@@ -1,17 +1,37 @@
-# Copy to worker/.dev.vars for `wrangler dev`. Never commit the real file.
+# Local development settings for `wrangler dev` (issue #11).
+#   cp worker/.dev.vars.example worker/.dev.vars
+# The real .dev.vars is git-ignored. Every value here overrides wrangler.toml
+# [vars] while developing; production values stay in wrangler.toml and
+# `wrangler secret`. Never put a live Stripe key (sk_live_…) in this file:
+# the Worker refuses to serve with one while APP_ENV=development.
+# `npm run dev` always runs with APP_ENV=development (wrangler dev --var);
+# this line documents it and protects `npx wrangler dev` run by hand.
+APP_ENV=development
+
+# Stripe TEST mode. Dashboard → Developers → API keys (Test mode) → Secret key.
 STRIPE_SECRET_KEY=sk_test_xxx
+# Printed by `stripe listen --forward-to 127.0.0.1:8787/api/stripe/webhook`.
+# Leave the placeholder if you do not test webhooks locally.
 STRIPE_WEBHOOK_SECRET=whsec_xxx
-# Local admin login (used only while ACCESS_TEAM_DOMAIN / ACCESS_AUD are empty).
-ADMIN_TOKEN=change-me-to-a-long-random-string
-# Local site and admin page (production values live in wrangler.toml [vars]).
-SITE_URL=http://127.0.0.1:4173/TypeFab/
+
+# Admin page login without Cloudflare Access (development only).
+ADMIN_TOKEN=local-development
+
+# Local site (Vite dev server started by `npm run dev` at the repository root)
+# and the admin page served by the local Worker.
+SITE_URL=http://127.0.0.1:5173/TypeFab/
 ADMIN_URL=http://127.0.0.1:8787/admin/
-# Let the Vite dev/preview admin page call the local Worker cross-origin.
+ALLOWED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173
 ADMIN_ALLOWED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173
-# Mail (Resend). Leave MAIL_API_KEY empty to skip sending (recorded as "mail not configured").
+
+# Mail: "console" prints the order mails to the wrangler dev log instead of
+# sending them (no Resend key needed). Set "resend" plus MAIL_API_KEY only if
+# you really want to send from your machine.
+MAIL_MODE=console
 MAIL_API_KEY=
 MAIL_FROM=TypeFab <orders@example.com>
 ADMIN_NOTIFICATION_EMAIL=you@example.com
-# Optional: point Stripe / mail API calls at mocks during local tests
+
+# Optional: point Stripe / mail API calls at mocks during automated tests.
 # STRIPE_API_BASE=http://127.0.0.1:4242
 # MAIL_API_BASE=http://127.0.0.1:4243

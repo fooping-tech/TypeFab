@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createApp } from "../worker/src/app.js";
 import { memoryStore, memoryBucket } from "../worker/src/store.js";
 import { signStripePayload, verifyStripeSignature, formEncode } from "../worker/src/stripe.js";
-import { configFromEnv } from "../worker/src/index.js";
+import worker, { configFromEnv, validateConfig, configWarnings } from "../worker/src/index.js";
 import { customerPaidMail, adminPaidMail } from "../worker/src/mail.js";
 import { makeAccessTestKit, createAccessVerifier } from "../worker/src/access.js";
 import { quote } from "../src/pricing.js";
@@ -50,6 +50,7 @@ function setup(overrides = {}, { certs = null } = {}) {
   };
   let clock = new Date("2026-09-14T03:00:00.000Z");
   const config = {
+    appEnv: "development",
     stripeSecretKey: "sk_test_1",
     stripeWebhookSecret: "whsec_test",
     adminToken: "admin-secret",
@@ -64,7 +65,8 @@ function setup(overrides = {}, { certs = null } = {}) {
     adminUrl: "https://typefab-orders.test/admin/",
     ...overrides,
   };
-  const app = createApp({ store, bucket, config, fetch, now: () => clock, makeOrderId: () => `TF-${String(store.orders.size + 1).padStart(5, "0")}`, log: (m) => logs.push(m) });
+  const mailConsole = [];
+  const app = createApp({ store, bucket, config, fetch, now: () => clock, makeOrderId: () => `TF-${String(store.orders.size + 1).padStart(5, "0")}`, log: (m) => logs.push(m), mailConsole: (m) => mailConsole.push(m) });
   const call = (path, { method = "GET", body, headers = {}, raw } = {}) =>
     app(new Request(`https://api.test${path}`, { method, headers: { Origin: ORIGIN, ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...headers }, body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined) }));
   const admin = (path, opts = {}) => call(path, { ...opts, headers: { Authorization: "Bearer admin-secret", ...(opts.headers ?? {}) } });
@@ -73,7 +75,7 @@ function setup(overrides = {}, { certs = null } = {}) {
     return call("/api/stripe/webhook", { method: "POST", raw: payload, headers: { "Stripe-Signature": await signStripePayload(payload, secret, t ?? Math.floor(clock.getTime() / 1000)) } });
   };
   return {
-    store, bucket, app, call, admin, webhook, stripeCalls, mailCalls, certCalls, logs,
+    store, bucket, app, call, admin, webhook, stripeCalls, mailCalls, certCalls, logs, mailConsole,
     setStripeFails: (v) => (stripeFails = v),
     setMailFails: (v) => (mailFails = v),
     setReceiptMissing: (v) => (receiptMissing = v),
@@ -319,6 +321,10 @@ test("stripe helpers: form encoding, signature round trip and env config", async
   assert.equal(cfg.accessAud, "aud");
   assert.equal(cfg.bulkThreshold, 5);
   assert.equal(cfg.siteUrl, "https://fooping-tech.github.io/TypeFab/");
+  assert.equal(cfg.appEnv, "production", "APP_ENV defaults to production");
+  assert.equal(cfg.mailMode, "resend", "MAIL_MODE defaults to resend");
+  assert.equal(configFromEnv({ APP_ENV: " Development ", MAIL_MODE: "Console" }).appEnv, "development");
+  assert.equal(configFromEnv({ APP_ENV: "development", MAIL_MODE: "Console" }).mailMode, "console");
   const app = createApp({ store: memoryStore(), bucket: memoryBucket(), config: cfg });
   const q = await (await app(new Request("https://x/api/quote", { method: "POST", body: JSON.stringify({ material: "mdf", thicknessMm: 3, quantity: 5, deliveryType: "NORMAL", widthMm: 50, heightMm: 50 }) }))).json();
   assert.equal(q.quote.inquiryRequired, true, "env bulk threshold applies");
@@ -557,4 +563,100 @@ test("retention purge (#8): closed orders lose personal data and SVG after the r
   await short.webhook({ id: "e", type: "checkout.session.expired", data: { object: { id: "cs", metadata: { orderId: c.orderId } } } });
   short.tick(2 * DAY);
   assert.deepEqual((await short.app.purgeExpiredData()).purged, [c.orderId]);
+});
+
+test("dev/prod separation (#11): validateConfig refuses live Stripe keys and console mail outside development", async () => {
+  const dev = configFromEnv({ APP_ENV: "development", STRIPE_SECRET_KEY: "sk_test_1", STRIPE_WEBHOOK_SECRET: "whsec", ADMIN_TOKEN: "local-development", MAIL_MODE: "console", SITE_URL: "http://127.0.0.1:5173/TypeFab/" });
+  assert.deepEqual(validateConfig(dev), []);
+  assert.deepEqual(configWarnings(dev), []);
+  assert.match(validateConfig({ ...dev, stripeSecretKey: "sk_live_abc" })[0], /live key/);
+  assert.match(validateConfig({ ...dev, stripeSecretKey: "rk_live_abc" })[0], /live key/);
+  assert.match(validateConfig({ ...dev, appEnv: "staging" })[0], /APP_ENV/);
+  assert.match(validateConfig({ ...dev, mailMode: "smtp" })[0], /MAIL_MODE/);
+  assert.match(configWarnings({ ...dev, stripeSecretKey: "sk_1" })[0], /test key/);
+  assert.match(configWarnings({ ...dev, siteUrl: "https://fooping-tech.github.io/TypeFab/" })[0], /not a local address/);
+  const prod = configFromEnv({ STRIPE_SECRET_KEY: "sk_live_1", STRIPE_WEBHOOK_SECRET: "whsec", ACCESS_TEAM_DOMAIN: "t.cloudflareaccess.com", ACCESS_AUD: "aud", MAIL_API_KEY: "re", MAIL_FROM: "x <x@y.z>" });
+  assert.deepEqual(validateConfig(prod), [], "live key is fine in production");
+  assert.deepEqual(configWarnings(prod), []);
+  assert.match(validateConfig({ ...prod, mailMode: "console" })[0], /only allowed in development/);
+  assert.match(validateConfig({ ...prod, stripeApiBase: "http://127.0.0.1:4242" })[0], /STRIPE_API_BASE/);
+  assert.match(validateConfig({ ...prod, mailApiBase: "http://127.0.0.1:4242" })[0], /MAIL_API_BASE/);
+  assert.match(configWarnings({ ...prod, adminToken: "x" })[0], /ADMIN_TOKEN is set but ignored/);
+  assert.match(configWarnings({ ...prod, accessAud: undefined })[0], /Cloudflare Access .* not configured/);
+  // The Worker entry refuses every API request while the config is invalid (no D1 access needed).
+  const env = { APP_ENV: "development", STRIPE_SECRET_KEY: "sk_live_1", STRIPE_WEBHOOK_SECRET: "whsec", MAIL_MODE: "console" };
+  const origError = console.error, origWarn = console.warn, printed = [];
+  console.error = (m) => printed.push(m);
+  console.warn = (m) => printed.push(m);
+  try {
+    const res = await worker.fetch(new Request("http://127.0.0.1:8787/api/health"), env);
+    assert.equal(res.status, 500);
+    const body = await res.json();
+    assert.match(body.details[0], /live key/);
+    let pending = null;
+    await worker.scheduled({}, env, { waitUntil: (p) => (pending = p) });
+    await pending;
+    assert.ok(printed.some((m) => /retention purge skipped/.test(m)), "scheduled() logs and swallows the config error");
+  } finally {
+    console.error = origError;
+    console.warn = origWarn;
+  }
+  assert.ok(printed.some((m) => /live key/.test(m)));
+});
+
+test("dev/prod separation (#11): ADMIN_TOKEN works only in development; production without Access answers 503", async () => {
+  const dev = setup();
+  const devHealth = await (await dev.call("/api/health")).json();
+  assert.equal(devHealth.env, "development");
+  assert.equal(devHealth.adminAuth, "token");
+  assert.equal(devHealth.mailMode, "resend");
+  assert.equal((await dev.admin("/api/admin/orders")).status, 200);
+  const prod = setup({ appEnv: "production" });
+  const prodHealth = await (await prod.call("/api/health")).json();
+  assert.equal(prodHealth.env, "production");
+  assert.equal(prodHealth.adminAuth, "none");
+  assert.equal(prodHealth.accessConfigured, false);
+  const res = await prod.admin("/api/admin/orders");
+  assert.equal(res.status, 503);
+  const body = await res.json();
+  assert.equal(body.authMode, "none");
+  assert.match(body.error, /Cloudflare Access/);
+  assert.equal((await prod.call("/api/admin/session")).status, 503, "no header at all is refused the same way");
+  assert.equal((await prod.call("/api/config")).status, 200, "public endpoints keep working");
+  // An unknown APP_ENV is treated as production by the app.
+  const odd = setup({ appEnv: "staging" });
+  assert.equal((await odd.admin("/api/admin/orders")).status, 503);
+  // Access configured: same in both environments (covered in the Access test); adminAuth reports it.
+  const teamDomain = "typefab.cloudflareaccess.com", aud = "b".repeat(64);
+  const kit = await makeAccessTestKit({ teamDomain, aud });
+  const withAccess = setup({ appEnv: "production", accessTeamDomain: teamDomain, accessAud: aud }, { certs: kit.certs });
+  assert.equal((await (await withAccess.call("/api/health")).json()).adminAuth, "access");
+  assert.equal((await withAccess.admin("/api/admin/orders")).status, 401, "bearer token is not accepted with Access");
+});
+
+test("MAIL_MODE=console (#11): mails are printed, not sent, and recorded as sent; ignored outside development", async () => {
+  const s = setup({ mailMode: "console", mailApiKey: undefined });
+  assert.equal((await (await s.call("/api/health")).json()).mailConfigured, true, "console mode counts as configured");
+  const created = await (await s.call("/api/orders", { method: "POST", body: base })).json();
+  const body = await (await s.webhook(paidEvent(created.orderId, "cs_test_1", created.quote.totalPrice))).json();
+  assert.deepEqual([body.notifications.customer_paid.status, body.notifications.customer_paid.mode], ["sent", "console"]);
+  assert.equal(body.notifications.admin_paid.status, "sent");
+  assert.equal(s.mailCalls.length, 0, "Resend is never called");
+  assert.equal(s.mailConsole.length, 2);
+  assert.match(s.mailConsole[0], /\[mail:console\] customer_paid for order TF-00001/);
+  assert.match(s.mailConsole[0], /To: taro@example.com/);
+  assert.match(s.mailConsole[0], /Subject: 【TypeFab】ご注文を承りました（TF-00001）/);
+  assert.match(s.mailConsole[0], /注文番号: TF-00001/);
+  assert.match(s.mailConsole[1], /\[mail:console\] admin_paid for order TF-00001/);
+  assert.match(s.mailConsole[1], /To: owner@typefab.test/);
+  const notes = await s.store.listNotifications(created.orderId);
+  assert.deepEqual(notes.map((n) => [n.type, Boolean(n.sentAt), n.providerId.startsWith("console:")]).sort(), [["admin_paid", true, true], ["customer_paid", true, true]]);
+  await s.webhook(paidEvent(created.orderId, "cs_test_1", created.quote.totalPrice));
+  const resend = await (await s.admin(`/api/admin/orders/${created.orderId}/notify`, { method: "POST", body: {} })).json();
+  assert.equal(resend.results.customer_paid.status, "already-sent");
+  assert.equal(s.mailConsole.length, 2, "idempotent like the real provider");
+  // createApp on its own (without validateConfig) never prints mail in production.
+  const prod = setup({ appEnv: "production", accessTeamDomain: "t.cloudflareaccess.com", accessAud: "aud", mailMode: "console", mailApiKey: undefined });
+  const h = await (await prod.call("/api/health")).json();
+  assert.deepEqual([h.mailMode, h.mailConfigured], ["resend", false]);
 });

@@ -6,11 +6,13 @@
   "scripts": {
     "build:admin": "npm --prefix .. run build:admin",
     "predev": "npm run build:admin",
-    "dev": "wrangler dev --port 8787",
+    "dev": "wrangler dev --port 8787 --var APP_ENV:development",
     "predeploy": "npm run build:admin",
     "deploy": "wrangler deploy",
     "db:local": "wrangler d1 execute typefab-orders --local --file=schema.sql",
     "db:remote": "wrangler d1 execute typefab-orders --remote --file=schema.sql",
+    "db:migrate:local": "wrangler d1 execute typefab-orders --local --file=migrations/0002_privacy_mail_receipt.sql",
+    "db:migrate:remote": "wrangler d1 execute typefab-orders --remote --file=migrations/0002_privacy_mail_receipt.sql",
     "purge:dry": "wrangler d1 execute typefab-orders --remote --command \"SELECT id, status, updated_at FROM orders WHERE status IN ('COMPLETED','CANCELLED') AND personal_data_deleted_at IS NULL ORDER BY updated_at\""
   },
   "devDependencies": {

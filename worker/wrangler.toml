@@ -18,7 +18,15 @@ not_found_handling = "none"
 [triggers]
 crons = ["0 18 * * *"]
 
+# ---------------------------------------------------------------------------
+# Production values. Local development (`wrangler dev`) overrides any of them
+# in worker/.dev.vars (copy .dev.vars.example), never here. Bindings below are
+# emulated locally by wrangler dev: D1 and R2 live under worker/.wrangler/state.
+# ---------------------------------------------------------------------------
 [vars]
+# "production" (Access-only admin login, Resend mail, live Stripe) or
+# "development" (.dev.vars: ADMIN_TOKEN login, MAIL_MODE=console, Stripe test key).
+APP_ENV = "production"
 # Public site (success/cancel URLs and the customer order page point back here).
 SITE_URL = "https://fooping-tech.github.io/TypeFab/"
 # Browser origins allowed to call the public order API (comma separated). Never "*".
@@ -33,7 +41,10 @@ ACCESS_TEAM_DOMAIN = ""
 ACCESS_AUD = ""
 # Days after COMPLETED/CANCELLED before name, e-mail, address, phone and the SVG are deleted.
 PERSONAL_DATA_RETENTION_DAYS = "90"
-# Mail (Resend): sender and the address that receives new-order notifications.
+# Mail: "resend" sends through Resend (MAIL_API_KEY secret); "console" only
+# prints the mails to the log and is refused unless APP_ENV = "development".
+MAIL_MODE = "resend"
+# Sender and the address that receives new-order notifications.
 MAIL_FROM = ""
 MAIL_REPLY_TO = ""
 ADMIN_NOTIFICATION_EMAIL = ""
@@ -47,8 +58,9 @@ EXPRESS_LEAD_TIME_DAYS = "3"
 CONTACT_URL = "https://github.com/fooping-tech/TypeFab/issues/new?title=%E5%A4%A7%E9%87%8F%E6%B3%A8%E6%96%87%E3%81%AE%E5%95%8F%E3%81%84%E5%90%88%E3%82%8F%E3%81%9B"
 
 # Secrets (never in this file):  npx wrangler secret put <NAME>   (run in worker/)
-#   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, MAIL_API_KEY, ADMIN_TOKEN (local only)
-# Local development reads them from worker/.dev.vars (see .dev.vars.example).
+#   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, MAIL_API_KEY
+# ADMIN_TOKEN is ignored in production (Cloudflare Access only) and belongs in
+# worker/.dev.vars together with the other local values (see .dev.vars.example).
 
 [[d1_databases]]
 binding = "DB"

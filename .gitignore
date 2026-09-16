@@ -2,9 +2,15 @@ node_modules/
 dist/
 output/
 .playwright-cli/
+# Local settings and secrets. Only the committed examples and the
+# development defaults (no secrets) are tracked.
 .env
-.env.local
+.env.*
+!.env.example
+!.env.development
 worker/.dev.vars
+worker/.dev.vars.*
+!worker/.dev.vars.example
 worker/.wrangler/
 worker/node_modules/
 worker/admin-dist/

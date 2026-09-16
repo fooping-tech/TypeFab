@@ -5,7 +5,7 @@ import { quote, publicCatalog, shipByDate, TRANSITIONS, CATALOG } from "../../sr
 import { analyzeSVG, withPhysicalSize } from "../../src/svganalyze.js";
 import { createCheckoutSession, verifyStripeSignature, timingSafeEqual, fetchReceipt } from "./stripe.js";
 import { createAccessVerifier } from "./access.js";
-import { sendMail, customerPaidMail, adminPaidMail } from "./mail.js";
+import { sendMail, customerPaidMail, adminPaidMail, consoleMailText } from "./mail.js";
 import { PERSONAL_DATA_FIELDS, NOTIFICATION_TYPES } from "./store.js";
 
 const MAX_BODY = 3 * 1024 * 1024;
@@ -93,15 +93,23 @@ export function createApp(deps) {
     makeOrderId = newOrderId,
     makeToken = newToken,
     log = (msg) => console.error(msg),
+    // MAIL_MODE=console (development): where the mails are printed instead of sent.
+    mailConsole = (msg) => console.log(msg),
   } = deps;
+  // "development" (wrangler dev + .dev.vars) or "production" (issue #11).
+  const appEnv = config.appEnv === "development" ? "development" : "production";
+  const mailMode = config.mailMode === "console" && appEnv === "development" ? "console" : "resend";
   const catalog = catalogFromConfig(config);
   const trim = (o) => o.replace(/\/$/, "");
   const allowedOrigins = (config.allowedOrigins ?? []).map(trim);
   const adminAllowedOrigins = (config.adminAllowedOrigins ?? []).map(trim);
   const stripeConfigured = Boolean(config.stripeSecretKey && config.stripeWebhookSecret);
   const stripeAuth = { secretKey: config.stripeSecretKey, apiBase: config.stripeApiBase };
-  const mailConfigured = Boolean(config.mailApiKey && config.mailFrom);
+  const mailConfigured = mailMode === "console" || Boolean(config.mailApiKey && config.mailFrom);
   const accessConfigured = Boolean(config.accessTeamDomain && config.accessAud);
+  // How /api/admin/* authenticates: Access when configured; the ADMIN_TOKEN
+  // bearer only in development; nothing (503) in production without Access.
+  const adminAuth = accessConfigured ? "access" : appEnv === "development" && config.adminToken ? "token" : "none";
   const verifyAccess = accessConfigured
     ? createAccessVerifier({ teamDomain: config.accessTeamDomain, aud: config.accessAud, fetch: fetchImpl, now: () => now().getTime() })
     : null;
@@ -125,12 +133,13 @@ export function createApp(deps) {
     return headers;
   };
   // Admin identity: Cloudflare Access JWT when Access is configured, else
-  // the ADMIN_TOKEN bearer (local development). Never both.
+  // the ADMIN_TOKEN bearer (development only). Never both.
   const adminIdentity = async (request) => {
-    if (accessConfigured) {
+    if (adminAuth === "access") {
       const who = await verifyAccess(request.headers.get("Cf-Access-Jwt-Assertion"));
       return who ? { mode: "access", email: who.email } : null;
     }
+    if (adminAuth !== "token") return null;
     const auth = request.headers.get("Authorization") ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
     return config.adminToken && token && timingSafeEqual(token, config.adminToken) ? { mode: "token", email: null } : null;
@@ -326,9 +335,17 @@ export function createApp(deps) {
         continue;
       }
       try {
-        const { id } = await sendMail({ apiKey: config.mailApiKey, apiBase: config.mailApiBase, from: config.mailFrom, replyTo: config.mailReplyTo }, { to, ...mail }, fetchImpl);
+        let id;
+        if (mailMode === "console") {
+          // Development: print instead of sending, but record it as sent so
+          // the admin page and the idempotency rules behave as in production.
+          mailConsole(consoleMailText({ to, from: config.mailFrom ?? "(MAIL_FROM unset)", ...mail, orderId: order.id, type }));
+          id = `console:${at}`;
+        } else {
+          ({ id } = await sendMail({ apiKey: config.mailApiKey, apiBase: config.mailApiBase, from: config.mailFrom, replyTo: config.mailReplyTo }, { to, ...mail }, fetchImpl));
+        }
         await store.recordNotification({ orderId: order.id, type, sentAt: at, providerId: id, error: null, at });
-        results[type] = { status: "sent", sentAt: at };
+        results[type] = { status: "sent", sentAt: at, mode: mailMode };
       } catch (e) {
         const msg = String(e.message).slice(0, 300);
         await store.recordNotification({ orderId: order.id, type, error: msg, at });
@@ -446,7 +463,7 @@ export function createApp(deps) {
     const headers = cors(request, isAdminPath);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
     const respond = async () => {
-      if (path === "/api/health") return json({ ok: true, stripeConfigured, mailConfigured, accessConfigured, time: now().toISOString() });
+      if (path === "/api/health") return json({ ok: true, env: appEnv, stripeConfigured, mailConfigured, mailMode, accessConfigured, adminAuth, time: now().toISOString() });
       if (path === "/api/config" && request.method === "GET")
         return json({ catalog: publicCatalog(catalog), stripeConfigured, contactUrl: config.contactUrl ?? null, siteUrl, privacyUrl: `${siteUrl}privacy/`, personalDataRetentionDays: retentionDays });
       if (path === "/api/quote" && request.method === "POST") {
@@ -465,8 +482,9 @@ export function createApp(deps) {
         return json({ order: customerView(order) });
       }
       if (isAdminPath) {
+        if (adminAuth === "none") return error("本番環境（APP_ENV=production）では Cloudflare Access（ACCESS_TEAM_DOMAIN / ACCESS_AUD）の設定が必要です。ADMIN_TOKEN は使えません。", 503, { authMode: "none" });
         const who = await adminIdentity(request);
-        if (!who) return error(accessConfigured ? "Cloudflare Access の認証が必要です。" : "管理者トークンが必要です。", 401, { authMode: accessConfigured ? "access" : "token" });
+        if (!who) return error(accessConfigured ? "Cloudflare Access の認証が必要です。" : "管理者トークンが必要です。", 401, { authMode: adminAuth });
         if (path === "/api/admin/session" && request.method === "GET") return json({ mode: who.mode, email: who.email, mailConfigured, retentionDays });
         if (path === "/api/admin/orders" && request.method === "GET") {
           const filter = url.searchParams.get("status");

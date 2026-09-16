@@ -505,3 +505,34 @@
 - 実ブラウザ（Chromium、production preview、Playwright 17 項目）: ダイアログの既定値 1.5 × 1.5、対象件数、送信前はブリッジ未追加、範囲外の値は送信されない、Esc でキャンセル、2.5 × 4 で文字に 6 個の切り抜きブリッジ（`h = 2.5`、対象付き）、通知メッセージ、値の記憶と再表示、既定値に戻す、ダイアログ内で Delete を押しても選択は消えない、Undo で一括削除、新規長方形に 3 × 1 の保持ブリッジ、console error なし — すべて通過。
 - 未検証: 実機加工での帯の強度（幅・高さは形状の指定であり強度の保証ではない）。
 - 公開: コミット `4f0adb0` を `main` へ push。Actions https://github.com/fooping-tech/TypeFab/actions/runs/35044419605 は success。`https://fooping-tech.github.io/TypeFab/app/` が HTTP 200 で、配信中のエディタのバンドルに `auto-bridge-dialog` が含まれることを確認（2026-09-16）。
+
+## ローカル開発環境の整備と dev/prod 設定分離 — Issue #11（2026-09-17）
+
+### 要求
+- `npm run dev` だけで Frontend + Worker（ローカル D1・R2）を起動できる。開発時に本番の D1・R2 に接続・書き込みしない。
+- `worker/.dev.vars.example` を整備し、実際の `.dev.vars`・`.env` 系は git 管理外にする。本番 Secret をローカル設定に書かなくてよい。
+- Stripe はローカルでは Test Mode のみ。`sk_live_` が設定されたら警告または起動拒否。Webhook は Stripe CLI で転送できる。
+- 管理画面はローカルでは `ADMIN_TOKEN`、本番では Cloudflare Access のみ（本番で `ADMIN_TOKEN` を使わない）。
+- 開発時に Resend の実メールを送らない `MAIL_MODE=console`。
+- `/api/health` がローカルで正常応答する。dev / production のセットアップ手順を README に分けて記載する。
+
+### 実装
+- `worker/src/index.js`: `APP_ENV`（既定 `production`）と `MAIL_MODE`（既定 `resend`）を設定に追加。`validateConfig` が development で `sk_live_`/`rk_live_`、production で `MAIL_MODE=console`・`STRIPE_API_BASE`・`MAIL_API_BASE` を設定エラーとし、エラー時は全 API が 500（`details` 付き）、Cron の削除も実行しない。`configWarnings` が本番の `ADMIN_TOKEN` 残存・Access 未設定・テストキーらしくない鍵・ローカルでない `SITE_URL` を警告ログに出す。
+- `worker/src/app.js`: `adminAuth` を `access` / `token` / `none` に分け、`token` は development のみ。production で Access 未設定なら `/api/admin/*` は 503（`authMode: "none"`）。`MAIL_MODE=console` は決済完了メールを Resend に送らず `[mail:console] <種別> for order <番号>` として本文ごとログ出力し、`providerId = console:<時刻>` で送信済みとして記録（冪等性は本番と同じ）。`/api/health` に `env`・`mailMode`・`adminAuth` を追加。`src/admin.js` は `adminAuth: "none"` のとき Access 未設定の案内を表示。
+- `worker/wrangler.toml`: `[vars]` に `APP_ENV = "production"`、`MAIL_MODE = "resend"` を追加し、本番値と `.dev.vars` の関係をコメント化。`worker/.dev.vars.example` を development 用に書き直し（`APP_ENV=development`、`ADMIN_TOKEN=local-development`、`SITE_URL=http://127.0.0.1:5173/TypeFab/`、`ALLOWED_ORIGINS`/`ADMIN_ALLOWED_ORIGINS` にローカルの origin、`MAIL_MODE=console`）。
+- `worker/package.json`: `dev` を `wrangler dev --port 8787 --var APP_ENV:development` にし、`.dev.vars` に `APP_ENV` が無くても development で動く（`--var` は `.dev.vars` より優先することを確認）。`db:migrate:local` / `db:migrate:remote` を追加。
+- ルート `package.json`: `dev` = `node scripts/dev.mjs`（Vite + Worker を `[web]`/`[worker]` プレフィックス付きで並行起動、どちらかが終了すれば両方停止）、`dev:web`、`dev:worker`、`db:local`、`db:remote`。`scripts/dev.mjs` は `worker/node_modules` か `.dev.vars` が無ければ Worker を起動せず案内を出して Vite だけ起動、`.dev.vars` の `STRIPE_SECRET_KEY` が `sk_live_` なら起動を拒否する。追加依存なし。
+- `.env.development`（コミット対象、秘密なし）: `VITE_ORDER_API_URL=http://127.0.0.1:8787`。`vite` 開発サーバーだけが読み、`vite build` には影響しない。`.gitignore` を `.env`・`.env.*`（`.env.example`・`.env.development` を除く）・`worker/.dev.vars`・`worker/.dev.vars.*`（`.example` を除く）に整理。
+- `vite.config.js`: `worker/admin-dist`・`worker/.wrangler`・`worker/node_modules` を監視対象から除外（Worker のビルドや D1 書き込みでページが再読み込みされないように）。
+- README: 「開発」節と、「開発環境と本番環境（Issue #11）」「ローカル開発（development）」「本番環境（production）: Cloudflare Workers のセットアップ」に分割。CLAUDE.md の開発コマンドと前提を更新。
+- テスト追加（`tests/worker.test.js`）: `validateConfig`/`configWarnings`、Worker エントリの 500 応答と Cron スキップ、development/production での `ADMIN_TOKEN` の扱いと 503、`MAIL_MODE=console` の出力・記録・冪等性・production での無効化。
+
+### 検証結果
+- `npm test`: 189 件すべて成功（追加 3 件を含む）。`npm run build`: 成功。
+- ルートで `npm run dev` を実行し、Vite（127.0.0.1:5173）と Worker（127.0.0.1:8787）が同時に起動。`wrangler dev` のバインディング表示は `env.DB` D1 local、`env.SVG_BUCKET` R2 local、`env.ASSETS` local。`/api/health` は `{"ok":true,"env":"development","stripeConfigured":true,"mailConfigured":true,"mailMode":"resend","accessConfigured":false,"adminAuth":"token"}`。
+- ローカル Worker とモック Stripe/Resend（scratchpad の簡易サーバー、`STRIPE_API_BASE`/`MAIL_API_BASE`）で注文作成（201・CORS は Vite の origin）→ Checkout → 署名付き Webhook → `PAID`・領収書 URL → モックに購入者・管理者メール 2 通。`ADMIN_TOKEN` で管理 API（一覧・セッション・詳細の配送先・通知状況）と SVG ダウンロードがローカル R2 から返り、データは `worker/.wrangler/state/v3/{d1,r2}` に保存。Cloudflare 上の D1/R2 は使っていない。
+- `wrangler dev --var MAIL_MODE:console` で注文を決済し、Resend モックには送信されず、Worker ログに `[mail:console] customer_paid for order TF-…` / `admin_paid` の本文（件名・宛先・注文番号・金額）が出力され、通知は送信済みとして記録された。
+- `wrangler dev --var STRIPE_SECRET_KEY:sk_live_dummy` では `/api/health`・`/api/orders` が 500 `{"error":"Worker の設定に誤りがあります。","details":["STRIPE_SECRET_KEY is a live key …"]}` を返し、ログに `typefab config error` が出た（`--var` が `.dev.vars` より優先されることも同時に確認）。
+- 未検証: 実際の Stripe Test Mode の鍵での Checkout と Stripe CLI（`stripe listen`）による Webhook 受信（CLI 未インストール・利用者の鍵は使っていない）。本番 Worker への `APP_ENV=production` デプロイと、Access 未設定時の 503 の実機表示（デプロイは利用者が行う）。`scripts/dev.mjs` の `.dev.vars` 欠如・`sk_live_` 拒否の分岐は利用者の `.dev.vars` を変更せずに済ませたため、コードの確認のみ。
+- 注意: 本番の `wrangler.toml` に `APP_ENV = "production"` を入れたため、次回デプロイ以降は Cloudflare Access（`ACCESS_TEAM_DOMAIN`/`ACCESS_AUD`）が未設定だと管理画面が使えない（`ADMIN_TOKEN` は無視）。Access を設定してからデプロイする。
+

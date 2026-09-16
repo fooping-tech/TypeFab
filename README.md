@@ -244,12 +244,14 @@ Node.js 22以降で実行します。
 
 ```sh
 npm ci
-npm run dev
+npm run dev        # Vite 開発サーバー + 注文API Worker（ローカル D1・R2）を同時起動
 npm test
 npm run build
 ```
 
-ローカル: http://127.0.0.1:5173/TypeFab/ （紹介ページ）、http://127.0.0.1:5173/TypeFab/app/ （エディタ）
+ローカル: http://127.0.0.1:5173/TypeFab/ （紹介ページ）、http://127.0.0.1:5173/TypeFab/app/ （エディタ）、http://127.0.0.1:5173/TypeFab/order/ （加工注文）、http://127.0.0.1:8787/admin/ （注文管理）
+
+`npm run dev` は `scripts/dev.mjs` が Vite（`npm run dev:web`）と Cloudflare Worker（`npm run dev:worker` = `wrangler dev`）を `[web]` / `[worker]` のプレフィックス付きで並行起動します。Worker の初回セットアップ（`worker/.dev.vars`、`cd worker && npm ci`、`npm run db:local`）がまだなら Worker は起動せず、エディタだけが使えます（注文ページは概算のみ）。手順は下記「[ローカル開発](#ローカル開発development)」を参照してください。エディタだけを動かしたいときは `npm run dev:web` です。
 
 Vite + JavaScript + opentype.js + HarfBuzz WASM + Clipperの完全静的構成です。`src/geometry.js` が輪郭・ブリッジ・SVG出力、`src/project.js` がJSON入力検証、`src/main.js` が編集UIを担当します。`src/operations.js` は拡縮とブーリアン、`src/layers.js` はレイヤー、`src/typography.js` は文字組版、`src/grouping.js` はグループと文字・部位への分解、`src/edit.js` は重なり順とコピー、`src/warp.js` はワープ（エンベロープ変形）、`src/path.js` はパスのノード編集（SVG pathの読み書き、ベジェ曲線の近似、ノード操作）、`src/svgimport.js` はSVGファイルの読み込みです。将来別リポジトリ名へ移す場合は `vite.config.js` の `base` を変更してください。
 
@@ -308,7 +310,7 @@ Stripe Webhook で注文が初めて `PAID` になった時点で、Worker が2�
 - 「SVGを表示」「SVGをダウンロード」（R2から取得）、「加工開始」「加工完了」「発送済みにする」（追跡番号・配送会社を任意入力）、「完了にする」「キャンセル」で状態を変えます。状態遷移は `NEW → PAYMENT_PENDING → PAID → PROCESSING → READY → SHIPPED → COMPLETED`（各段階から `CANCELLED`）で、許可されない遷移はWorkerが拒否します。Access でログインした管理者のメールアドレスは状態履歴に残ります。返金はStripeダッシュボードで行います。
 - 「保持期限切れの個人情報・SVGの削除」から、削除対象の確認（dry run）と手動実行ができます（下記「個人情報の保持期間」）。
 
-Access が設定されていない環境（ローカル開発）では従来どおり `ADMIN_TOKEN` の入力欄が出ます。`ACCESS_TEAM_DOMAIN` と `ACCESS_AUD` を設定すると Bearer トークンは受け付けなくなり、Access の JWT だけで認証します（併用はしません）。
+ローカル開発（`APP_ENV=development`、Access 未設定）では `ADMIN_TOKEN` の入力欄が出ます。`ACCESS_TEAM_DOMAIN` と `ACCESS_AUD` を設定すると Bearer トークンは受け付けなくなり、Access の JWT だけで認証します（併用はしません）。本番（`APP_ENV=production`）では `ADMIN_TOKEN` を無視し、Access が未設定なら管理 API は 503 を返して管理画面にその旨を表示します（Issue #11）。
 
 ### 個人情報の保持期間と自動削除（Issue #8）
 
@@ -331,7 +333,7 @@ Cloudflare Workers（注文API /api/*、管理画面 /admin/、管理API /api/ad
 - GitHub Pages は静的ファイルだけを配信し、秘密鍵や個人情報を持ちません。エディタはフォント・文字・プロジェクトを外部へ送りません。
 - 公開 API（`/api/config`・`/api/quote`・`/api/orders`・`/api/orders/:id`）の CORS は `ALLOWED_ORIGINS` に限定し、`*` は使いません。管理 API は `ADMIN_ALLOWED_ORIGINS`（本番は空＝同一オリジンのみ）と別のポリシーで、preflight を含めてテストしています。
 - 購入者API は住所・メールアドレス・Stripe の ID を返しません。Worker のログとエラーメッセージに個人情報を出しません。
-- 本番とローカルの違い: 本番は Access で管理画面を保護し、Resend と Stripe 本番キーを使います。ローカルは `ADMIN_TOKEN`、Stripe テストモード（またはモック）、`MAIL_API_KEY` 未設定なら送信スキップです。
+- 本番とローカルの違い: 本番（`APP_ENV=production`）は Access で管理画面を保護し、Resend と Stripe 本番キーを使います。ローカル（`APP_ENV=development`）は `ADMIN_TOKEN`、Stripe テストモード（またはモック）、`MAIL_MODE=console` でメールをログ出力です。下記「開発環境と本番環境」を参照。
 
 ### アーキテクチャ
 
@@ -349,7 +351,70 @@ Cloudflare Workers（注文API /api/*、管理画面 /admin/、管理API /api/ad
 
 GitHub Pages側には秘密鍵や決済処理を置きません。
 
-### Cloudflare Workers のセットアップ
+### 開発環境と本番環境（Issue #11）
+
+Worker の設定は「ローカル開発」と「本番」で完全に分かれています。ローカルでは Cloudflare 上の D1・R2 に接続せず、本番の Secret をローカルの設定ファイルに書く必要もありません。
+
+```text
+Development（npm run dev）              Production（cd worker && npm run deploy）
+├─ Worker: wrangler dev（127.0.0.1:8787） ├─ Worker: Cloudflare Workers
+├─ D1: ローカル（worker/.wrangler/state）  ├─ D1: Cloudflare D1
+├─ R2: ローカル（worker/.wrangler/state）  ├─ R2: Cloudflare R2
+├─ Stripe: Test Mode（sk_test_…）          ├─ Stripe: Live Mode（sk_live_…、wrangler secret）
+├─ Stripe Webhook: Stripe CLI で転送        ├─ Stripe Webhook: 公開エンドポイント
+├─ Mail: MAIL_MODE=console（ログに出力）     ├─ Mail: Resend
+└─ 管理画面の認証: ADMIN_TOKEN              └─ 管理画面の認証: Cloudflare Access
+   設定: worker/.dev.vars（git 管理外）        設定: worker/wrangler.toml [vars] + wrangler secret
+```
+
+切り替えは Worker の環境変数 `APP_ENV` です。`wrangler.toml` は `APP_ENV = "production"`、`npm run dev`（`wrangler dev --var APP_ENV:development`）と `.dev.vars.example` は `development` にしています。Worker はこの値で次のように振る舞います。
+
+| | development | production |
+| --- | --- | --- |
+| 管理API（`/api/admin/*`）の認証 | Cloudflare Access が設定されていればそれ、なければ `ADMIN_TOKEN` | Cloudflare Access のみ。`ADMIN_TOKEN` は無視し、Access 未設定なら 503 |
+| `STRIPE_SECRET_KEY` | `sk_live_` / `rk_live_` なら設定エラーとしてすべての API が 500 を返す（`npm run dev` は起動前にも拒否） | 本番キー |
+| `MAIL_MODE=console` | メールを送らず、宛先・件名・本文を `wrangler dev` のログに出力し、送信済みとして記録 | 設定エラー（顧客のメールアドレスをログに出さないため） |
+| `STRIPE_API_BASE` / `MAIL_API_BASE`（モック） | 使える | 設定エラー |
+
+`GET /api/health` は `env`（`development` / `production`）、`mailMode`、`adminAuth`（`access` / `token` / `none`）を返すので、どちらのモードで動いているか確認できます。R2 と D1 は Worker コードでは同じバインディング（`env.SVG_BUCKET`、`env.DB`）を使い、環境による分岐はありません。`wrangler dev` がローカルのエミュレーションに向けます。
+
+### ローカル開発（development）
+
+初回だけ:
+
+```sh
+npm ci                                          # ルート
+cd worker && npm ci && cd ..                    # wrangler
+cp worker/.dev.vars.example worker/.dev.vars    # Stripe のテストキー（sk_test_…）だけ入れる。git 管理外
+npm run db:local                                # ローカル D1 にスキーマを作成（worker/.wrangler/state）
+```
+
+通常:
+
+```sh
+npm run dev
+```
+
+これで Vite（http://127.0.0.1:5173/TypeFab/ ）と Worker（http://127.0.0.1:8787 ）が起動し、注文ページと管理画面はローカルの Worker を呼びます（`.env.development` の `VITE_ORDER_API_URL=http://127.0.0.1:8787` を Vite が読みます。`vite build` は読みません）。`http://127.0.0.1:8787/api/health` が `{"ok":true,"env":"development",…}` を返せば準備完了です。
+
+- **D1 / R2**: `wrangler dev` はローカルのエミュレーションを使い、データは `worker/.wrangler/state/` に残ります。本番の D1・R2 には接続しません。スキーマの再適用は `npm run db:local`、既存 DB へのマイグレーションは `cd worker && npm run db:migrate:local` です。
+- **管理画面**: `http://127.0.0.1:8787/admin/` を開き、`.dev.vars` の `ADMIN_TOKEN`（例では `local-development`）を入力します。Vite 側の `http://127.0.0.1:5173/TypeFab/admin/` からも同じ Worker を呼べます（`.dev.vars` の `ADMIN_ALLOWED_ORIGINS`）。
+- **メール**: `.dev.vars.example` は `MAIL_MODE=console` です。決済完了時の購入者・管理者宛メールは Resend に送らず、`[worker]` のログに `[mail:console] customer_paid for order TF-…` のように本文ごと出力され、管理画面では送信済みと表示されます。実際に送るときだけ `MAIL_MODE=resend` と `MAIL_API_KEY` を設定します。
+- **Stripe**: 必ず Test Mode の秘密鍵（`sk_test_…`）を使います。`sk_live_` を書くと `npm run dev` は Worker を起動せず、`npx wrangler dev` を直接起動した場合も API がすべて 500（設定エラー）になります。Checkout はテストカード（4242 4242 4242 4242）で完了できます。
+- **Stripe Webhook**: 決済完了を受け取る（PAID にする）には別ターミナルで Stripe CLI を動かします。
+
+  ```sh
+  stripe listen --forward-to 127.0.0.1:8787/api/stripe/webhook
+  ```
+
+  表示された `whsec_…` を `.dev.vars` の `STRIPE_WEBHOOK_SECRET` に入れて `npm run dev` を再起動します。Stripe CLI を使わない場合は注文が `PAYMENT_PENDING` のままになります。
+- **モック**: `.dev.vars` の `STRIPE_API_BASE` / `MAIL_API_BASE` で Stripe API・Resend API の向き先を差し替えられるため、自動テスト用のモックサーバーでも注文→決済→通知→領収書の流れを確認できます。
+- **保持期限の削除**: `curl -X POST -H "Authorization: Bearer <ADMIN_TOKEN>" -H "Content-Type: application/json" -d '{"dryRun":true}' http://127.0.0.1:8787/api/admin/maintenance/purge` で試せます。
+- **ビルド済みサイトで確認**: `npm run build && npm run preview`（http://127.0.0.1:4173/TypeFab/ ）。ビルドはローカル Worker の URL を含まないので、注文ページをローカル Worker につなぐには `VITE_ORDER_API_URL=http://127.0.0.1:8787 npm run build` とし、`.dev.vars` の `SITE_URL` を `http://127.0.0.1:4173/TypeFab/` にします。
+
+`worker/.dev.vars`、`worker/.dev.vars.*`、`.env`、`.env.*`（`.env.example` と `.env.development` を除く）は `.gitignore` 済みで、コミットされません。
+
+### 本番環境（production）: Cloudflare Workers のセットアップ
 
 ```sh
 npm ci                 # ルート（Workerも src/ のモジュールを使います）
@@ -357,14 +422,14 @@ cd worker && npm ci    # wrangler
 npx wrangler login
 ```
 
-1. **D1**: `npx wrangler d1 create typefab-orders` を実行し、表示された `database_id` を `worker/wrangler.toml` に書きます。スキーマを適用します: `npm run db:remote`（ローカル開発は `npm run db:local`）。
+1. **D1**: `npx wrangler d1 create typefab-orders` を実行し、表示された `database_id` を `worker/wrangler.toml` に書きます。スキーマを適用します: `npm run db:remote`（ルートからも `npm run db:remote`）。既存 DB は `npm run db:migrate:remote`（`migrations/0002_privacy_mail_receipt.sql`）を適用します。
 2. **R2**: `npx wrangler r2 bucket create typefab-order-svgs`（名前を変えた場合は `wrangler.toml` の `bucket_name` も変更）。
-3. **Stripe**: ダッシュボードで秘密鍵（`sk_live_…` / `sk_test_…`）を取得します。Webhookエンドポイントに `https://<worker>.workers.dev/api/stripe/webhook` を登録し、イベント `checkout.session.completed`、`checkout.session.async_payment_succeeded`、`checkout.session.async_payment_failed`、`checkout.session.expired` を選び、署名シークレット（`whsec_…`）を控えます。
+3. **Stripe**: ダッシュボードで本番の秘密鍵（`sk_live_…`）を取得します。Webhookエンドポイントに `https://<worker>.workers.dev/api/stripe/webhook` を登録し、イベント `checkout.session.completed`、`checkout.session.async_payment_succeeded`、`checkout.session.async_payment_failed`、`checkout.session.expired` を選び、署名シークレット（`whsec_…`）を控えます。
 4. **Stripe の領収書メール**: ダッシュボードの Settings → Emails で「Successful payments」を有効にします（Issue #10）。
-5. **Resend**（Issue #9）: https://resend.com でアカウントを作り、送信ドメインを追加して表示された SPF / DKIM（必要なら DMARC）の DNS レコードを設定し、API キーを発行します。`MAIL_FROM`（例 `TypeFab <orders@example.com>`、検証済みドメインのアドレス）、`ADMIN_NOTIFICATION_EMAIL`（新規注文通知の宛先）、任意で `MAIL_REPLY_TO` と `ADMIN_URL`（管理画面のURL。空なら `<SITE_URL>admin/`）を `wrangler.toml` の `[vars]` に書きます。
-6. **Secrets**（`worker/` で実行）: `npx wrangler secret put STRIPE_SECRET_KEY`、`npx wrangler secret put STRIPE_WEBHOOK_SECRET`、`npx wrangler secret put MAIL_API_KEY`。`ADMIN_TOKEN` は Access を使わないローカル開発用で、本番では設定不要です。
-7. **環境変数**（`worker/wrangler.toml` の `[vars]`）: `SITE_URL`（決済後に戻る公開サイト）、`ALLOWED_ORIGINS`（公開APIを呼べるオリジン）、`ADMIN_ALLOWED_ORIGINS`（本番は空）、`PERSONAL_DATA_RETENTION_DAYS`、`BULK_THRESHOLD`、`NORMAL_LEAD_TIME_DAYS`、`EXPRESS_LEAD_TIME_DAYS`、`CONTACT_URL`。料金表は `src/pricing.js` の `CATALOG` を編集します。
-8. **デプロイ**: `cd worker && npm run deploy`（先に `npm run build:admin` が走り、管理画面を `worker/admin-dist` に生成します）。`https://<worker>.workers.dev/api/health` が `{"ok":true,"stripeConfigured":true,"mailConfigured":true,"accessConfigured":true}` を返せば準備完了です。Cron Trigger はデプロイ時に登録されます。
+5. **Resend**（Issue #9）: https://resend.com でアカウントを作り、送信ドメインを追加して表示された SPF / DKIM（必要なら DMARC）の DNS レコードを設定し、API キーを発行します。`MAIL_FROM`（例 `TypeFab <orders@example.com>`、検証済みドメインのアドレス）、`ADMIN_NOTIFICATION_EMAIL`（新規注文通知の宛先）、任意で `MAIL_REPLY_TO` と `ADMIN_URL`（管理画面のURL。空なら `<SITE_URL>admin/`）を `wrangler.toml` の `[vars]` に書きます。`MAIL_MODE` は `resend` のままにします。
+6. **Secrets**（`worker/` で実行）: `npx wrangler secret put STRIPE_SECRET_KEY`、`npx wrangler secret put STRIPE_WEBHOOK_SECRET`、`npx wrangler secret put MAIL_API_KEY`。`ADMIN_TOKEN` は本番では使われません（設定してあれば `npx wrangler secret delete ADMIN_TOKEN` で消します）。
+7. **環境変数**（`worker/wrangler.toml` の `[vars]`）: `APP_ENV = "production"`、`SITE_URL`（決済後に戻る公開サイト）、`ALLOWED_ORIGINS`（公開APIを呼べるオリジン）、`ADMIN_ALLOWED_ORIGINS`（本番は空）、`PERSONAL_DATA_RETENTION_DAYS`、`BULK_THRESHOLD`、`NORMAL_LEAD_TIME_DAYS`、`EXPRESS_LEAD_TIME_DAYS`、`CONTACT_URL`。料金表は `src/pricing.js` の `CATALOG` を編集します。ローカル用の値（`.dev.vars`）は本番に影響しません。
+8. **デプロイ**: `cd worker && npm run deploy`（先に `npm run build:admin` が走り、管理画面を `worker/admin-dist` に生成します）。`https://<worker>.workers.dev/api/health` が `{"ok":true,"env":"production","stripeConfigured":true,"mailConfigured":true,"mailMode":"resend","accessConfigured":true,"adminAuth":"access"}` を返せば準備完了です。`accessConfigured` が `false`（`adminAuth` が `none`）の間は管理APIが 503 を返します。Cron Trigger はデプロイ時に登録されます。
 9. **Cloudflare Access**（Issue #8、デプロイ後）:
    1. Cloudflare ダッシュボード → Zero Trust でチーム名を決めます（チームドメイン `https://<team>.cloudflareaccess.com`）。
    2. Access → Applications → Add an application → **Self-hosted**。Application domain に Worker のホスト名（`typefab-orders.<subdomain>.workers.dev`、独自ドメインなら `api.example.com`）を入れ、パスに `admin` を指定します。同じアプリケーションに **Add public hostname / path** で `/api/admin` を追加します（`/api/orders` などの公開APIは含めません）。Worker の「Access」タブの「Protect this Worker behind Access」は Worker 全体（公開APIを含む）を保護してしまうため使いません。
@@ -374,23 +439,13 @@ npx wrangler login
 
 ### GitHub Pages 側の設定
 
-フロントエンドはビルド時に `VITE_ORDER_API_URL`（WorkerのURL、末尾スラッシュなし）を埋め込みます。GitHubリポジトリの **Settings → Secrets and variables → Actions → Variables** に `ORDER_API_URL` を追加すると、`.github/workflows/pages.yml` がそれをビルドに渡します。未設定なら注文ページは概算のみになります。ローカルは `.env.example` を `.env` にコピーして値を入れます。
-
-### ローカル開発
-
-```sh
-cp worker/.dev.vars.example worker/.dev.vars   # テスト用の鍵・ADMIN_TOKEN・SITE_URL・ADMIN_ALLOWED_ORIGINS・メール設定
-cd worker && npm run db:local && npm run dev      # http://127.0.0.1:8787（D1・R2はローカルエミュレーション。predev で管理画面をビルド）
-VITE_ORDER_API_URL=http://127.0.0.1:8787 npm run build && npm run preview
-```
-
-管理画面は `http://127.0.0.1:8787/admin/` です。Access を設定していないので `ADMIN_TOKEN` を入力します（`npm run dev` の Vite 開発サーバーの `/TypeFab/admin/` からも、`.dev.vars` の `ADMIN_ALLOWED_ORIGINS` に含まれるオリジンなら同じ Worker を呼べます）。Stripeのテストモードでは `stripe listen --forward-to 127.0.0.1:8787/api/stripe/webhook` でWebhookを転送します。`.dev.vars` の `STRIPE_API_BASE` / `MAIL_API_BASE` でStripe API・Resend API の向き先を差し替えられるため、モックサーバーでも注文→決済→通知→領収書の流れを確認できます。`MAIL_API_KEY` を空にすると送信をスキップします。保持期限の削除は `curl -X POST -H "Authorization: Bearer <ADMIN_TOKEN>" -d '{"dryRun":true}' http://127.0.0.1:8787/api/admin/maintenance/purge` で試せます。秘密情報（`.env`、`worker/.dev.vars`）はコミットしません。
+フロントエンドはビルド時に `VITE_ORDER_API_URL`（WorkerのURL、末尾スラッシュなし）を埋め込みます。GitHubリポジトリの **Settings → Secrets and variables → Actions → Variables** に `ORDER_API_URL` を追加すると、`.github/workflows/pages.yml` がそれをビルドに渡します。未設定なら注文ページは概算のみになります。ローカルの `npm run dev` は `.env.development` でローカル Worker を指します。ローカルで本番ビルドと同じ URL を使いたいときは `.env.example` を `.env` にコピーして値を入れます。
 
 ### 本番環境の構築手順（まとめ）
 
-1. 上記のD1・R2・Stripe・Resend・Secretsを設定し、`SITE_URL` と `ALLOWED_ORIGINS` を公開サイトに合わせてWorkerをデプロイする。既存のD1には `migrations/0002_privacy_mail_receipt.sql` を適用する。
+1. 上記のD1・R2・Stripe・Resend・Secretsを設定し、`APP_ENV = "production"`、`SITE_URL`、`ALLOWED_ORIGINS` を公開サイトに合わせてWorkerをデプロイする。既存のD1には `npm run db:migrate:remote` を適用する。
 2. Stripeダッシュボードで本番のWebhookを登録し、署名シークレットをSecretに設定する。領収書メール（Successful payments）を有効にする。
-3. Cloudflare Access のアプリケーション（`/admin`・`/api/admin`）を作り、`ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` を設定して再デプロイする。
+3. Cloudflare Access のアプリケーション（`/admin`・`/api/admin`）を作り、`ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` を設定して再デプロイする。これまで本番で `ADMIN_TOKEN` を使っていた場合、`APP_ENV = "production"` では使えなくなるので、Access の設定を先に済ませる。
 4. GitHubのリポジトリ変数 `ORDER_API_URL` にWorkerのURLを設定し、`main` へpushしてPagesを再ビルドする。
 5. `/order/` でテスト注文（Stripeテストカード）→ 購入者・管理者へのメール到着 → 注文状況ページの領収書リンク → `https://<worker>/admin/`（Access ログイン）で PAID の表示 → 詳細で配送先・通知状況 → SVGダウンロード → 状態変更 → 追跡番号入力 → COMPLETED 後に詳細で個人情報が消えることを確認する。
 
