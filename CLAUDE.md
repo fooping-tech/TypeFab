@@ -40,7 +40,7 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | `admin/index.html` / `vite.admin.config.js` | 注文管理画面。`npm run build:admin` で `worker/admin-dist` に別ビルドし、Worker の Static Assets として `/admin/` で配信（GitHub Pages には含めない） |
 | `src/main.js` | 編集UI全体（ツールバー、キャンバス操作、プロパティ、Undo/Redo、自動保存、「このデザインを加工注文する」） |
 | `src/landing.js` / `src/landing.css` / `src/landing-glyphs.js` | 紹介ページ。`landing-glyphs.js` は `scripts/landing-glyphs.mjs` が同梱フォントと `geometry.js` から生成 |
-| `src/pricing.js` / `src/svganalyze.js` | 加工注文の料金カタログ・状態遷移、SVGの寸法・カット長・検査・サニタイズ（フロントと `worker/` で共用） |
+| `src/pricing.js` / `src/svganalyze.js` / `src/cutpiece.js` | 加工注文の料金カタログ（材料は黒クラフトペーパーのみ）・状態遷移・サイズ規則（SVG は A4 横の用紙 `CATALOG.sheet`、切り抜き後の紙片は長形3号封筒 `CATALOG.envelope`、どちらも周囲 10 mm マージン）、SVGの寸法・カット長・検査・サニタイズ・用紙配置（`analysis.layout`）と紙片（`analysis.piece`）、切断線から紙片を求める幾何（フロントと `worker/` で共用） |
 | `src/order.js` / `src/admin.js` / `src/order.css` / `src/privacy.js` | 加工注文ページ（個人情報はブラウザ保存なし、領収書リンク）、注文管理ページ（Access／トークン、一覧は個人情報なし・詳細で配送先、通知再送、保持期限削除）、プライバシーポリシー |
 | `worker/` | Cloudflare Workers（D1・R2・Stripe Checkout・Webhook・Resend メール・Cloudflare Access JWT 検証・Cron の保持期限削除）。`src/index.js` が環境変数→設定（`configFromEnv`）と設定検証（`validateConfig`: development で `sk_live_` 拒否、production で `MAIL_MODE=console` 拒否）、`src/app.js` 本体、`src/access.js`、`src/mail.js`、`src/stripe.js`、`src/store.js`、`schema.sql`、`migrations/`、`.dev.vars.example`（ローカル設定の雛形）。`npm test` はルートから `worker/src` を直接テストする |
 | `scripts/dev.mjs` / `.env.development` | `npm run dev` の一括起動（Vite + `wrangler dev`）と、開発サーバーだけが読む `VITE_ORDER_API_URL=http://127.0.0.1:8787` |

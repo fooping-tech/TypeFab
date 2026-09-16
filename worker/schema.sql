@@ -1,7 +1,8 @@
 -- TypeFab order API (Cloudflare D1). Apply with:
 --   npx wrangler d1 execute typefab-orders --file=schema.sql [--local | --remote]
--- Databases created before 2026-09-16 need migrations/0002_privacy_mail_receipt.sql
--- instead (it adds the columns and table introduced for issues #8/#9/#10).
+-- Existing databases: apply the migrations in order instead of this file.
+--   before 2026-09-16: migrations/0002_privacy_mail_receipt.sql (issues #8/#9/#10)
+--   before 2026-09-17: migrations/0003_piece_size.sql (piece_width_mm / piece_height_mm)
 CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
   status TEXT NOT NULL,
@@ -23,6 +24,9 @@ CREATE TABLE IF NOT EXISTS orders (
   svg_bytes INTEGER,
   width_mm REAL NOT NULL,
   height_mm REAL NOT NULL,
+  -- Finished piece after cutting (must fit the envelope); NULL for old orders.
+  piece_width_mm REAL,
+  piece_height_mm REAL,
   path_count INTEGER,
   cut_length_mm REAL,
   estimated_processing_minutes REAL,

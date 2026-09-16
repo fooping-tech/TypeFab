@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { quote, CATALOG, shipByDate, shippingRule, publicCatalog, TRANSITIONS, ORDER_STATUSES } from "../src/pricing.js";
+import { quote, CATALOG, shipByDate, shippingRule, publicCatalog, TRANSITIONS, ORDER_STATUSES, fitsWithin } from "../src/pricing.js";
 
 const base = { material: "kraft-black", thicknessMm: 0.3, quantity: 1, deliveryType: "NORMAL", widthMm: 82.3, heightMm: 142, cutLengthMm: 3428, pathCount: 12 };
 
@@ -64,19 +64,42 @@ test("materials, thicknesses, size limits and delivery types are validated", () 
   assert.equal(q.thicknessMm, 0.3);
 });
 
-test("size limit: a 長形3号 envelope minus a 10 mm margin (215 × 100 mm) in either orientation", () => {
-  assert.deepEqual(CATALOG.sheet, { name: "長形3号封筒", widthMm: 120, heightMm: 235, marginMm: 10 });
-  assert.equal(CATALOG.limits.maxWidthMm, CATALOG.sheet.heightMm - 2 * CATALOG.sheet.marginMm);
-  assert.equal(CATALOG.limits.maxHeightMm, CATALOG.sheet.widthMm - 2 * CATALOG.sheet.marginMm);
-  assert.ok(quote({ ...base, widthMm: 215, heightMm: 100 }).ok, "exactly the limit fits");
+test("size rules: the SVG must fit the A4 landscape sheet, the finished piece the 長形3号 envelope (10 mm margins, either orientation)", () => {
+  assert.deepEqual(CATALOG.sheet, { name: "A4 横", widthMm: 297, heightMm: 210, marginMm: 10 });
+  assert.deepEqual(CATALOG.envelope, { name: "長形3号封筒", widthMm: 120, heightMm: 235, marginMm: 10 });
+  assert.equal(CATALOG.limits.sheet.maxWidthMm, CATALOG.sheet.widthMm - 2 * CATALOG.sheet.marginMm);
+  assert.equal(CATALOG.limits.sheet.maxHeightMm, CATALOG.sheet.heightMm - 2 * CATALOG.sheet.marginMm);
+  assert.equal(CATALOG.limits.piece.maxWidthMm, CATALOG.envelope.heightMm - 2 * CATALOG.envelope.marginMm);
+  assert.equal(CATALOG.limits.piece.maxHeightMm, CATALOG.envelope.widthMm - 2 * CATALOG.envelope.marginMm);
+  assert.ok(fitsWithin(100, 215, CATALOG.limits.piece) && !fitsWithin(101, 101, CATALOG.limits.piece));
+  // A TypeFab export: the whole work area is the SVG, the bookmark outline is the piece.
+  const typical = quote({ ...base, widthMm: 240, heightMm: 160, pieceWidthMm: 50, pieceHeightMm: 140 });
+  assert.ok(typical.ok, typical.errors.join());
+  assert.deepEqual([typical.pieceWidthMm, typical.pieceHeightMm], [50, 140]);
+  assert.equal(typical.shippingLabel, "コンパクト便", "shipping is judged on the piece, not the sheet");
+  assert.equal(typical.materialFee, Math.round((240 * 160) / 100 * 0.3), "material is the sheet area consumed");
+  // Without a cut analysis the piece defaults to the document.
+  assert.ok(quote({ ...base, widthMm: 215, heightMm: 100 }).ok, "exactly the envelope limit fits");
   assert.ok(quote({ ...base, widthMm: 100, heightMm: 215 }).ok, "portrait fits");
   assert.ok(quote({ ...base, widthMm: 82.3, heightMm: 142 }).ok, "a bookmark fits");
   const wide = quote({ ...base, widthMm: 215.1, heightMm: 100 });
   assert.equal(wide.ok, false);
-  assert.match(wide.errors[0], /最大 215 × 100 mm、長形3号封筒（120 × 235 mm）から周囲 10 mm のマージン/);
-  assert.equal(quote({ ...base, widthMm: 101, heightMm: 101 }).ok, false, "101 × 101 does not fit in either orientation");
-  assert.equal(quote({ ...base, widthMm: 120, heightMm: 235 }).ok, false, "the whole envelope is too big");
-  assert.equal(quote({ ...base, widthMm: 190, heightMm: 277 }).ok, false, "the former A4-based limit no longer applies");
+  assert.match(wide.errors[0], /切り抜き後のサイズが封筒に収まりません（215\.1 × 100\.0 mm。最大 215 × 100 mm、長形3号封筒（120 × 235 mm）から周囲 10 mm のマージン/);
+  assert.equal(quote({ ...base, widthMm: 101, heightMm: 101 }).ok, false, "101 × 101 does not fit the envelope in either orientation");
+  // The sheet rule is about the SVG itself.
+  const big = quote({ ...base, widthMm: 277, heightMm: 190, pieceWidthMm: 50, pieceHeightMm: 140 });
+  assert.ok(big.ok, "a full A4-minus-margin SVG with a small piece is fine");
+  const sheet = quote({ ...base, widthMm: 278, heightMm: 100, pieceWidthMm: 50, pieceHeightMm: 140 });
+  assert.equal(sheet.ok, false);
+  assert.match(sheet.errors[0], /SVGが用紙に収まりません（278\.0 × 100\.0 mm。最大 277 × 190 mm、A4 横（297 × 210 mm）から周囲 10 mm のマージン/);
+  assert.ok(quote({ ...base, widthMm: 190, heightMm: 277, pieceWidthMm: 50, pieceHeightMm: 140 }).ok, "a portrait SVG is laid out rotated");
+  assert.equal(quote({ ...base, widthMm: 297, heightMm: 210, pieceWidthMm: 50, pieceHeightMm: 140 }).ok, false, "a full A4 SVG leaves no margin");
+  // Both rules fail together.
+  const both = quote({ ...base, widthMm: 300, heightMm: 200, pieceWidthMm: 300, pieceHeightMm: 200 });
+  assert.equal(both.errors.length, 2);
+  assert.match(both.errors[1], /封筒に収まりません/);
+  assert.equal(quote({ ...base, widthMm: 100, heightMm: 100, pieceWidthMm: 0, pieceHeightMm: 10 }).ok, false, "a degenerate piece is rejected");
+  assert.match(quote({ ...base, widthMm: 100, heightMm: 100, pieceWidthMm: 3, pieceHeightMm: 3 }).errors[0], /切り抜き後のサイズが小さすぎます/);
 });
 
 test("shipping rule: compact for small boards and up to 3 pieces, parcel otherwise", () => {
@@ -101,8 +124,9 @@ test("ship-by date adds the configured lead time", () => {
 test("public catalogue is JSON-serialisable and statuses/transitions are consistent", () => {
   const p = JSON.parse(JSON.stringify(publicCatalog()));
   assert.equal(p.materials.length, 1);
-  assert.equal(p.limits.maxWidthMm, 215);
-  assert.equal(p.sheet.name, "長形3号封筒");
+  assert.deepEqual([p.limits.sheet.maxWidthMm, p.limits.sheet.maxHeightMm, p.limits.piece.maxWidthMm, p.limits.piece.maxHeightMm], [277, 190, 215, 100]);
+  assert.equal(p.sheet.name, "A4 横");
+  assert.equal(p.envelope.name, "長形3号封筒");
   assert.equal(p.bulkThreshold, 10);
   for (const [from, tos] of Object.entries(TRANSITIONS)) {
     assert.ok(ORDER_STATUSES.includes(from));

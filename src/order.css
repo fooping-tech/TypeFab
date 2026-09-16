@@ -337,6 +337,23 @@ main.page {
   font-size: 18px;
   font-variant-numeric: tabular-nums;
 }
+/* Sheet layout: the SVG on the A4 landscape sheet, the piece in the envelope */
+.layout {
+  margin: 12px 0 0;
+  padding: 0;
+}
+.layout svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  background: #f0f3f6;
+}
+.layout figcaption {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
 /* Finished-look mock-ups (issue #7) */
 .mockup {
   margin-top: 18px;

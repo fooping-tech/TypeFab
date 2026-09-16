@@ -4,6 +4,8 @@
 // plain XML reader from svgimport.js). Sizes are in millimetres.
 import { svgShapes, parseXML, fromDOM, lengthMM } from "./svgimport.js";
 import { pathContours } from "./path.js";
+import { CATALOG, fitsWithin, sizeLimitText } from "./pricing.js";
+import { cutPiece } from "./cutpiece.js";
 
 const PHYSICAL_UNITS = /^\s*[-+]?(?:\d*\.\d+|\d+\.?)(?:e[-+]?\d+)?\s*(mm|cm|in|pt|pc|q)\s*$/i;
 const NUMBER = /^\s*[-+]?(?:\d*\.\d+|\d+\.?)(?:e[-+]?\d+)?\s*(px)?\s*$/i;
@@ -180,14 +182,28 @@ const segmentLength = (ps) =>
   ps.slice(1).reduce((n, p, i) => n + Math.hypot(p.x - ps[i].x, p.y - ps[i].y), 0);
 const same = (a, b) => Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6;
 
+// Where the document goes on the material sheet: top-left inside the
+// margin, turned 90° only when it fits no other way. Null when it does not
+// fit at all.
+export function sheetLayout(size, sheet, limit) {
+  const { widthMm: w, heightMm: h } = size;
+  const upright = w <= limit.maxWidthMm && h <= limit.maxHeightMm;
+  const rotated = !upright && h <= limit.maxWidthMm && w <= limit.maxHeightMm;
+  if (!upright && !rotated) return null;
+  return { sheetWidthMm: sheet.widthMm, sheetHeightMm: sheet.heightMm, marginMm: sheet.marginMm, rotated, x: sheet.marginMm, y: sheet.marginMm, widthMm: rotated ? h : w, heightMm: rotated ? w : h };
+}
 // Full analysis. `errors` block ordering; `warnings` are shown to the user.
+// `options.limits` / `options.sheet` default to the catalogue (pricing.js):
+// the document must fit the A4 landscape sheet, the finished piece the envelope.
 export function analyzeSVG(text, options = {}) {
   const bytes = new TextEncoder().encode(text).length;
-  // Defaults mirror CATALOG.limits in pricing.js (a 長形3号 envelope minus a 10 mm margin).
-  const limits = { maxWidthMm: 215, maxHeightMm: 100, sizeNote: "長形3号封筒（120 × 235 mm）から周囲 10 mm のマージンを除いた範囲", minSizeMm: 5, maxSvgBytes: 2 * 1024 * 1024, ...options.limits };
+  const limits = { ...CATALOG.limits, ...options.limits };
+  const sheet = options.sheet ?? CATALOG.sheet;
   const result = {
     bytes,
     size: null,
+    piece: null,
+    layout: null,
     pathCount: 0,
     subpathCount: 0,
     openPaths: 0,
@@ -223,9 +239,8 @@ export function analyzeSVG(text, options = {}) {
     );
   else {
     const { widthMm: w, heightMm: h } = result.size;
-    const fits = (w <= limits.maxWidthMm && h <= limits.maxHeightMm) || (h <= limits.maxWidthMm && w <= limits.maxHeightMm);
-    if (!fits) result.errors.push(`サイズが大きすぎます（${w.toFixed(1)} × ${h.toFixed(1)} mm。最大 ${limits.maxWidthMm} × ${limits.maxHeightMm} mm${limits.sizeNote ? `、${limits.sizeNote}` : ""}）。`);
-    if (w < limits.minSizeMm || h < limits.minSizeMm) result.errors.push(`サイズが小さすぎます（最小 ${limits.minSizeMm} mm）。`);
+    result.layout = sheetLayout(result.size, sheet, limits.sheet);
+    if (!result.layout) result.errors.push(`SVGが用紙に収まりません（${w.toFixed(1)} × ${h.toFixed(1)} mm。${sizeLimitText(limits.sheet)}）。`);
   }
   let shapes;
   try {
@@ -265,6 +280,17 @@ export function analyzeSVG(text, options = {}) {
   }
   result.cutLengthMm = Number(result.cutLengthMm.toFixed(2));
   if (!result.pathCount) result.errors.push("カットできる図形がありません（パス・長方形・円・楕円・線・折れ線・多角形）。");
+  // The finished piece (the outline enclosing every cut line, or the whole
+  // sheet) must fit the envelope. Judged on the piece, not the document.
+  if (result.pathCount && result.size?.known) {
+    const piece = cutPiece(shapes.shapes, result.size);
+    if (piece) {
+      result.piece = { widthMm: Number(piece.widthMm.toFixed(3)), heightMm: Number(piece.heightMm.toFixed(3)), sheet: piece.sheet, x: piece.box.x, y: piece.box.y, loopCount: piece.loops.length, openCount: piece.open.length };
+      const { widthMm: pw, heightMm: ph } = result.piece;
+      if (!fitsWithin(pw, ph, limits.piece)) result.errors.push(`切り抜き後のサイズが封筒に収まりません（${pw.toFixed(1)} × ${ph.toFixed(1)} mm。${sizeLimitText(limits.piece)}）。`);
+      if (pw < limits.minSizeMm || ph < limits.minSizeMm) result.errors.push(`切り抜き後のサイズが小さすぎます（最小 ${limits.minSizeMm} mm）。`);
+    }
+  }
   if (result.hasText) result.warnings.push(`文字（text）要素 ${shapes.skipped["文字"]} 個はカットされません。アウトライン化してください。`);
   for (const [name, n] of Object.entries(shapes.skipped)) if (name !== "文字") result.warnings.push(`${name} ${n} 個は対応していないため無視されます。`);
   if (shapes.invalid) result.warnings.push(`読み取れない要素が ${shapes.invalid} 個あります。`);
@@ -276,6 +302,7 @@ export function analyzeSVG(text, options = {}) {
 export function summaryLines(a) {
   const lines = [];
   if (a.size?.known) lines.push(`✓ 実寸 ${a.size.widthMm.toFixed(1)} × ${a.size.heightMm.toFixed(1)} mm`);
+  if (a.piece) lines.push(`✓ 切り抜き後 ${a.piece.widthMm.toFixed(1)} × ${a.piece.heightMm.toFixed(1)} mm`);
   if (a.size?.viewBox) lines.push("✓ viewBox 正常");
   if (a.pathCount && !Object.keys(a.unsupported).length) lines.push("✓ カット図形のみ");
   return lines;

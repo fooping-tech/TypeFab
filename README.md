@@ -268,7 +268,10 @@ TypeFabで作ったSVG、または手元のSVGをそのままレーザー加工�
 ### 使い方（注文する側）
 
 1. エディタのヘッダーにある「このデザインを加工注文する」を押すと、書き出しと同じ検査（加工エリア外のカット線、ブリッジで消えた輪郭）を通したSVGを注文ページ（`/order/`）に渡します。保存と再アップロードは不要です。外部のSVGは注文ページにドロップ／選択して読み込めます。
-2. 注文ページはSVGを解析し、実寸（mm）、viewBox、パスのみか、総カット長、パス数、開いた線（open path）、重複線の可能性、文字（text）や未対応要素の有無を表示します。**注文できるデザインの最大サイズは 215 × 100 mm**（長形3号封筒 120 × 235 mm から周囲 10 mm のマージンを除いた範囲。縦横どちらの向きでも可。`CATALOG.sheet` と `CATALOG.limits`）で、超えるSVGはエラーになり注文できません。最小は 5 mm です。`script`・`foreignObject`・`iframe`・イベント属性・外部URL・外部エンティティを含むSVGは受け付けません。プレビューはこれらを取り除いたSVGを `<img>` で表示します。
+2. 注文ページはSVGを解析し、実寸（mm）、viewBox、パスのみか、総カット長、パス数、開いた線（open path）、重複線の可能性、文字（text）や未対応要素の有無を表示します。サイズの判定は2段階です（`src/pricing.js` の `CATALOG.sheet` / `CATALOG.envelope` / `CATALOG.limits`、解析は `src/svganalyze.js`、紙片の判定は `src/cutpiece.js`）。
+   - **用紙**: SVG（実寸）を **A4 横（297 × 210 mm）の用紙に周囲 10 mm のマージンを取って配置**します。SVG が 277 × 190 mm に収まらない（縦横どちらでも）と注文できません。縦長の SVG は 90° 回転して配置します。
+   - **封筒**: **切り抜き後の紙片**（すべての切断線を囲む閉じた外形があればその外形。なければ SVG 全体を1枚の紙片とみなす。しおりの完成イメージと同じ規則）が **長形3号封筒（120 × 235 mm）に周囲 10 mm の余裕を持って収まる**（215 × 100 mm 以内、縦横どちらでも）ことが条件です。TypeFab の書き出しは加工エリア全体が SVG になるため、しおりの外形だけを封筒と比べます。最小は 5 mm です。
+   - 注文ページは用紙への配置図（SVG の枠と紙片）と封筒との比較図を表示し、Worker も同じ規則で再検査します。送料区分は紙片のサイズで決めます。`script`・`foreignObject`・`iframe`・イベント属性・外部URL・外部エンティティを含むSVGは受け付けません。プレビューはこれらを取り除いたSVGを `<img>` で表示します。
 3. TypeFab内部では **1 SVGユーザー単位 = 1 mm** とし、書き出すSVGには `width="240mm" height="160mm" viewBox="0 0 240 160"` のように物理サイズを明示します。width/heightが px や単位なしで実寸が決まらないSVGは「実寸の幅 (mm)」の入力を求め、確定するまで注文できません。
 4. 材料は**黒クラフトペーパー（約 0.3 mm）のみ**です（`CATALOG.materials`。複数材料・厚さや「要相談」材料の仕組みは残しているので、追加はカタログの編集だけで済みます）。数量、通常／特急を選ぶと概算を表示します。料金は `src/pricing.js` の設定値（仮）で `基本料金 + 材料費 + 加工費 + 数量加算`、特急は加工料金×2（送料は2倍にしない）です。**最終金額はWorker側で必ず再計算**し、ブラウザから送られた金額は使いません。
 5. 数量が閾値（初期値10個、`BULK_THRESHOLD`）以上は事前問い合わせとし、「大量注文について問い合わせる」（`CONTACT_URL`）へ案内します。
@@ -403,7 +406,7 @@ npm run dev
 
 これで Vite（http://127.0.0.1:5173/TypeFab/ ）と Worker（http://127.0.0.1:8787 ）が起動し、注文ページと管理画面はローカルの Worker を呼びます（`.env.development` の `VITE_ORDER_API_URL=http://127.0.0.1:8787` を Vite が読みます。`vite build` は読みません）。`http://127.0.0.1:8787/api/health` が `{"ok":true,"env":"development",…}` を返せば準備完了です。
 
-- **D1 / R2**: `wrangler dev` はローカルのエミュレーションを使い、データは `worker/.wrangler/state/` に残ります。本番の D1・R2 には接続しません。スキーマの再適用は `npm run db:local`、既存 DB へのマイグレーションは `cd worker && npm run db:migrate:local` です。
+- **D1 / R2**: `wrangler dev` はローカルのエミュレーションを使い、データは `worker/.wrangler/state/` に残ります。本番の D1・R2 には接続しません。スキーマの再適用は `npm run db:local`、既存 DB へのマイグレーション（最新は `worker/migrations/0003_piece_size.sql`）は `npm run db:migrate:local` です。
 - **管理画面**: `http://127.0.0.1:8787/admin/` を開き、`.dev.vars` の `ADMIN_TOKEN`（例では `local-development`）を入力します。Vite 側の `http://127.0.0.1:5173/TypeFab/admin/` からも同じ Worker を呼べます（`.dev.vars` の `ADMIN_ALLOWED_ORIGINS`）。
 - **メール**: `.dev.vars.example` は `MAIL_MODE=console` です。決済完了時の購入者・管理者宛メールは Resend に送らず、`[worker]` のログに `[mail:console] customer_paid for order TF-…` のように本文ごと出力され、管理画面では送信済みと表示されます。実際に送るときだけ `MAIL_MODE=resend` と `MAIL_API_KEY` を設定します。
 - **Stripe**: 必ず Test Mode の秘密鍵（`sk_test_…`）を使います。`sk_live_` を書くと `npm run dev` は Worker を起動せず、`npx wrangler dev` を直接起動した場合も API がすべて 500（設定エラー）になります。Checkout はテストカード（4242 4242 4242 4242）で完了できます。
@@ -431,7 +434,7 @@ npx wrangler login
 
 ルートの `npm ci` は Worker も使う `src/` のモジュールのため、`npm --prefix worker ci` は wrangler のためです。以降の `npx wrangler …` は `worker/` で実行します。
 
-1. **D1**: `npx wrangler d1 create typefab-orders` を実行し、表示された `database_id` を `worker/wrangler.toml` に書きます。スキーマを適用します: `npm run db:remote`（ルートからも `npm run db:remote`）。既存 DB は `npm run db:migrate:remote`（`migrations/0002_privacy_mail_receipt.sql`）を適用します。
+1. **D1**: `npx wrangler d1 create typefab-orders` を実行し、表示された `database_id` を `worker/wrangler.toml` に書きます。スキーマを適用します: `npm run db:remote`（ルートからも `npm run db:remote`）。既存 DB は `npm run db:migrate:remote`（最新のマイグレーション `migrations/0003_piece_size.sql`）を適用します。2026-09-16 より前に作った DB は先に `npx wrangler d1 execute typefab-orders --remote --file=migrations/0002_privacy_mail_receipt.sql` を適用します。
 2. **R2**: `npx wrangler r2 bucket create typefab-order-svgs`（名前を変えた場合は `wrangler.toml` の `bucket_name` も変更）。
 3. **Stripe**: ダッシュボードで本番の秘密鍵（`sk_live_…`）を取得します。Webhookエンドポイントに `https://<worker>.workers.dev/api/stripe/webhook` を登録し、イベント `checkout.session.completed`、`checkout.session.async_payment_succeeded`、`checkout.session.async_payment_failed`、`checkout.session.expired` を選び、署名シークレット（`whsec_…`）を控えます。
 4. **Stripe の領収書メール**: ダッシュボードの Settings → Emails で「Successful payments」を有効にします（Issue #10）。
@@ -452,7 +455,7 @@ npx wrangler login
 
 ### 本番環境の構築手順（まとめ）
 
-1. 上記のD1・R2・Stripe・Resend・Secretsを設定し、`APP_ENV = "production"`、`SITE_URL`、`ALLOWED_ORIGINS` を公開サイトに合わせてWorkerをデプロイする。既存のD1には `npm run db:migrate:remote` を適用する。
+1. 上記のD1・R2・Stripe・Resend・Secretsを設定し、`APP_ENV = "production"`、`SITE_URL`、`ALLOWED_ORIGINS` を公開サイトに合わせてWorkerをデプロイする。既存のD1には `npm run db:migrate:remote`（`migrations/0003_piece_size.sql`。それより古い DB は先に 0002）を適用してからデプロイする。
 2. Stripeダッシュボードで本番のWebhookを登録し、署名シークレットをSecretに設定する。領収書メール（Successful payments）を有効にする。
 3. Cloudflare Access のアプリケーション（`/admin`・`/api/admin`）を作り、`ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` を設定して再デプロイする。これまで本番で `ADMIN_TOKEN` を使っていた場合、`APP_ENV = "production"` では使えなくなるので、Access の設定を先に済ませる。
 4. GitHubのリポジトリ変数 `ORDER_API_URL` にWorkerのURLを設定し、`main` へpushしてPagesを再ビルドする。

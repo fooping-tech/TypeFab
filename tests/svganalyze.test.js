@@ -116,9 +116,48 @@ test("malformed, oversized and too-large files are rejected with messages", () =
   assert.match(bad.errors[0], /SVGとして読み込めません/);
   assert.equal(analyzeSVG("hello").ok, false);
   const big = analyzeSVG(svg('width="400mm" height="100mm"', rect));
-  assert.match(big.errors[0], /大きすぎます/);
-  assert.ok(analyzeSVG(svg('width="100mm" height="215mm"', rect)).ok, "rotated fit (default limit: 長形3号 envelope minus 10 mm)");
-  assert.match(analyzeSVG(svg('width="100mm" height="250mm"', rect)).errors[0], /最大 215 × 100 mm、長形3号封筒/);
+  assert.match(big.errors[0], /SVGが用紙に収まりません（400\.0 × 100\.0 mm。最大 277 × 190 mm、A4 横/);
+  assert.equal(big.layout, null);
+  assert.ok(analyzeSVG(svg('width="100mm" height="215mm"', rect)).ok, "a portrait SVG is laid out rotated; the piece (whole sheet, no outline) fits the envelope");
+  assert.ok(analyzeSVG(svg('width="100mm" height="250mm"', rect)).ok, "a small closed shape on a large sheet is a small piece");
+  assert.match(analyzeSVG(svg('width="100mm" height="250mm" viewBox="0 0 100 250"', '<rect width="100" height="250"/>')).errors[0], /切り抜き後のサイズが封筒に収まりません（100\.0 × 250\.0 mm。最大 215 × 100 mm、長形3号封筒/);
   const huge = analyzeSVG(svg('width="10mm" height="10mm"', rect), { limits: { maxSvgBytes: 100 } });
   assert.match(huge.errors[0], /ファイルが大きすぎます/);
+});
+
+test("sheet layout and finished piece: the SVG goes on the A4 landscape sheet, the envelope check uses the cut outline", () => {
+  const outline = '<rect x="20" y="10" width="50" height="140"/><circle cx="45" cy="40" r="8"/>';
+  const a = analyzeSVG(svg('width="240mm" height="160mm" viewBox="0 0 240 160"', outline));
+  assert.ok(a.ok, a.errors.join());
+  assert.deepEqual(a.layout, { sheetWidthMm: 297, sheetHeightMm: 210, marginMm: 10, rotated: false, x: 10, y: 10, widthMm: 240, heightMm: 160 });
+  assert.deepEqual(a.piece, { widthMm: 50, heightMm: 140, sheet: false, x: 20, y: 10, loopCount: 2, openCount: 0 });
+  // Portrait work area: laid out rotated, same piece.
+  const p = analyzeSVG(svg('width="160mm" height="240mm" viewBox="0 0 160 240"', '<rect x="10" y="20" width="50" height="140"/>'));
+  assert.ok(p.ok, p.errors.join());
+  assert.equal(p.layout.rotated, true);
+  assert.deepEqual([p.layout.widthMm, p.layout.heightMm], [240, 160]);
+  assert.deepEqual([p.piece.widthMm, p.piece.heightMm], [50, 140]);
+  // The work area fits the sheet but the outline does not fit the envelope.
+  const tall = analyzeSVG(svg('width="240mm" height="160mm" viewBox="0 0 240 160"', '<rect x="10" y="10" width="220" height="120"/>'));
+  assert.equal(tall.ok, false);
+  assert.match(tall.errors[0], /切り抜き後のサイズが封筒に収まりません（220\.0 × 120\.0 mm/);
+  assert.ok(tall.layout, "the sheet layout is still known");
+  // No enclosing outline: the whole sheet is the piece.
+  const holes = analyzeSVG(svg('width="240mm" height="160mm" viewBox="0 0 240 160"', '<circle cx="40" cy="40" r="10"/><circle cx="200" cy="120" r="10"/>'));
+  assert.equal(holes.ok, false);
+  assert.equal(holes.piece.sheet, true);
+  assert.deepEqual([holes.piece.widthMm, holes.piece.heightMm], [240, 160]);
+  const small = analyzeSVG(svg('width="100mm" height="80mm" viewBox="0 0 100 80"', '<circle cx="40" cy="40" r="10"/><circle cx="60" cy="40" r="10"/>'));
+  assert.ok(small.ok, small.errors.join());
+  assert.equal(small.piece.sheet, true);
+  // Sheet too big even though the piece is fine; both messages are separate.
+  const big = analyzeSVG(svg('width="300mm" height="200mm" viewBox="0 0 300 200"', outline));
+  assert.equal(big.layout, null);
+  assert.deepEqual([big.piece.widthMm, big.piece.heightMm], [50, 140]);
+  assert.equal(big.errors.length, 1);
+  assert.match(big.errors[0], /SVGが用紙に収まりません/);
+  // Custom limits and sheet flow through.
+  const custom = analyzeSVG(svg('width="240mm" height="160mm" viewBox="0 0 240 160"', outline), { limits: { piece: { maxWidthMm: 120, maxHeightMm: 40, note: "小さい封筒" } }, sheet: { name: "A4", widthMm: 297, heightMm: 210, marginMm: 5 } });
+  assert.match(custom.errors[0], /最大 120 × 40 mm、小さい封筒/);
+  assert.equal(custom.layout.marginMm, 5);
 });

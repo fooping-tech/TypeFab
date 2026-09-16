@@ -660,3 +660,34 @@ test("MAIL_MODE=console (#11): mails are printed, not sent, and recorded as sent
   const h = await (await prod.call("/api/health")).json();
   assert.deepEqual([h.mailMode, h.mailConfigured], ["resend", false]);
 });
+
+test("size rules (sheet vs envelope): a TypeFab work area larger than the envelope is accepted when the cut outline fits, and the piece size is stored", async () => {
+  const s = setup();
+  const area = (body) => `<svg xmlns="http://www.w3.org/2000/svg" width="240mm" height="160mm" viewBox="0 0 240 160">${body}</svg>`;
+  const ok = await s.call("/api/orders", { method: "POST", body: { ...base, svg: area('<rect x="20" y="10" width="50" height="140"/><circle cx="45" cy="40" r="8"/>') } });
+  const okText = await ok.text();
+  assert.equal(ok.status, 201, okText);
+  const out = JSON.parse(okText);
+  assert.deepEqual([out.order.widthMm, out.order.heightMm, out.order.pieceWidthMm, out.order.pieceHeightMm], [240, 160, 50, 140]);
+  assert.equal(out.quote.shippingLabel, "コンパクト便");
+  const stored = await s.store.getOrder(out.orderId);
+  assert.deepEqual([stored.pieceWidthMm, stored.pieceHeightMm], [50, 140]);
+  const cfg = await (await s.call("/api/config")).json();
+  assert.deepEqual([cfg.catalog.sheet.name, cfg.catalog.envelope.name, cfg.catalog.limits.piece.maxWidthMm], ["A4 横", "長形3号封筒", 215]);
+  // The same work area with an outline that does not fit the envelope is refused with the piece size.
+  const bad = await s.call("/api/orders", { method: "POST", body: { ...base, svg: area('<rect x="10" y="10" width="220" height="120"/>') } });
+  assert.equal(bad.status, 400);
+  const body = await bad.json();
+  assert.match(body.details[0], /切り抜き後のサイズが封筒に収まりません（220\.0 × 120\.0 mm/);
+  // A work area that does not fit the sheet is refused even with a small outline.
+  const sheet = await s.call("/api/orders", { method: "POST", body: { ...base, svg: '<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="200mm" viewBox="0 0 300 200"><rect x="20" y="10" width="50" height="140"/></svg>' } });
+  assert.equal(sheet.status, 400);
+  assert.match((await sheet.json()).details[0], /SVGが用紙に収まりません/);
+  // The customer mail mentions the piece when it differs from the SVG.
+  const paid = await s.webhook(paidEvent(out.orderId, "cs_test_1", out.quote.totalPrice));
+  assert.equal((await paid.json()).notifications.customer_paid.status, "sent");
+  assert.match(s.mailCalls[0].body.text, /サイズ: 240\.0 × 160\.0 mm（切り抜き後 50\.0 × 140\.0 mm）/);
+  // Admin list and detail carry the piece size.
+  const list = await (await s.admin("/api/admin/orders")).json();
+  assert.deepEqual([list.orders[0].pieceWidthMm, list.orders[0].pieceHeightMm], [50, 140]);
+});

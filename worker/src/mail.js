@@ -15,10 +15,15 @@ const jpDateTime = (iso) => (iso ? new Intl.DateTimeFormat("ja-JP", { timeZone: 
 const materialName = (id) => CATALOG.materials.find((m) => m.id === id)?.name ?? id;
 const deliveryLabel = (t) => (t === "EXPRESS" ? "特急" : "通常");
 
+// "（切り抜き後 50.0 × 140.0 mm）" when the finished piece differs from the SVG.
+const pieceNote = (o) =>
+  o.pieceWidthMm > 0 && o.pieceHeightMm > 0 && (Math.abs(o.pieceWidthMm - o.widthMm) > 0.05 || Math.abs(o.pieceHeightMm - o.heightMm) > 0.05)
+    ? `（切り抜き後 ${Number(o.pieceWidthMm).toFixed(1)} × ${Number(o.pieceHeightMm).toFixed(1)} mm）`
+    : "";
 export function orderSummaryLines(order) {
   return [
     `材料: ${materialName(order.material)} ${order.thicknessMm} mm`,
-    `サイズ: ${Number(order.widthMm).toFixed(1)} × ${Number(order.heightMm).toFixed(1)} mm`,
+    `サイズ: ${Number(order.widthMm).toFixed(1)} × ${Number(order.heightMm).toFixed(1)} mm${pieceNote(order)}`,
     `数量: ${order.quantity}`,
     `納期: ${deliveryLabel(order.deliveryType)}`,
     `ファイル: ${order.originalFileName ?? "design.svg"}`,

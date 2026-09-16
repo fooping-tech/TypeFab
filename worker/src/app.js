@@ -53,6 +53,8 @@ export const customerView = (o) => ({
   fileName: o.originalFileName,
   widthMm: o.widthMm,
   heightMm: o.heightMm,
+  pieceWidthMm: o.pieceWidthMm ?? null,
+  pieceHeightMm: o.pieceHeightMm ?? null,
   material: o.material,
   thicknessMm: o.thicknessMm,
   quantity: o.quantity,
@@ -67,7 +69,7 @@ export const customerView = (o) => ({
 });
 // Admin list view: what the order board needs, without contact details.
 const ADMIN_LIST_FIELDS = [
-  "id", "status", "createdAt", "updatedAt", "paidAt", "shipBy", "customerName", "originalFileName", "svgBytes", "widthMm", "heightMm",
+  "id", "status", "createdAt", "updatedAt", "paidAt", "shipBy", "customerName", "originalFileName", "svgBytes", "widthMm", "heightMm", "pieceWidthMm", "pieceHeightMm",
   "pathCount", "cutLengthMm", "estimatedProcessingMinutes", "material", "thicknessMm", "quantity", "deliveryType", "basePrice", "processingPrice",
   "shippingPrice", "totalPrice", "currency", "shippingTrackingNumber", "shippingCarrier", "notes", "personalDataDeletedAt",
 ];
@@ -163,14 +165,15 @@ export function createApp(deps) {
     if (svg.length > catalog.limits.maxSvgBytes) return error("SVGが大きすぎます。", 413);
     const fileName = clean(body.fileName, 120).replace(/[\\/:*?"<>|]/g, "_") || "design.svg";
     const confirmedWidth = Number(body.confirmedWidthMm);
-    let analysis = analyzeSVG(svg, { limits: catalog.limits });
+    const analyze = (text) => analyzeSVG(text, { limits: catalog.limits, sheet: catalog.sheet });
+    let analysis = analyze(svg);
     if (!analysis.ok && analysis.size && !analysis.size.known && confirmedWidth > 0) {
       try {
         svg = withPhysicalSize(svg, confirmedWidth);
       } catch (e) {
         return error(e.message);
       }
-      analysis = analyzeSVG(svg, { limits: catalog.limits });
+      analysis = analyze(svg);
     }
     if (!analysis.ok) return error("SVGに問題があります。", 400, { details: analysis.errors, analysis });
     const q = quote(
@@ -181,6 +184,8 @@ export function createApp(deps) {
         deliveryType: body.deliveryType,
         widthMm: analysis.size.widthMm,
         heightMm: analysis.size.heightMm,
+        pieceWidthMm: analysis.piece?.widthMm,
+        pieceHeightMm: analysis.piece?.heightMm,
         cutLengthMm: analysis.cutLengthMm,
         pathCount: analysis.pathCount,
       },
@@ -227,6 +232,8 @@ export function createApp(deps) {
       svgBytes: analysis.bytes,
       widthMm: analysis.size.widthMm,
       heightMm: analysis.size.heightMm,
+      pieceWidthMm: q.pieceWidthMm,
+      pieceHeightMm: q.pieceHeightMm,
       pathCount: analysis.pathCount,
       cutLengthMm: analysis.cutLengthMm,
       estimatedProcessingMinutes: q.estimatedProcessingMinutes,

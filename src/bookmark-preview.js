@@ -5,7 +5,14 @@
 // ratio between the book and the bookmark is exact at any display size.
 import { parseSVG, documentSize } from "./svganalyze.js";
 import { svgShapes } from "./svgimport.js";
-import { pathContours } from "./path.js";
+import { cutPiece, closeCutLoops, MAX_GAP_MM, MAX_BRIDGE_SPAN_MM } from "./cutpiece.js";
+export { closeCutLoops, MAX_GAP_MM, MAX_BRIDGE_SPAN_MM };
+
+const f = (v) => String(Number(Number(v).toFixed(3)));
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const PAPER = { fill: "#25221f", edge: "#7d7167", grain: "#4b443e", ghost: "#8b8178" };
+const BOOK = { cover: "#d8ccb4", spine: "#b9aa8c", pages: "#f3eee3", edge: "#a99a7c", text: "#6c5f4c" };
+const INK = "#4f5d6a";
 
 // Fixed bunko (A6) paperback and how far a bookmark shows above it. Both are
 // display constants for the first version, not order parameters.
@@ -18,142 +25,13 @@ export const BOOKMARK_THRESHOLDS = { maxWidthMm: 50, minHeightMm: 90, maxHeightM
 // (rulers, coins, business cards) to extend the view; `draw` picks the sketch.
 export const COMPARISON_REFERENCES = [{ id: "bunko", label: "文庫本", widthMm: BOOK_WIDTH_MM, heightMm: BOOK_HEIGHT_MM, draw: "book" }];
 
-// Cut lines interrupted by bridges: a gap this wide or narrower is closed along
-// the contour; a bridge's side (the short segment across the stroke between the
-// outer and inner gap) is joined when it scores better than closing the gap.
-export const MAX_GAP_MM = 6;
-export const MAX_BRIDGE_SPAN_MM = 10;
-
-const f = (v) => String(Number(Number(v).toFixed(3)));
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const same = (a, b) => Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6;
-const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-const PAPER = { fill: "#25221f", edge: "#7d7167", grain: "#4b443e", ghost: "#8b8178" };
-const BOOK = { cover: "#d8ccb4", spine: "#b9aa8c", pages: "#f3eee3", edge: "#a99a7c", text: "#6c5f4c" };
-const INK = "#4f5d6a";
-
-// ---- geometry ----------------------------------------------------------------
-
-// Joins open cut lines into closed loops. Each endpoint is paired with at
-// most one other endpoint: the gap left by a bridge is closed along the
-// contour, unless the segment across the stroke (the side of the bridge)
-// is clearly shorter — then the loop follows the real cut around the bridge
-// and the bridge stays as material in the fill.
-export function closeCutLoops(polylines) {
-  const loops = [],
-    open = [];
-  const ends = [];
-  polylines.forEach((pl, i) => {
-    const pts = dedupe(pl.points);
-    if (pts.length < 2) return;
-    if (pl.closed || same(pts[0], pts.at(-1))) {
-      if (pts.length >= 3) loops.push(same(pts[0], pts.at(-1)) ? pts : [...pts, { ...pts[0] }]);
-      return;
-    }
-    const tangent = (a, b) => {
-      const d = dist(a, b) || 1;
-      return { x: (a.x - b.x) / d, y: (a.y - b.y) / d };
-    };
-    const id = open.length;
-    open.push(pts);
-    ends.push({ poly: id, side: "start", p: pts[0], t: tangent(pts[0], pts[1]) });
-    ends.push({ poly: id, side: "end", p: pts.at(-1), t: tangent(pts.at(-1), pts.at(-2)) });
-  });
-  const pairs = [];
-  for (let i = 0; i < ends.length; i++)
-    for (let j = i + 1; j < ends.length; j++) {
-      const a = ends[i],
-        b = ends[j],
-        d = dist(a.p, b.p);
-      if (d > MAX_BRIDGE_SPAN_MM) continue;
-      const v = d > 1e-9 ? { x: (b.p.x - a.p.x) / d, y: (b.p.y - a.p.y) / d } : { x: 0, y: 0 };
-      const c = Math.max(Math.abs(a.t.x * v.x + a.t.y * v.y), Math.abs(b.t.x * v.x + b.t.y * v.y));
-      if (c > 0.5 && d > MAX_GAP_MM) continue;
-      pairs.push({ i, j, score: d * (1 + 4 * c) });
-    }
-  pairs.sort((p, q) => p.score - q.score || p.i - q.i || p.j - q.j);
-  const partner = new Array(ends.length).fill(-1);
-  for (const { i, j } of pairs) {
-    if (partner[i] >= 0 || partner[j] >= 0) continue;
-    partner[i] = j;
-    partner[j] = i;
-  }
-  const used = new Array(open.length).fill(false);
-  const chains = [];
-  for (let start = 0; start < open.length; start++) {
-    if (used[start]) continue;
-    used[start] = true;
-    const chain = [...open[start]];
-    let closed = false;
-    // Forward from this polyline's end, then backward from its start, so an
-    // open chain is still merged into one polyline.
-    let idx = 2 * start + 1;
-    for (;;) {
-      const to = partner[idx];
-      if (to < 0) break;
-      const e = ends[to];
-      if (e.poly === start) {
-        closed = true;
-        break;
-      }
-      if (used[e.poly]) break;
-      used[e.poly] = true;
-      chain.push(...(e.side === "start" ? open[e.poly] : [...open[e.poly]].reverse()));
-      idx = e.side === "start" ? 2 * e.poly + 1 : 2 * e.poly;
-    }
-    if (!closed) {
-      idx = 2 * start;
-      for (;;) {
-        const to = partner[idx];
-        if (to < 0) break;
-        const e = ends[to];
-        if (e.poly === start || used[e.poly]) break;
-        used[e.poly] = true;
-        chain.unshift(...(e.side === "end" ? open[e.poly] : [...open[e.poly]].reverse()));
-        idx = e.side === "end" ? 2 * e.poly : 2 * e.poly + 1;
-      }
-    }
-    if (closed && chain.length >= 3) loops.push([...chain, { ...chain[0] }]);
-    else chains.push(chain);
-  }
-  return { loops, open: chains };
-}
-function dedupe(points) {
-  const out = [];
-  for (const p of points) if (!out.length || !same(out.at(-1), p)) out.push({ x: p.x, y: p.y });
-  return out;
-}
-function boundsOf(lists) {
-  let x = Infinity,
-    y = Infinity,
-    x2 = -Infinity,
-    y2 = -Infinity;
-  for (const ps of lists)
-    for (const p of ps) {
-      x = Math.min(x, p.x);
-      y = Math.min(y, p.y);
-      x2 = Math.max(x2, p.x);
-      y2 = Math.max(y2, p.y);
-    }
-  return Number.isFinite(x) ? { x, y, w: x2 - x, h: y2 - y } : null;
-}
-function insidePolygon(p, c) {
-  let inside = false;
-  for (let i = 1; i < c.length; i++) {
-    const a = c[i - 1],
-      b = c[i];
-    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-}
 const pathOf = (lists, close) =>
   lists.map((ps) => `M${ps.map((p) => `${f(p.x)} ${f(p.y)}`).join("L")}${close ? "Z" : ""}`).join("");
 
-// Reads the finished piece out of an SVG: the outline enclosing every other
-// cut line when there is one (the rest is scrap), otherwise the whole sheet
-// (document size) with the cut lines as holes. Returns null when the physical
-// size is unknown or nothing can be cut. Coordinates are mm from the piece's
-// top-left corner.
+// Reads the finished piece out of an SVG (see cutPiece in cutpiece.js):
+// the outline enclosing every other cut line when there is one, otherwise
+// the whole sheet. Returns null when the physical size is unknown or nothing
+// can be cut. Path data is in mm from the piece's top-left corner.
 export function bookmarkPiece(svgText) {
   let root;
   try {
@@ -169,30 +47,10 @@ export function bookmarkPiece(svgText) {
   } catch {
     return null;
   }
-  const polylines = [];
-  for (const shape of shapes)
-    for (const sub of shape.path)
-      for (const points of pathContours([sub])) if (points.length >= 2) polylines.push({ points, closed: Boolean(sub.closed) });
-  if (!polylines.length) return null;
-  const { loops, open } = closeCutLoops(polylines);
-  const all = [...loops, ...open];
-  const box = boundsOf(all);
-  if (!box || !(box.w > 0 || box.h > 0)) return null;
-  // The enclosing outline: the loop whose polygon contains a point of every
-  // other cut line and whose box spans all of them.
-  let outer = null;
-  for (const loop of loops) {
-    const b = boundsOf([loop]);
-    if (Math.abs(b.w - box.w) > 1e-6 || Math.abs(b.h - box.h) > 1e-6) continue;
-    if (all.every((ps) => ps === loop || insidePolygon(ps[0], loop) || ps.every((p) => onLoop(p, loop)))) {
-      outer = loop;
-      break;
-    }
-  }
-  const sheet = !outer;
-  const origin = sheet ? { x: 0, y: 0 } : { x: box.x, y: box.y };
-  const widthMm = sheet ? size.widthMm : box.w;
-  const heightMm = sheet ? size.heightMm : box.h;
+  const piece = cutPiece(shapes, size);
+  if (!piece) return null;
+  const { widthMm, heightMm, sheet, loops, open } = piece;
+  const origin = sheet ? { x: 0, y: 0 } : { x: piece.box.x, y: piece.box.y };
   const shift = (ps) => ps.map((p) => ({ x: p.x - origin.x, y: p.y - origin.y }));
   const fillLoops = loops.map(shift);
   const fillD = (sheet ? `M0 0H${f(widthMm)}V${f(heightMm)}H0Z` : "") + pathOf(fillLoops, true);
@@ -208,18 +66,54 @@ export function bookmarkPiece(svgText) {
     lineD: pathOf(open.map(shift), false),
   };
 }
-function onLoop(p, loop) {
-  for (let i = 1; i < loop.length; i++) {
-    const a = loop[i - 1],
-      b = loop[i],
-      l = dist(a, b);
-    if (l < 1e-9) continue;
-    const t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / (l * l);
-    if (t < -1e-6 || t > 1 + 1e-6) continue;
-    const q = { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
-    if (dist(p, q) < 1e-3) return true;
-  }
-  return false;
+
+// ---- sheet layout (order page) -----------------------------------------------------
+
+// Left: the material sheet (A4 landscape) with its margin and the SVG's
+// document rectangle placed by analysis.layout, the finished piece marked
+// inside it. Right: the envelope (drawn landscape) with the piece inside
+// when it fits, turned 90° when that is how it fits.
+export function renderSheetLayout(analysis, catalog) {
+  const { sheet, envelope, limits } = catalog;
+  const lay = analysis.layout,
+    piece = analysis.piece,
+    size = analysis.size;
+  const gap = 16,
+    env = { w: envelope.heightMm, h: envelope.widthMm, m: envelope.marginMm };
+  const totalW = sheet.widthMm + gap + env.w,
+    totalH = Math.max(sheet.heightMm, env.h);
+  const font = 6;
+  // Piece rectangle in sheet coordinates: document origin + piece offset, rotated with the document.
+  const docX = lay.x,
+    docY = lay.y;
+  const px = lay.rotated ? docX + (size.heightMm - piece.y - piece.heightMm) : docX + piece.x;
+  const py = lay.rotated ? docY + piece.x : docY + piece.y;
+  const pw = lay.rotated ? piece.heightMm : piece.widthMm;
+  const ph = lay.rotated ? piece.widthMm : piece.heightMm;
+  const fitsUpright = piece.widthMm <= limits.piece.maxWidthMm && piece.heightMm <= limits.piece.maxHeightMm;
+  const fitsRotated = piece.heightMm <= limits.piece.maxWidthMm && piece.widthMm <= limits.piece.maxHeightMm;
+  const fits = fitsUpright || fitsRotated;
+  const ew = fitsUpright ? piece.widthMm : piece.heightMm,
+    eh = fitsUpright ? piece.heightMm : piece.widthMm;
+  const ex = sheet.widthMm + gap + (env.w - ew) / 2,
+    ey = (env.h - eh) / 2;
+  const label = (x, y, text, anchor = "start") => `<text x="${f(x)}" y="${f(y)}" font-size="${font}" font-family="system-ui, sans-serif" fill="${INK}" text-anchor="${anchor}">${esc(text)}</text>`;
+  const out = [];
+  out.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-2} ${-font - 4} ${totalW + 4} ${totalH + font + 12}" role="img" aria-label="用紙への配置と封筒との比較">`);
+  out.push(`<rect x="0" y="0" width="${f(sheet.widthMm)}" height="${f(sheet.heightMm)}" fill="${PAPER.fill}" stroke="${PAPER.edge}" stroke-width="0.6"/>`);
+  out.push(`<rect x="${f(sheet.marginMm)}" y="${f(sheet.marginMm)}" width="${f(sheet.widthMm - 2 * sheet.marginMm)}" height="${f(sheet.heightMm - 2 * sheet.marginMm)}" fill="none" stroke="${PAPER.ghost}" stroke-width="0.5" stroke-dasharray="3 2"/>`);
+  out.push(`<rect x="${f(docX)}" y="${f(docY)}" width="${f(lay.widthMm)}" height="${f(lay.heightMm)}" fill="rgba(255,255,255,0.10)" stroke="${PAPER.ghost}" stroke-width="0.6"/>`);
+  out.push(`<rect x="${f(px)}" y="${f(py)}" width="${f(pw)}" height="${f(ph)}" fill="none" stroke="#ffb454" stroke-width="0.9"/>`);
+  out.push(label(0, -3, `${sheet.name} ${sheet.widthMm} × ${sheet.heightMm} mm`));
+  out.push(label(sheet.widthMm, -3, `SVG ${size.widthMm.toFixed(1)} × ${size.heightMm.toFixed(1)} mm${lay.rotated ? "（90° 回転）" : ""}`, "end"));
+  out.push(`<rect x="${f(sheet.widthMm + gap)}" y="0" width="${f(env.w)}" height="${f(env.h)}" fill="#f6efe2" stroke="#b9aa8c" stroke-width="0.6"/>`);
+  out.push(`<rect x="${f(sheet.widthMm + gap + env.m)}" y="${f(env.m)}" width="${f(env.w - 2 * env.m)}" height="${f(env.h - 2 * env.m)}" fill="none" stroke="#b9aa8c" stroke-width="0.5" stroke-dasharray="3 2"/>`);
+  if (fits) out.push(`<rect x="${f(ex)}" y="${f(ey)}" width="${f(ew)}" height="${f(eh)}" fill="${PAPER.fill}" stroke="#ffb454" stroke-width="0.9"/>`);
+  else out.push(label(sheet.widthMm + gap + env.w / 2, env.h / 2 + font / 2, "封筒に収まりません", "middle"));
+  out.push(label(sheet.widthMm + gap, -3, `${envelope.name} ${envelope.widthMm} × ${envelope.heightMm} mm`));
+  out.push(label(sheet.widthMm + gap, env.h + font + 2, `切り抜き後 ${piece.widthMm.toFixed(1)} × ${piece.heightMm.toFixed(1)} mm（最大 ${limits.piece.maxWidthMm} × ${limits.piece.maxHeightMm} mm）`));
+  out.push("</svg>");
+  return out.join("");
 }
 
 // ---- sizes, layout, warnings ---------------------------------------------------

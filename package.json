@@ -12,7 +12,9 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js",
-    "build:admin": "vite build --config vite.admin.config.js"
+    "build:admin": "vite build --config vite.admin.config.js",
+    "db:migrate:local": "npm --prefix worker run db:migrate:local",
+    "db:migrate:remote": "npm --prefix worker run db:migrate:remote"
   },
   "dependencies": {
     "clipper-lib": "^6.4.2",

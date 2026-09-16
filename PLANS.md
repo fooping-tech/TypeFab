@@ -585,3 +585,23 @@
 - コードブロック内に ` # ` を含む行が README に残っていないことを確認（0 行）。`npm run db:local` はルートから `npm --prefix worker run db:local` を呼ぶ配線のままで、利用者のログでも wrangler 自体は起動している（余分な引数だけが原因）。
 
 - 公開: コミット `4058200` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/35150423613 は success、https://fooping-tech.github.io/TypeFab/ は HTTP 200。
+
+## 用紙（A4 横）への配置と、切り抜き後の紙片による封筒判定（2026-09-17）
+
+### 要求
+- 加工注文ページでは SVG を A4 横サイズの用紙にレイアウトし、注文できるかどうかは「切り抜き後のサイズ」が封筒サイズに収まるかで判定する（SVG の外形サイズで判定しない）。
+
+### 実装
+- `src/cutpiece.js`（新規）: しおり完成イメージ（Issue #7）が使っていた切断線→閉ループ結合（`closeCutLoops`）と紙片判定を `bookmark-preview.js` から分離し、`cutPiece(shapes, size)` として共用化。規則は従来どおり「すべての切断線を囲む閉じた外形があればその外形、なければ SVG 全体を1枚の紙片」。`bookmark-preview.js` はこれを利用（既存テスト 13 件はそのまま成功）。
+- `src/pricing.js`: `CATALOG.sheet = A4 横 297 × 210 mm（マージン 10）`、`CATALOG.envelope = 長形3号封筒 120 × 235 mm（マージン 10）`、`limits.sheet = 277 × 190`、`limits.piece = 215 × 100`（いずれも縦横どちらでも可）。`quote()` は `widthMm/heightMm`（SVG 実寸）を用紙と、`pieceWidthMm/pieceHeightMm`（未指定なら実寸）を封筒と照合し、エラー文を「SVGが用紙に収まりません（…）」「切り抜き後のサイズが封筒に収まりません（…）」に分けた。送料区分は紙片サイズで決める。材料費は用紙に配置する SVG の面積のまま。`fitsWithin`・`sizeLimitText` を追加。
+- `src/svganalyze.js`: `analysis.layout`（用紙上の配置。縦長は 90° 回転）と `analysis.piece`（紙片サイズ・外形の有無）を追加し、用紙・封筒の検査を分離。既定の limits/sheet は `CATALOG` を参照。
+- 注文ページ: 検査項目に「用紙 A4 横に収まります（90° 回転して配置）」「切り抜き後 W × H mm は封筒に収まります」を追加し、外形がない場合の案内を表示。`renderSheetLayout`（`bookmark-preview.js`）で用紙への配置図（SVG の枠・紙片）と封筒との比較図を描画（`#layout`）。確認画面・注文状況・見積り入力に切り抜き後サイズを追加。ドロップ領域の案内文と紹介ページの文言を更新。
+- Worker: `analyzeSVG(svg, { limits, sheet })` で同じ規則で再検査し、`piece_width_mm` / `piece_height_mm` を注文に保存（`schema.sql`、`migrations/0003_piece_size.sql`、`store.js`）。購入者向け・管理者向けビューと通知メール（「サイズ: 240.0 × 160.0 mm（切り抜き後 50.0 × 140.0 mm）」）、管理画面の詳細に紙片サイズを追加。`worker/package.json` の `db:migrate:local/remote` は 0003 を指す。
+- README・CLAUDE.md を更新。テスト: `tests/pricing.test.js`（2段階の規則・送料・材料費・両方失敗・退化した紙片）、`tests/svganalyze.test.js`（配置・回転・紙片・外形なし・用紙超過・カスタム limits）、`tests/worker.test.js`（加工エリア 240 × 160 に 50 × 140 の外形 → 受付・保存・メール、外形 220 × 120 → 400、用紙超過 300 × 200 → 400）。
+
+### 検証結果
+- `npm test`: 192 件すべて成功。`npm run build`: 成功。
+- `vite preview` + Chromium で注文ページを確認: 加工エリア 240 × 160 mm に 50 × 140 mm の外形 → 「用紙 A4 横に収まります」「切り抜き後 50.0 × 140.0 mm は封筒に収まります」、配置図と封筒図を表示、送料コンパクト便。縦長 160 × 240 → 「90° 回転して配置」。外形 220 × 120 → 「切り抜き後のサイズが封筒に収まりません」。用紙 300 × 200 → 「SVGが用紙に収まりません」（配置図なし）。穴だけの 240 × 160 → SVG 全体が紙片として封筒超過＋外形を描く案内。console error なし。スクリーンショットで配置図（用紙・マージン・SVG 枠・紙片）と封筒図（紙片を回転して収納）を目視確認。
+- ローカル D1（`worker/.wrangler/state`）に `npm run db:migrate:local` を適用（下記）。本番 D1 は利用者が `cd worker && npm run db:migrate:remote` を適用してからデプロイする必要がある（適用前に Worker をデプロイすると注文作成が列不足で失敗する）。
+- 未検証: 実機での用紙配置・封筒への収まり。
+

@@ -24,11 +24,12 @@
             <h2><span>01</span>SVG</h2>
             <div class="drop" id="drop">
               <label><input type="file" id="file" accept=".svg,image/svg+xml" />
-                <b>SVGファイルをここにドロップ</b>、または <u>クリックして選択</u><br /><small>TypeFabの「このデザインを加工注文する」から来た場合は、そのSVGが下に表示されます。</small><br /><small id="size-limit">材料は黒クラフトペーパーのみです。デザインの最大サイズは 215 × 100 mm（長形3号封筒 120 × 235 mm から周囲 10 mm のマージンを除いた範囲。縦横どちらの向きでも可）です。</small></label>
+                <b>SVGファイルをここにドロップ</b>、または <u>クリックして選択</u><br /><small>TypeFabの「このデザインを加工注文する」から来た場合は、そのSVGが下に表示されます。</small><br /><small id="size-limit">材料は黒クラフトペーパーのみです。SVG は A4 横（297 × 210 mm）の用紙に周囲 10 mm のマージンを取って配置します（SVG の最大 277 × 190 mm）。注文できるかどうかは、切り抜き後の紙片が長形3号封筒（120 × 235 mm）に周囲 10 mm の余裕を持って収まるか（最大 215 × 100 mm、縦横どちらの向きでも可）で判定します。</small></label>
             </div>
             <div class="file-line" id="file-line"></div>
             <div class="preview" id="preview"><span class="empty">SVGがまだありません</span></div>
             <ul class="checks" id="checks"></ul>
+            <figure id="layout" class="layout hidden"></figure>
             <div id="size-confirm" class="hidden">
               <p class="note">このSVGは px または単位なしのため実寸が確定できません。実際に切り出したい幅を入力してください（高さは縦横比から決まります）。</p>
               <div class="fields"><label>実寸の幅 (mm)<input type="number" id="confirm-width" min="1" step="0.1" /></label><div class="field"><span>&nbsp;</span><button id="confirm-apply">実寸を適用</button></div></div>

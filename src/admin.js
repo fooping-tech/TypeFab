@@ -145,6 +145,7 @@ function render() {
     <div class="meta"><span>注文日 <b>${day(o.createdAt)}</b></span><span>決済 <b>${day(o.paidAt)}</b></span><span class="deadline ${overdue ? "overdue" : ""}">発送期限 <b>${day(o.shipBy)}</b>${overdue ? " 超過" : ""}</span></div>
     <div class="spec">
       <div><span>購入者</span>${esc(o.customerName ?? "—")}</div>
+      ${o.pieceWidthMm ? `<div><span>切り抜き後</span>${Number(o.pieceWidthMm).toFixed(1)} × ${Number(o.pieceHeightMm).toFixed(1)} mm</div>` : ""}
       <div><span>材料</span>${esc(materialName(o.material))} ${esc(o.thicknessMm)} mm</div>
       <div><span>サイズ</span>${Number(o.widthMm).toFixed(1)} × ${Number(o.heightMm).toFixed(1)} mm</div>
       <div><span>数量</span>${esc(o.quantity)}</div>

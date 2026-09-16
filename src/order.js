@@ -1,7 +1,8 @@
 import "./order.css";
 import { CATALOG, quote, publicCatalog } from "./pricing.js";
 import { analyzeSVG, sanitizeSVG, withPhysicalSize } from "./svganalyze.js";
-import { BOOK_WIDTH_MM, BOOK_HEIGHT_MM, bookmarkPiece, bookmarkOrientation, bookmarkLayout, bookmarkWarnings, renderSingle, renderInBook, renderComparison } from "./bookmark-preview.js";
+import { BOOK_WIDTH_MM, BOOK_HEIGHT_MM, bookmarkPiece, bookmarkOrientation, bookmarkLayout, bookmarkWarnings, renderSingle, renderInBook, renderComparison, renderSheetLayout } from "./bookmark-preview.js";
+import { fitsWithin } from "./pricing.js";
 
 const API = (import.meta.env.VITE_ORDER_API_URL || "").replace(/\/$/, "");
 const HANDOFF_KEY = "typefab-order";
@@ -62,7 +63,7 @@ function setSVG(text, fileName, fromEditor = false) {
   state.svg = text;
   state.fileName = fileName || "design.svg";
   state.fromEditor = fromEditor;
-  state.analysis = analyzeSVG(text, { limits: state.catalog.limits });
+  state.analysis = analyzeSVG(text, { limits: state.catalog.limits, sheet: state.catalog.sheet });
   state.mockup.piece = null;
   state.mockup.rotated = null;
   if (state.analysis.size?.known && !state.analysis.security.length) {
@@ -75,6 +76,20 @@ function setSVG(text, fileName, fromEditor = false) {
   renderSVG();
   renderMockup();
   updateQuote();
+}
+// ---- sheet layout ---------------------------------------------------------------
+// The SVG placed on the material sheet and the finished piece in the envelope.
+function renderLayout() {
+  const a = state.analysis,
+    fig = $("#layout");
+  if (!a?.layout || !a.piece || a.security.length) {
+    fig.classList.add("hidden");
+    fig.innerHTML = "";
+    return;
+  }
+  const c = state.catalog;
+  fig.classList.remove("hidden");
+  fig.innerHTML = renderSheetLayout(a, c) + `<figcaption>左: ${esc(c.sheet.name)}の用紙（${c.sheet.widthMm} × ${c.sheet.heightMm} mm）に SVG（${a.size.widthMm.toFixed(1)} × ${a.size.heightMm.toFixed(1)} mm）を配置。破線は周囲 ${c.sheet.marginMm} mm のマージン。右: ${esc(c.envelope.name)}（${c.envelope.widthMm} × ${c.envelope.heightMm} mm）と切り抜き後の紙片（${a.piece.widthMm.toFixed(1)} × ${a.piece.heightMm.toFixed(1)} mm）。判定は切り抜き後のサイズで行います。</figcaption>`;
 }
 // ---- finished-look mock-ups -------------------------------------------------------
 const MOCKUP_VIEWS = { single: renderSingle, book: renderInBook, compare: renderComparison };
@@ -164,11 +179,18 @@ function renderSVG() {
     if (a.size?.known) items.push(["ok", `実寸 ${a.size.widthMm.toFixed(1)} × ${a.size.heightMm.toFixed(1)} mm`]);
     if (a.size?.viewBox) items.push(["ok", "viewBox 正常"]);
     if (a.pathCount && !Object.keys(a.unsupported).length) items.push(["ok", "pathのみ（カット図形のみ）"]);
+    const c = state.catalog;
+    if (a.layout) items.push(["ok", `用紙 ${c.sheet.name}（${c.sheet.widthMm} × ${c.sheet.heightMm} mm、マージン ${c.sheet.marginMm} mm）に収まります${a.layout.rotated ? "（90° 回転して配置）" : ""}`]);
+    if (a.piece && fitsWithin(a.piece.widthMm, a.piece.heightMm, c.limits.piece))
+      items.push(["ok", `切り抜き後 ${a.piece.widthMm.toFixed(1)} × ${a.piece.heightMm.toFixed(1)} mm は封筒（${c.envelope.name}、最大 ${c.limits.piece.maxWidthMm} × ${c.limits.piece.maxHeightMm} mm）に収まります${a.piece.sheet ? "（外形の切断線がないため SVG 全体を1枚の紙として判定）" : ""}`]);
     for (const e of a.errors) items.push(["bad", e]);
+    if (a.piece?.sheet && !fitsWithin(a.piece.widthMm, a.piece.heightMm, c.limits.piece))
+      items.push(["info", "すべての切断線を囲む外形がないため、SVG 全体を1枚の紙片として判定しています。紙片の外形を閉じた線で描くと、その大きさで判定します。"]);
     for (const w of a.warnings) items.push(["warn", w]);
     if (a.security.length) items.push(["bad", "安全のため、このファイルは受け付けられません。スクリプト・外部参照を取り除いて保存し直してください。"]);
   }
   $("#checks").innerHTML = items.map(([k, t]) => `<li class="${k}">${esc(t)}</li>`).join("");
+  renderLayout();
   $("#stat").innerHTML = a?.pathCount
     ? `総カット長 <b>${Math.round(a.cutLengthMm).toLocaleString("ja-JP")}</b> mm · パス <b>${a.pathCount}</b> 個（閉じた輪郭 ${a.closedPaths}、開いた線 ${a.openPaths}）`
     : "";
@@ -214,6 +236,8 @@ function updateQuote() {
       deliveryType: state.deliveryType,
       widthMm: a?.size?.widthMm,
       heightMm: a?.size?.heightMm,
+      pieceWidthMm: a?.piece?.widthMm,
+      pieceHeightMm: a?.piece?.heightMm,
       cutLengthMm: a?.cutLengthMm ?? 0,
       pathCount: a?.pathCount ?? 0,
     },
@@ -296,6 +320,7 @@ function showConfirm() {
   $("#summary").innerHTML = [
     ["SVG", esc(state.fileName)],
     ["サイズ", `${a.size.widthMm.toFixed(1)} × ${a.size.heightMm.toFixed(1)} mm`],
+    ["切り抜き後", `${Number(q.pieceWidthMm).toFixed(1)} × ${Number(q.pieceHeightMm).toFixed(1)} mm`],
     ["材料", esc(q.materialName)],
     ["厚さ", `${q.thicknessMm} mm`],
     ["数量", String(q.quantity)],
@@ -358,7 +383,7 @@ async function showStatus(orderId, token, result) {
   const render = (order, note) => {
     view.innerHTML = `<h2>注文 ${esc(orderId)}</h2>${note ? `<div class="banner ${order?.status === "PAID" ? "ok" : ""}">${note}</div>` : ""}${
       order
-        ? `<dl class="summary"><dt>ステータス</dt><dd><span class="badge status-${esc(order.status)}">${esc(STATUS_LABEL[order.status] ?? order.status)}</span></dd><dt>SVG</dt><dd>${esc(order.fileName)}（${Number(order.widthMm).toFixed(1)} × ${Number(order.heightMm).toFixed(1)} mm）</dd><dt>内容</dt><dd>${esc(order.material)} ${esc(order.thicknessMm)} mm × ${esc(order.quantity)} · ${order.deliveryType === "EXPRESS" ? "特急" : "通常"}</dd><dt>合計</dt><dd>${yen(order.totalPrice)}</dd>${order.shipBy ? `<dt>発送予定</dt><dd>${new Date(order.shipBy).toLocaleDateString("ja-JP")} まで</dd>` : ""}${order.trackingNumber ? `<dt>追跡番号</dt><dd>${esc(order.trackingNumber)}${order.carrier ? `（${esc(order.carrier)}）` : ""}</dd>` : ""}${
+        ? `<dl class="summary"><dt>ステータス</dt><dd><span class="badge status-${esc(order.status)}">${esc(STATUS_LABEL[order.status] ?? order.status)}</span></dd><dt>SVG</dt><dd>${esc(order.fileName)}（${Number(order.widthMm).toFixed(1)} × ${Number(order.heightMm).toFixed(1)} mm${order.pieceWidthMm ? `、切り抜き後 ${Number(order.pieceWidthMm).toFixed(1)} × ${Number(order.pieceHeightMm).toFixed(1)} mm` : ""}）</dd><dt>内容</dt><dd>${esc(order.material)} ${esc(order.thicknessMm)} mm × ${esc(order.quantity)} · ${order.deliveryType === "EXPRESS" ? "特急" : "通常"}</dd><dt>合計</dt><dd>${yen(order.totalPrice)}</dd>${order.shipBy ? `<dt>発送予定</dt><dd>${new Date(order.shipBy).toLocaleDateString("ja-JP")} まで</dd>` : ""}${order.trackingNumber ? `<dt>追跡番号</dt><dd>${esc(order.trackingNumber)}${order.carrier ? `（${esc(order.carrier)}）` : ""}</dd>` : ""}${
             order.receiptUrl ? `<dt>領収書</dt><dd><a href="${esc(order.receiptUrl)}" target="_blank" rel="noopener" id="receipt-link"><button>領収書を表示（Stripe）</button></a><span class="note" style="display:block;margin:4px 0 0">Stripe が発行する領収書です。決済時のメールアドレスにも Stripe から領収書メールが届きます。</span></dd>` : PAID_LIKE.includes(order.status) ? `<dt>領収書</dt><dd><span class="note" style="margin:0">領収書を準備しています。しばらくしてからこのページを再読み込みしてください。</span></dd>` : ""
           }</dl>`
         : ""

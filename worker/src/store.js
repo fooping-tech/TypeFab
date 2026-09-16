@@ -21,6 +21,9 @@ export const ORDER_COLUMNS = {
   svgBytes: "svg_bytes",
   widthMm: "width_mm",
   heightMm: "height_mm",
+  // Finished piece after cutting (envelope check); the SVG itself is width/height.
+  pieceWidthMm: "piece_width_mm",
+  pieceHeightMm: "piece_height_mm",
   pathCount: "path_count",
   cutLengthMm: "cut_length_mm",
   estimatedProcessingMinutes: "estimated_processing_minutes",

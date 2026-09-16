@@ -10,15 +10,17 @@ export const CATALOG = {
   currency: "JPY",
   baseFee: 500, // per order
   bulkThreshold: 10, // quantity at or above this needs an inquiry first
-  // Orderable design size: a 長形3号 envelope (120 × 235 mm, the largest
-  // 定形郵便 size) minus a 10 mm margin on every side. Either orientation is
-  // accepted (215 × 100 or 100 × 215). Change `sheet` to use another envelope;
-  // `limits` and `sizeNote` below must match it.
-  sheet: { name: "長形3号封筒", widthMm: 120, heightMm: 235, marginMm: 10 },
+  // Two size rules. The SVG (its document size) is laid out on one A4
+  // landscape sheet of black kraft paper; the finished piece after cutting
+  // (the outline enclosing all cut lines, or the whole sheet when there is
+  // none — see cutpiece.js) must fit a 長形3号 envelope (120 × 235 mm, the
+  // largest 定形郵便 size). Both keep a 10 mm margin on every side and accept
+  // either orientation. `limits.sheet` / `limits.piece` must match these.
+  sheet: { name: "A4 横", widthMm: 297, heightMm: 210, marginMm: 10 },
+  envelope: { name: "長形3号封筒", widthMm: 120, heightMm: 235, marginMm: 10 },
   limits: {
-    maxWidthMm: 215,
-    maxHeightMm: 100,
-    sizeNote: "長形3号封筒（120 × 235 mm）から周囲 10 mm のマージンを除いた範囲",
+    sheet: { maxWidthMm: 277, maxHeightMm: 190, note: "A4 横（297 × 210 mm）から周囲 10 mm のマージンを除いた範囲" },
+    piece: { maxWidthMm: 215, maxHeightMm: 100, note: "長形3号封筒（120 × 235 mm）から周囲 10 mm のマージンを除いた範囲" },
     minSizeMm: 5,
     maxSvgBytes: 2 * 1024 * 1024,
     maxQuantity: 999,
@@ -64,6 +66,11 @@ export const TRANSITIONS = {
   COMPLETED: [],
   CANCELLED: [],
 };
+// True when a w × h rectangle fits the limit in either orientation.
+export function fitsWithin(widthMm, heightMm, { maxWidthMm, maxHeightMm }) {
+  return (widthMm <= maxWidthMm && heightMm <= maxHeightMm) || (heightMm <= maxWidthMm && widthMm <= maxHeightMm);
+}
+export const sizeLimitText = (l) => `最大 ${l.maxWidthMm} × ${l.maxHeightMm} mm${l.note ? `、${l.note}` : ""}`;
 export function material(catalog, id) {
   return catalog.materials.find((m) => m.id === id) ?? null;
 }
@@ -93,6 +100,9 @@ export function quote(input, catalog = CATALOG) {
   const errors = [];
   const widthMm = Number(input.widthMm),
     heightMm = Number(input.heightMm),
+    // Finished piece; defaults to the document when the caller has no cut analysis.
+    pieceWidthMm = Number(input.pieceWidthMm ?? input.widthMm),
+    pieceHeightMm = Number(input.pieceHeightMm ?? input.heightMm),
     quantity = Number(input.quantity),
     cutLengthMm = Number(input.cutLengthMm ?? 0),
     pathCount = Number(input.pathCount ?? 0),
@@ -106,12 +116,13 @@ export function quote(input, catalog = CATALOG) {
   if (!catalog.delivery[deliveryType]) errors.push("納期の種類が不正です。");
   if (!(widthMm > 0 && heightMm > 0)) errors.push("SVGの実寸（mm）が必要です。");
   else {
-    const { maxWidthMm, maxHeightMm, minSizeMm, sizeNote } = catalog.limits;
-    const fits =
-      (widthMm <= maxWidthMm && heightMm <= maxHeightMm) ||
-      (heightMm <= maxWidthMm && widthMm <= maxHeightMm);
-    if (!fits) errors.push(`サイズが大きすぎます（最大 ${maxWidthMm} × ${maxHeightMm} mm${sizeNote ? `、${sizeNote}` : ""}）。`);
-    if (widthMm < minSizeMm || heightMm < minSizeMm) errors.push(`サイズが小さすぎます（最小 ${minSizeMm} mm）。`);
+    const { sheet, piece, minSizeMm } = catalog.limits;
+    if (!fitsWithin(widthMm, heightMm, sheet)) errors.push(`SVGが用紙に収まりません（${widthMm.toFixed(1)} × ${heightMm.toFixed(1)} mm。${sizeLimitText(sheet)}）。`);
+    if (!(pieceWidthMm > 0 && pieceHeightMm > 0)) errors.push("切り抜き後のサイズが不正です。");
+    else {
+      if (!fitsWithin(pieceWidthMm, pieceHeightMm, piece)) errors.push(`切り抜き後のサイズが封筒に収まりません（${pieceWidthMm.toFixed(1)} × ${pieceHeightMm.toFixed(1)} mm。${sizeLimitText(piece)}）。`);
+      if (pieceWidthMm < minSizeMm || pieceHeightMm < minSizeMm) errors.push(`切り抜き後のサイズが小さすぎます（最小 ${minSizeMm} mm）。`);
+    }
   }
   if (!(cutLengthMm >= 0) || !(pathCount >= 0)) errors.push("カット長・パス数が不正です。");
   if (errors.length) return { ok: false, errors };
@@ -129,7 +140,7 @@ export function quote(input, catalog = CATALOG) {
   const quantityFee = unitPrice * (quantity - 1);
   const fabricationPrice = catalog.baseFee + materialFee + processingFee + quantityFee;
   const processingPrice = fabricationPrice * delivery.multiplier;
-  const ship = shippingRule(catalog, { widthMm, heightMm, quantity });
+  const ship = shippingRule(catalog, { widthMm: pieceWidthMm, heightMm: pieceHeightMm, quantity });
   const shippingPrice = ship.price;
   const minutesPerUnit = th
     ? cutLengthMm / th.speedMmPerMin + (pathCount * th.pierceSeconds) / 60
@@ -148,6 +159,8 @@ export function quote(input, catalog = CATALOG) {
     leadTimeDays: delivery.leadTimeDays,
     widthMm,
     heightMm,
+    pieceWidthMm,
+    pieceHeightMm,
     cutLengthMm,
     pathCount,
     baseFee: catalog.baseFee,
@@ -177,7 +190,8 @@ export function publicCatalog(catalog = CATALOG) {
     baseFee: catalog.baseFee,
     bulkThreshold: catalog.bulkThreshold,
     sheet: catalog.sheet ? { ...catalog.sheet } : null,
-    limits: { ...catalog.limits },
+    envelope: catalog.envelope ? { ...catalog.envelope } : null,
+    limits: structuredClone(catalog.limits),
     delivery: Object.fromEntries(
       Object.entries(catalog.delivery).map(([k, v]) => [k, { ...v }]),
     ),
