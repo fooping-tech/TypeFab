@@ -255,7 +255,7 @@ function updateQuote() {
     if (q.deliveryMultiplier > 1) rows.push(["特急（加工料金 ×2）", `× ${q.deliveryMultiplier}`]);
     if (!q.inquiryRequired) {
       rows.push(["加工料金", yen(q.processingPrice)]);
-      rows.push([`送料（${q.shippingLabel}）`, yen(q.shippingPrice)]);
+      rows.push([`送料・梱包料（${q.shippingLabel}）`, yen(q.shippingPrice)]);
       rows.push(["合計", yen(q.totalPrice), "total"]);
       rows.push([`予測加工時間 約 ${q.estimatedProcessingMinutes} 分 · ${q.leadTimeDays} 日以内に発送`, "", "sub"]);
     }
@@ -311,6 +311,31 @@ function clearDraft() {
   } catch {}
 }
 
+// ---- terms and consent -----------------------------------------------------
+// The conditions come from the catalogue so the page and the Worker agree.
+function renderTerms() {
+  const c = state.catalog;
+  $("#terms-list").innerHTML = (c.terms ?? []).map((t) => `<li>${esc(t.text)}</li>`).join("");
+  $("#shipping-note").textContent = c.shippingNote ?? "";
+  const letter = c.shipping?.[0];
+  if (letter) $("#shipping-price").textContent = letter.price.toLocaleString("ja-JP");
+}
+function renderConsent() {
+  const items = [
+    ...(state.catalog.terms ?? []).map((t) => ({ id: t.id, html: esc(t.text) })),
+    { id: "privacy", html: `個人情報の取り扱いは <a href="../privacy/" target="_blank" rel="noopener">プライバシーポリシー</a> のとおりです。` },
+  ];
+  $("#consent").innerHTML = items.map((t) => `<label><input type="checkbox" data-term="${esc(t.id)}" /><span>${t.html}</span></label>`).join("");
+  updatePayButton();
+}
+const agreedTerms = () => [...$("#consent").querySelectorAll("input[data-term]")].filter((i) => i.checked).map((i) => i.dataset.term);
+const allAgreed = () => [...$("#consent").querySelectorAll("input[data-term]")].every((i) => i.checked);
+function updatePayButton() {
+  const btn = $("#pay");
+  btn.disabled = !allAgreed();
+  btn.title = btn.disabled ? "上の項目をすべて確認してチェックしてください" : "";
+}
+
 // ---- confirmation & checkout ------------------------------------------------
 function showConfirm() {
   const a = state.analysis,
@@ -326,17 +351,19 @@ function showConfirm() {
     ["数量", String(q.quantity)],
     ["納期", `${esc(d.label)} ${d.leadTimeDays}日以内発送`],
     ["加工料金", yen(q.processingPrice)],
-    ["送料", yen(q.shippingPrice)],
+    ["送料・梱包料", `${yen(q.shippingPrice)}（${esc(q.shippingLabel)}）`],
     ["合計", `<b>${yen(q.totalPrice)}</b>`],
     ["お届け先", `${esc(c.name)}<br>〒${esc(s.postalCode)} ${esc(s.prefecture)} ${esc(s.address1)} ${esc(s.address2)}<br>${esc(c.email)}${s.phone ? ` · ${esc(s.phone)}` : ""}`],
   ]
     .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`)
     .join("");
+  renderConsent();
   $("#form-view").classList.add("hidden");
   $("#confirm-view").classList.remove("hidden");
   window.scrollTo({ top: 0 });
 }
 async function pay() {
+  if (!allAgreed()) return alertMsg("注意事項をすべて確認してチェックしてください。");
   const btn = $("#pay");
   btn.disabled = true;
   btn.textContent = "決済ページを準備しています…";
@@ -352,6 +379,7 @@ async function pay() {
         thicknessMm: state.thicknessMm,
         quantity: state.quantity,
         deliveryType: state.deliveryType,
+        agreedTerms: agreedTerms().filter((id) => id !== "privacy"),
         ...customer(),
       }),
     });
@@ -367,8 +395,8 @@ async function pay() {
     location.assign(body.checkoutUrl);
   } catch (e) {
     alertMsg(e.message);
-    btn.disabled = false;
     btn.textContent = "Stripeで支払う";
+    updatePayButton();
   }
 }
 
@@ -456,6 +484,7 @@ function wire() {
     showConfirm();
   };
   $("#edit").onclick = () => { $("#confirm-view").classList.add("hidden"); $("#form-view").classList.remove("hidden"); };
+  $("#consent").addEventListener("change", updatePayButton);
   $("#pay").onclick = pay;
 }
 async function loadConfig() {
@@ -492,8 +521,10 @@ async function init() {
   }
   loadDraft();
   renderOptions();
+  renderTerms();
   await loadConfig();
   renderOptions();
+  renderTerms();
   try {
     const handoff = JSON.parse(localStorage.getItem(HANDOFF_KEY) || "null");
     if (handoff?.svg) setSVG(handoff.svg, handoff.fileName || "typefab.svg", true);

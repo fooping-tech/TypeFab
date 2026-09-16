@@ -44,6 +44,8 @@ export const ORDER_COLUMNS = {
   shippingCarrier: "shipping_carrier",
   accessToken: "access_token",
   notes: "notes",
+  // When the customer accepted the order terms (checkboxes before checkout).
+  termsAcceptedAt: "terms_accepted_at",
   personalDataDeletedAt: "personal_data_deleted_at",
 };
 // Columns cleared by the retention purge (issue #8). Everything else —

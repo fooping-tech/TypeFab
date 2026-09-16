@@ -2,7 +2,7 @@
 --   npx wrangler d1 execute typefab-orders --file=schema.sql [--local | --remote]
 -- Existing databases: apply the migrations in order instead of this file.
 --   before 2026-09-16: migrations/0002_privacy_mail_receipt.sql (issues #8/#9/#10)
---   before 2026-09-17: migrations/0003_piece_size.sql (piece_width_mm / piece_height_mm)
+--   before 2026-09-17: migrations/0003_piece_size.sql (piece_width_mm / piece_height_mm / terms_accepted_at)
 CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
   status TEXT NOT NULL,
@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS orders (
   shipping_carrier TEXT,
   access_token TEXT NOT NULL,
   notes TEXT,
+  -- When the customer accepted the order terms (laser marks, neck width, letter mail).
+  terms_accepted_at TEXT,
   -- Set when the personal data columns were cleared and the SVG deleted.
   personal_data_deleted_at TEXT
 );

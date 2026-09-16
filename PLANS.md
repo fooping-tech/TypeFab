@@ -606,3 +606,24 @@
 - 未検証: 実機での用紙配置・封筒への収まり。
 
 - 公開: コミット `2201a74` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/35153469574 は success、https://fooping-tech.github.io/TypeFab/order/ は HTTP 200 で新しい案内文を含む。Worker 側は利用者が `npm run db:migrate:remote` → `cd worker && npm run deploy` の順で反映する。
+
+## 注文前の注意事項と同意画面、定形郵便での発送（2026-09-17）
+
+### 要求
+- 注文ページに注記を足し、発注前に同意する画面を表示する。
+  - レーザー加工するため、切断面に黒い焦げ粉や匂いがつく場合がある。匂いは数日で消える。
+  - 接続部位が小さいと千切れる可能性がある。推奨 4 mm 以上のネック幅を確保する。
+- 発送について: 折れ・水濡れ防止の梱包を行い、日本郵便の定形郵便で発送する。定形郵便には追跡番号・配達状況の確認・補償がなく、発送後の配送状況は個別に確認できない。送料・梱包料は全国一律 300 円。
+- 質問「加工費と加工料金の違い」→ 回答（加工費＝カット長に応じた費用、加工料金＝基本料金＋材料費＋加工費＋数量加算（特急×2）の小計、合計＝加工料金＋送料）。README にも追記。
+
+### 実装
+- `src/pricing.js`: `CATALOG.terms`（3 項目、id: `laser-marks` / `neck-width` / `letter-mail`）、`CATALOG.shippingNote`、送料を `[{ id: "letter", label: "日本郵便 定形郵便", price: 300 }]` の一律ルールに変更（コンパクト便・宅配便を削除。サイズ別ルールを前に足せる構造は維持）。`missingTerms(agreed)` を追加し `publicCatalog` に `terms` / `shippingNote` を含めた。
+- 注文ページ: 左列に「ご注文前の注意」カード（注意事項の箇条書きと「発送について」）を追加。料金カードの注記を定形郵便・全国一律 300 円に。確認画面に「ご確認と同意」のチェックボックス（注意事項 3 件＋プライバシーポリシー）を追加し、すべてチェックするまで「Stripeで支払う」を無効化。注文作成リクエストに `agreedTerms` を付ける。送料の表記を「送料・梱包料（日本郵便 定形郵便）」に。
+- Worker: `agreedTerms` に全 id が無い注文は 400「注意事項への同意が必要です。」（`missingTerms` を返す）。同意日時を `terms_accepted_at` に保存（`schema.sql`、`migrations/0003_piece_size.sql` に列を追加。管理 API の一覧・詳細に `termsAcceptedAt`、購入者向けビューには含めない）。購入者向けメールに「▼ 発送について」（`shippingNote`）を追加。管理画面の発送プロンプトの文言を定形郵便向けに変更。
+- README を更新。テスト: `tests/pricing.test.js`（一律送料・前置ルール・注意事項・`missingTerms`）、`tests/worker.test.js`（同意なし／不足／文字列 → 400 かつ保存・Stripe 呼び出しなし、同意あり → 201 と `termsAcceptedAt`、メール本文）。
+
+### 検証結果
+- `npm test`: 194 件すべて成功。`npm run build`: 成功。
+- ローカル D1 に `terms_accepted_at` 列を追加済み（0003 を先に適用していたため `ALTER TABLE` を直接実行）。本番 D1 は `npm run db:migrate:remote`（0003 に両方の列を含む）で適用する。- ブラウザ（Chromium、`VITE_ORDER_API_URL=http://127.0.0.1:8787` でビルドした preview + ローカル Worker + モック Stripe）: 注文ページ左列に「ご注文前の注意」（3 項目）と「発送について」を表示、料金カードの注記と料金表に「送料・梱包料（日本郵便 定形郵便）¥300」。確認画面には同意チェック 4 件（注意事項 3 件＋プライバシーポリシー）が出て、「Stripeで支払う」は 3/4 チェックでは無効、4/4 で有効、1 つ外すと再び無効（スクリーンショットで確認）。同意後の決済で注文作成 201 → モック Checkout → Webhook 200 → 注文状況ページが「決済完了（加工待ち）」、Worker のコンソールメールに「▼ 発送について」の定形郵便の文言と「送料: ¥300」、管理 API の注文に `termsAcceptedAt` が保存された。API に `agreedTerms` なしで POST すると 400 と `missingTerms` 3 件。console error なし。
+- 補足: 利用者が `cp worker/.dev.vars.example worker/.dev.vars` を実行済みのため、ローカル Worker の `.dev.vars` は雛形（`sk_test_xxx`、`MAIL_MODE=console`、モック URL なし）になっている。検証では `.dev.vars` を変更せず `wrangler dev --var STRIPE_API_BASE:… --var MAIL_API_BASE:… --var SITE_URL:http://127.0.0.1:4173/TypeFab/` で差し替えた。
+

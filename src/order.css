@@ -475,6 +475,49 @@ main.page {
   color: var(--muted);
   margin: 10px 0 0;
 }
+.card h3.sub {
+  margin: 16px 0 4px;
+  font-size: 14px;
+  color: #253748;
+}
+.terms {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: 14px;
+  line-height: 1.6;
+  display: grid;
+  gap: 6px;
+}
+.terms li::marker {
+  color: var(--accent, #d9822b);
+}
+.consent {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.consent label {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid #dfe5ec;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.55;
+  cursor: pointer;
+  background: #fff;
+}
+.consent label:has(input:checked) {
+  border-color: var(--accent, #d9822b);
+  background: #fff8f1;
+}
+.consent input {
+  margin: 3px 0 0;
+  width: 16px;
+  height: 16px;
+}
 .actions {
   display: flex;
   gap: 10px;

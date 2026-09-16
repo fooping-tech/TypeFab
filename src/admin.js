@@ -224,7 +224,7 @@ document.addEventListener("click", async (e) => {
       const status = b.dataset.status;
       const body = { status };
       if (status === "SHIPPED") {
-        const tracking = prompt("追跡番号（任意）を入力してください。空欄でも発送済みにできます。", "");
+        const tracking = prompt("追跡番号（任意）を入力してください。定形郵便には追跡番号がないので、通常は空欄のまま発送済みにします。", "");
         if (tracking === null) return;
         body.trackingNumber = tracking.trim();
         if (body.trackingNumber) {

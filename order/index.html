@@ -51,6 +51,12 @@
               <p class="note" id="mockup-note">完成イメージは切断線から求めた形を黒いクラフトペーパー風に描いた目安です。実際の材料の色・表面・仕上がりとは異なります。文庫本は 105 × 148 mm の固定サイズで、上部から見える長さは 20 mm としています。</p>
             </div>
           </section>
+          <section class="card" id="terms-card">
+            <h2><span>!</span>ご注文前の注意</h2>
+            <ul class="terms" id="terms-list"></ul>
+            <h3 class="sub">発送について</h3>
+            <p class="note" id="shipping-note"></p>
+          </section>
         </div>
         <div>
           <section class="card">
@@ -66,7 +72,7 @@
           <section class="card">
             <h2><span>03</span>料金</h2>
             <div class="quote" id="quote"></div>
-            <p class="note">表示は概算です。最終的な決済金額はサーバー側で再計算します。送料は特急でも2倍になりません。</p>
+            <p class="note">表示は概算です。最終的な決済金額はサーバー側で再計算します。送料・梱包料は日本郵便の定形郵便で全国一律 <span id="shipping-price">300</span> 円（特急でも変わりません）。追跡番号・補償はありません。</p>
           </section>
           <section class="card">
             <h2><span>04</span>配送先</h2>
@@ -89,8 +95,10 @@
         <dl class="summary" id="summary"></dl>
         <p class="note">「Stripeで支払う」を押すと、Stripeの決済ページに移動します。決済完了後にこのページへ戻り、注文番号を表示します。決済完了はStripeからの通知（Webhook）で確定し、確定後に注文受付メールをお送りします。</p>
         <p class="note">領収書は決済後に Stripe からメールで届きます。注文状況ページの「領収書を表示」からも確認できます。適格請求書（インボイス）の発行には対応していません。</p>
-        <p class="note">個人情報の取り扱いは <a href="../privacy/" target="_blank" rel="noopener">プライバシーポリシー</a> のとおりです。「Stripeで支払う」を押すと、これに同意したものとします。</p>
-        <div class="actions"><button id="edit">内容を修正する</button><button class="primary" id="pay">Stripeで支払う</button></div>
+        <h3 class="sub">ご確認と同意</h3>
+        <p class="note" style="margin-top:4px">以下をすべて確認してチェックすると「Stripeで支払う」を押せます。</p>
+        <div class="consent" id="consent"></div>
+        <div class="actions"><button id="edit">内容を修正する</button><button class="primary" id="pay" disabled>Stripeで支払う</button></div>
       </section>
     </main>
     <script type="module" src="/src/order.js"></script>

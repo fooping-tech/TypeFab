@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { quote, CATALOG, shipByDate, shippingRule, publicCatalog, TRANSITIONS, ORDER_STATUSES, fitsWithin } from "../src/pricing.js";
+import { quote, CATALOG, shipByDate, shippingRule, publicCatalog, TRANSITIONS, ORDER_STATUSES, fitsWithin, missingTerms } from "../src/pricing.js";
 
 const base = { material: "kraft-black", thicknessMm: 0.3, quantity: 1, deliveryType: "NORMAL", widthMm: 82.3, heightMm: 142, cutLengthMm: 3428, pathCount: 12 };
 
@@ -14,8 +14,9 @@ test("normal order: base + material + processing + quantity, shipping separate",
   assert.equal(q.quantityFee, 0);
   assert.equal(q.fabricationPrice, 500 + q.materialFee + q.processingFee);
   assert.equal(q.processingPrice, q.fabricationPrice);
-  assert.equal(q.shippingPrice, 750);
-  assert.equal(q.totalPrice, q.processingPrice + 750);
+  assert.equal(q.shippingPrice, 300, "flat letter-mail shipping and packaging");
+  assert.equal(q.shippingLabel, "日本郵便 定形郵便");
+  assert.equal(q.totalPrice, q.processingPrice + 300);
   assert.equal(q.leadTimeDays, 7);
   assert.ok(Number.isInteger(q.totalPrice));
 });
@@ -32,7 +33,7 @@ test("quantity 1 and 9 price normally; 10 requires an inquiry; 0 and fractions a
   const q1 = quote(base), q9 = quote({ ...base, quantity: 9 });
   assert.equal(q9.quantityFee, (q1.materialFee + q1.processingFee) * 8);
   assert.equal(q9.inquiryRequired, false);
-  assert.equal(q9.shippingPrice, 1100, "more than 3 pieces ship as a parcel");
+  assert.equal(q9.shippingPrice, 300, "shipping stays flat for several pieces");
   const q10 = quote({ ...base, quantity: 10 });
   assert.ok(q10.ok && q10.inquiryRequired);
   assert.equal(q10.totalPrice, null);
@@ -76,7 +77,7 @@ test("size rules: the SVG must fit the A4 landscape sheet, the finished piece th
   const typical = quote({ ...base, widthMm: 240, heightMm: 160, pieceWidthMm: 50, pieceHeightMm: 140 });
   assert.ok(typical.ok, typical.errors.join());
   assert.deepEqual([typical.pieceWidthMm, typical.pieceHeightMm], [50, 140]);
-  assert.equal(typical.shippingLabel, "コンパクト便", "shipping is judged on the piece, not the sheet");
+  assert.equal(typical.shippingPrice, 300);
   assert.equal(typical.materialFee, Math.round((240 * 160) / 100 * 0.3), "material is the sheet area consumed");
   // Without a cut analysis the piece defaults to the document.
   assert.ok(quote({ ...base, widthMm: 215, heightMm: 100 }).ok, "exactly the envelope limit fits");
@@ -102,11 +103,29 @@ test("size rules: the SVG must fit the A4 landscape sheet, the finished piece th
   assert.match(quote({ ...base, widthMm: 100, heightMm: 100, pieceWidthMm: 3, pieceHeightMm: 3 }).errors[0], /切り抜き後のサイズが小さすぎます/);
 });
 
-test("shipping rule: compact for small boards and up to 3 pieces, parcel otherwise", () => {
-  assert.equal(shippingRule(CATALOG, { widthMm: 200, heightMm: 150, quantity: 3 }).id, "compact");
-  assert.equal(shippingRule(CATALOG, { widthMm: 150, heightMm: 200, quantity: 1 }).id, "compact");
-  assert.equal(shippingRule(CATALOG, { widthMm: 201, heightMm: 100, quantity: 1 }).id, "parcel");
-  assert.equal(shippingRule(CATALOG, { widthMm: 100, heightMm: 100, quantity: 4 }).id, "parcel");
+test("shipping: one flat letter-mail rule; size-based rules can still be put in front", () => {
+  assert.deepEqual(CATALOG.shipping, [{ id: "letter", label: "日本郵便 定形郵便", price: 300 }]);
+  for (const size of [{ widthMm: 215, heightMm: 100, quantity: 9 }, { widthMm: 10, heightMm: 10, quantity: 1 }]) assert.equal(shippingRule(CATALOG, size).id, "letter");
+  const c = { ...CATALOG, shipping: [{ id: "tiny", maxWidthMm: 50, maxHeightMm: 50, maxQuantity: 1, price: 100 }, ...CATALOG.shipping] };
+  assert.equal(shippingRule(c, { widthMm: 40, heightMm: 40, quantity: 1 }).id, "tiny");
+  assert.equal(shippingRule(c, { widthMm: 60, heightMm: 40, quantity: 1 }).id, "letter");
+  assert.match(CATALOG.shippingNote, /定形郵便/);
+  assert.match(CATALOG.shippingNote, /追跡番号・配達状況の確認・補償はなく/);
+  assert.match(CATALOG.shippingNote, /全国一律 300 円/);
+});
+
+test("order terms: laser marks, neck width and letter mail must all be accepted", () => {
+  assert.deepEqual(CATALOG.terms.map((t) => t.id), ["laser-marks", "neck-width", "letter-mail"]);
+  assert.match(CATALOG.terms[0].text, /焦げ粉や匂い/);
+  assert.match(CATALOG.terms[1].text, /4 mm 以上のネック幅/);
+  assert.match(CATALOG.terms[2].text, /追跡番号・配達状況の確認・補償はありません/);
+  assert.deepEqual(missingTerms(["laser-marks", "neck-width", "letter-mail"]), []);
+  assert.deepEqual(missingTerms(["laser-marks"]), ["neck-width", "letter-mail"]);
+  assert.deepEqual(missingTerms(undefined), ["laser-marks", "neck-width", "letter-mail"]);
+  assert.deepEqual(missingTerms("laser-marks"), ["laser-marks", "neck-width", "letter-mail"], "a string is not a list");
+  const p = JSON.parse(JSON.stringify(publicCatalog()));
+  assert.equal(p.terms.length, 3);
+  assert.equal(p.shippingNote, CATALOG.shippingNote);
 });
 
 test("processing time estimate grows with cut length, path count and quantity", () => {

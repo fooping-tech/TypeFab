@@ -1,7 +1,7 @@
 // Request handlers for the TypeFab order API. Everything that touches the
 // outside world (D1, R2, Stripe, mail, Access, time, randomness) comes in
 // through `deps` so the flow can be tested end to end without Cloudflare.
-import { quote, publicCatalog, shipByDate, TRANSITIONS, CATALOG } from "../../src/pricing.js";
+import { quote, publicCatalog, shipByDate, TRANSITIONS, CATALOG, missingTerms } from "../../src/pricing.js";
 import { analyzeSVG, withPhysicalSize } from "../../src/svganalyze.js";
 import { createCheckoutSession, verifyStripeSignature, timingSafeEqual, fetchReceipt } from "./stripe.js";
 import { createAccessVerifier } from "./access.js";
@@ -71,7 +71,7 @@ export const customerView = (o) => ({
 const ADMIN_LIST_FIELDS = [
   "id", "status", "createdAt", "updatedAt", "paidAt", "shipBy", "customerName", "originalFileName", "svgBytes", "widthMm", "heightMm", "pieceWidthMm", "pieceHeightMm",
   "pathCount", "cutLengthMm", "estimatedProcessingMinutes", "material", "thicknessMm", "quantity", "deliveryType", "basePrice", "processingPrice",
-  "shippingPrice", "totalPrice", "currency", "shippingTrackingNumber", "shippingCarrier", "notes", "personalDataDeletedAt",
+  "shippingPrice", "totalPrice", "currency", "shippingTrackingNumber", "shippingCarrier", "notes", "termsAcceptedAt", "personalDataDeletedAt",
 ];
 export const adminListView = (o) => Object.fromEntries(ADMIN_LIST_FIELDS.map((k) => [k, o[k] ?? null]));
 // Admin detail view: adds Stripe ids and the receipt; shipping details only
@@ -204,6 +204,9 @@ export function createApp(deps) {
     if (!clean(shipping.address1, 200)) details.push("住所を入力してください。");
     if (!clean(customer.name, 100)) details.push("お名前を入力してください。");
     if (details.length) return error("配送先を確認してください。", 400, { details });
+    // Consent to the production and shipping conditions (order page checkboxes).
+    const missing = missingTerms(body.agreedTerms, catalog);
+    if (missing.length) return error("注意事項への同意が必要です。", 400, { details: ["注文前の注意事項（加工の焦げ・匂い、ネック幅、定形郵便での発送）をすべて確認して同意してください。"], missingTerms: missing });
     if (!stripeConfigured) return error("決済の設定が完了していないため、現在は注文を受け付けられません。", 503);
 
     const at = now().toISOString();
@@ -254,6 +257,7 @@ export function createApp(deps) {
       shippingCarrier: null,
       accessToken,
       notes: null,
+      termsAcceptedAt: at,
       personalDataDeletedAt: null,
     };
     await store.insertOrder(order);

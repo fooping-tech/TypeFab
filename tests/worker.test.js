@@ -21,6 +21,7 @@ const base = {
   totalPrice: 1, // must be ignored by the server
   customer: { name: "山田 太郎", email: "taro@example.com" },
   shipping: { postalCode: "100-0001", prefecture: "東京都", address1: "千代田区1-1", address2: "", phone: "0300000000" },
+  agreedTerms: ["laser-marks", "neck-width", "letter-mail"],
 };
 function setup(overrides = {}, { certs = null } = {}) {
   const store = memoryStore(), bucket = memoryBucket();
@@ -412,11 +413,12 @@ test("notifications: provider failure keeps PAID, records the error and can be r
 });
 
 test("mail templates never include the shipping address or phone number", () => {
-  const order = { id: "TF-X", status: "PAID", paidAt: "2026-09-14T03:00:00.000Z", shipBy: "2026-09-21T03:00:00.000Z", customerName: "山田 太郎", customerEmail: "taro@example.com", shippingPostalCode: "1000001", shippingPrefecture: "東京都", shippingAddress1: "千代田区1-1", shippingAddress2: "ビル2F", shippingPhone: "0300000000", material: "mdf", thicknessMm: 3, widthMm: 40, heightMm: 120, quantity: 1, deliveryType: "EXPRESS", processingPrice: 2000, shippingPrice: 750, totalPrice: 2750, originalFileName: "a.svg", cutLengthMm: 500, pathCount: 3 };
+  const order = { id: "TF-X", status: "PAID", paidAt: "2026-09-14T03:00:00.000Z", shipBy: "2026-09-21T03:00:00.000Z", customerName: "山田 太郎", customerEmail: "taro@example.com", shippingPostalCode: "1000001", shippingPrefecture: "東京都", shippingAddress1: "千代田区1-1", shippingAddress2: "ビル2F", shippingPhone: "0300000000", material: "mdf", thicknessMm: 3, widthMm: 40, heightMm: 120, quantity: 1, deliveryType: "EXPRESS", processingPrice: 2000, shippingPrice: 300, totalPrice: 2300, originalFileName: "a.svg", cutLengthMm: 500, pathCount: 3 };
   const c = customerPaidMail(order, { orderUrl: "https://site/order/?order=TF-X&token=t", contactUrl: "https://contact" });
   const a = adminPaidMail(order, { adminUrl: "https://admin/" });
   for (const m of [c, a]) for (const pii of ["1000001", "東京都", "千代田区", "ビル2F", "0300000000"]) assert.ok(!m.text.includes(pii) && !m.subject.includes(pii), pii);
-  assert.match(c.text, /¥2,750/);
+  assert.match(c.text, /¥2,300/);
+  assert.match(c.text, /▼ 発送について\n.*定形郵便には追跡番号・配達状況の確認・補償はなく/);
   assert.match(c.text, /特急/);
   assert.match(c.text, /2026-09-21/);
   assert.ok(!a.text.includes("taro@example.com"), "admin mail has no customer e-mail");
@@ -669,7 +671,7 @@ test("size rules (sheet vs envelope): a TypeFab work area larger than the envelo
   assert.equal(ok.status, 201, okText);
   const out = JSON.parse(okText);
   assert.deepEqual([out.order.widthMm, out.order.heightMm, out.order.pieceWidthMm, out.order.pieceHeightMm], [240, 160, 50, 140]);
-  assert.equal(out.quote.shippingLabel, "コンパクト便");
+  assert.equal(out.quote.shippingPrice, 300);
   const stored = await s.store.getOrder(out.orderId);
   assert.deepEqual([stored.pieceWidthMm, stored.pieceHeightMm], [50, 140]);
   const cfg = await (await s.call("/api/config")).json();
@@ -690,4 +692,25 @@ test("size rules (sheet vs envelope): a TypeFab work area larger than the envelo
   // Admin list and detail carry the piece size.
   const list = await (await s.admin("/api/admin/orders")).json();
   assert.deepEqual([list.orders[0].pieceWidthMm, list.orders[0].pieceHeightMm], [50, 140]);
+});
+
+test("order terms: checkout is refused until every condition is accepted, and the acceptance time is stored", async () => {
+  const s = setup();
+  for (const agreedTerms of [undefined, [], ["laser-marks", "neck-width"], "laser-marks,neck-width,letter-mail"]) {
+    const res = await s.call("/api/orders", { method: "POST", body: { ...base, agreedTerms } });
+    assert.equal(res.status, 400, JSON.stringify(agreedTerms));
+    const body = await res.json();
+    assert.equal(body.error, "注意事項への同意が必要です。");
+    assert.ok(body.missingTerms.length >= 1);
+  }
+  assert.equal(s.store.orders.size, 0, "nothing is stored without consent");
+  assert.equal(s.stripeCalls.length, 0, "Stripe is never called without consent");
+  const ok = await s.call("/api/orders", { method: "POST", body: { ...base, agreedTerms: ["letter-mail", "neck-width", "laser-marks", "extra"] } });
+  assert.equal(ok.status, 201);
+  const out = await ok.json();
+  const stored = await s.store.getOrder(out.orderId);
+  assert.equal(stored.termsAcceptedAt, "2026-09-14T03:00:00.000Z");
+  assert.equal(out.order.termsAcceptedAt, undefined, "not part of the customer view");
+  const detail = await (await s.admin(`/api/admin/orders/${out.orderId}`)).json();
+  assert.equal(detail.order.termsAcceptedAt, "2026-09-14T03:00:00.000Z");
 });

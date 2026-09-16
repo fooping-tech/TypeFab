@@ -26,10 +26,18 @@ export const CATALOG = {
     maxQuantity: 999,
   },
   delivery: DELIVERY,
-  shipping: [
-    // First rule whose size limits hold applies. Shipping is never doubled.
-    { id: "compact", label: "コンパクト便", maxWidthMm: 200, maxHeightMm: 150, maxQuantity: 3, price: 750 },
-    { id: "parcel", label: "宅配便", price: 1100 },
+  // Everything goes by 日本郵便 定形郵便 (no tracking, no insurance) at one
+  // flat rate for shipping and packaging. First rule whose size limits hold
+  // applies, so size-based rules can be added in front. Never doubled.
+  shipping: [{ id: "letter", label: "日本郵便 定形郵便", price: 300 }],
+  shippingNote: "商品は折れ・水濡れ防止の梱包を行い、日本郵便の定形郵便で発送します。定形郵便には追跡番号・配達状況の確認・補償はなく、発送後の配送状況を個別に確認することはできません。送料・梱包料として全国一律 300 円をいただきます。",
+  // Conditions every customer must accept before checkout. The order page
+  // shows them as checkboxes and the Worker refuses orders that do not list
+  // every id in `agreedTerms`.
+  terms: [
+    { id: "laser-marks", text: "レーザー加工するため、切断面に黒い焦げ粉や匂いがつく場合があります。匂いは数日で消えます。" },
+    { id: "neck-width", text: "接続部位が小さいと千切れる可能性があります。推奨 4 mm 以上のネック幅を確保してください。" },
+    { id: "letter-mail", text: "商品は折れ・水濡れ防止の梱包を行い、日本郵便の定形郵便で発送します。定形郵便には追跡番号・配達状況の確認・補償はありません。発送後の配送状況を個別に確認することはできません。" },
   ],
   // The only material offered is black kraft paper. The quote code still
   // supports several materials/thicknesses and `inquiryOnly` entries, so
@@ -71,6 +79,11 @@ export function fitsWithin(widthMm, heightMm, { maxWidthMm, maxHeightMm }) {
   return (widthMm <= maxWidthMm && heightMm <= maxHeightMm) || (heightMm <= maxWidthMm && widthMm <= maxHeightMm);
 }
 export const sizeLimitText = (l) => `最大 ${l.maxWidthMm} × ${l.maxHeightMm} mm${l.note ? `、${l.note}` : ""}`;
+// Ids of the terms a request must have accepted; the missing ones.
+export function missingTerms(agreed, catalog = CATALOG) {
+  const set = new Set(Array.isArray(agreed) ? agreed.map(String) : []);
+  return (catalog.terms ?? []).filter((t) => !set.has(t.id)).map((t) => t.id);
+}
 export function material(catalog, id) {
   return catalog.materials.find((m) => m.id === id) ?? null;
 }
@@ -196,6 +209,8 @@ export function publicCatalog(catalog = CATALOG) {
       Object.entries(catalog.delivery).map(([k, v]) => [k, { ...v }]),
     ),
     shipping: catalog.shipping.map((s) => ({ ...s })),
+    shippingNote: catalog.shippingNote ?? "",
+    terms: (catalog.terms ?? []).map((t) => ({ ...t })),
     materials: catalog.materials.map((m) => ({
       id: m.id,
       name: m.name,
