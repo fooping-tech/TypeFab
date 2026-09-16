@@ -554,4 +554,5 @@
 - `npm test`: 190 件すべて成功。`npm run build`: 成功。
 - `vite preview` + Chromium（Playwright）で注文ページを確認: 材料セレクトは「黒クラフトペーパー」のみ、厚さは 0.3 mm のみ、案内文が表示される。277 × 190 mm と 190 × 277 mm の SVG は検査を通り概算が出る（宅配便）。280 × 190 mm と 210 × 297 mm は「サイズが大きすぎます（… 最大 277 × 190 mm、A4 用紙（210 × 297 mm）から周囲 10 mm のマージンを除いた範囲）」で注文不可。console error なし。
 - 未変更・未検証: 送料区分（コンパクト便 200 × 150 mm・3 個まで）は変えていないため、A4 近くの紙は宅配便扱いになる。料金係数（材料費 0.3 円/cm²、加工費 0.1 円/mm、下限 100 円）は仮の値。既存注文の `material` 列に残る `mdf` などは表示上 ID のまま出る。
+- 公開: コミット `60c5dc1` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/35141804008 は success。https://fooping-tech.github.io/TypeFab/order/ は HTTP 200 で新しい案内文（最大サイズ 277 × 190 mm）を含む。Worker 側の料金再計算は同じ `src/pricing.js` を使うため、利用者が `cd worker && npm run deploy` した時点で本番 API にも反映される。
 
