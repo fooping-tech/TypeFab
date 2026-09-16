@@ -10,9 +10,13 @@ export const CATALOG = {
   currency: "JPY",
   baseFee: 500, // per order
   bulkThreshold: 10, // quantity at or above this needs an inquiry first
+  // Orderable design size: one A4 sheet (210 × 297 mm) minus a 10 mm margin
+  // on every side. Either orientation is accepted (277 × 190 or 190 × 277).
+  sheet: { name: "A4", widthMm: 210, heightMm: 297, marginMm: 10 },
   limits: {
-    maxWidthMm: 300,
-    maxHeightMm: 200,
+    maxWidthMm: 277,
+    maxHeightMm: 190,
+    sizeNote: "A4 用紙（210 × 297 mm）から周囲 10 mm のマージンを除いた範囲",
     minSizeMm: 5,
     maxSvgBytes: 2 * 1024 * 1024,
     maxQuantity: 999,
@@ -23,32 +27,17 @@ export const CATALOG = {
     { id: "compact", label: "コンパクト便", maxWidthMm: 200, maxHeightMm: 150, maxQuantity: 3, price: 750 },
     { id: "parcel", label: "宅配便", price: 1100 },
   ],
+  // The only material offered is black kraft paper. The quote code still
+  // supports several materials/thicknesses and `inquiryOnly` entries, so
+  // adding one here is enough to offer it.
   materials: [
     {
-      id: "mdf",
-      name: "MDF",
+      id: "kraft-black",
+      name: "黒クラフトペーパー",
       // material fee per cm² of bounding area, processing fee per mm of cut,
-      // cutting speed for the time estimate (mm/min), pierce time per path (s)
-      thicknesses: [
-        { mm: 2.5, materialPerCm2: 1.2, cutPerMm: 0.25, speedMmPerMin: 900, pierceSeconds: 0.5 },
-        { mm: 3, materialPerCm2: 1.4, cutPerMm: 0.3, speedMmPerMin: 700, pierceSeconds: 0.6 },
-        { mm: 5.5, materialPerCm2: 2.0, cutPerMm: 0.45, speedMmPerMin: 350, pierceSeconds: 1 },
-      ],
-    },
-    {
-      id: "acrylic",
-      name: "アクリル（キャスト・透明）",
-      thicknesses: [
-        { mm: 2, materialPerCm2: 3.0, cutPerMm: 0.35, speedMmPerMin: 600, pierceSeconds: 0.6 },
-        { mm: 3, materialPerCm2: 3.6, cutPerMm: 0.45, speedMmPerMin: 400, pierceSeconds: 0.8 },
-        { mm: 5, materialPerCm2: 5.2, cutPerMm: 0.7, speedMmPerMin: 220, pierceSeconds: 1.2 },
-      ],
-    },
-    {
-      id: "other",
-      name: "その他（要相談）",
-      inquiryOnly: true,
-      thicknesses: [],
+      // cutting speed for the time estimate (mm/min), pierce time per path (s).
+      // Placeholder values; the sheet is about 0.3 mm thick.
+      thicknesses: [{ mm: 0.3, materialPerCm2: 0.3, cutPerMm: 0.1, speedMmPerMin: 1500, pierceSeconds: 0.2 }],
     },
   ],
 };
@@ -115,11 +104,11 @@ export function quote(input, catalog = CATALOG) {
   if (!catalog.delivery[deliveryType]) errors.push("納期の種類が不正です。");
   if (!(widthMm > 0 && heightMm > 0)) errors.push("SVGの実寸（mm）が必要です。");
   else {
-    const { maxWidthMm, maxHeightMm, minSizeMm } = catalog.limits;
+    const { maxWidthMm, maxHeightMm, minSizeMm, sizeNote } = catalog.limits;
     const fits =
       (widthMm <= maxWidthMm && heightMm <= maxHeightMm) ||
       (heightMm <= maxWidthMm && widthMm <= maxHeightMm);
-    if (!fits) errors.push(`サイズが大きすぎます（最大 ${maxWidthMm} × ${maxHeightMm} mm）。`);
+    if (!fits) errors.push(`サイズが大きすぎます（最大 ${maxWidthMm} × ${maxHeightMm} mm${sizeNote ? `、${sizeNote}` : ""}）。`);
     if (widthMm < minSizeMm || heightMm < minSizeMm) errors.push(`サイズが小さすぎます（最小 ${minSizeMm} mm）。`);
   }
   if (!(cutLengthMm >= 0) || !(pathCount >= 0)) errors.push("カット長・パス数が不正です。");
@@ -185,7 +174,8 @@ export function publicCatalog(catalog = CATALOG) {
     currency: catalog.currency,
     baseFee: catalog.baseFee,
     bulkThreshold: catalog.bulkThreshold,
-    limits: catalog.limits,
+    sheet: catalog.sheet ? { ...catalog.sheet } : null,
+    limits: { ...catalog.limits },
     delivery: Object.fromEntries(
       Object.entries(catalog.delivery).map(([k, v]) => [k, { ...v }]),
     ),

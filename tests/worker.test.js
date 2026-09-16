@@ -14,8 +14,8 @@ const ORIGIN = "https://fooping-tech.github.io";
 const base = {
   svg: SVG,
   fileName: "terminal-bookmark.svg",
-  material: "mdf",
-  thicknessMm: 2.5,
+  material: "kraft-black",
+  thicknessMm: 0.3,
   quantity: 2,
   deliveryType: "NORMAL",
   totalPrice: 1, // must be ignored by the server
@@ -96,7 +96,7 @@ test("config and quote endpoints expose the catalogue and server-side pricing wi
   const cfg = await res.json();
   assert.equal(cfg.stripeConfigured, true);
   assert.equal(cfg.catalog.bulkThreshold, 10);
-  const q = await (await call("/api/quote", { method: "POST", body: { material: "mdf", thicknessMm: 3, quantity: 1, deliveryType: "EXPRESS", widthMm: 50, heightMm: 50, cutLengthMm: 500, pathCount: 2 } })).json();
+  const q = await (await call("/api/quote", { method: "POST", body: { material: "kraft-black", thicknessMm: 0.3, quantity: 1, deliveryType: "EXPRESS", widthMm: 50, heightMm: 50, cutLengthMm: 500, pathCount: 2 } })).json();
   assert.equal(q.quote.deliveryMultiplier, 2);
   const preflight = await call("/api/orders", { method: "OPTIONS" });
   assert.equal(preflight.status, 204);
@@ -139,7 +139,7 @@ test("order creation: SVG validated, price recomputed on the server, SVG stored 
   const out = JSON.parse(text);
   assert.equal(out.orderId, "TF-00001");
   assert.match(out.checkoutUrl, /^https:\/\/checkout\.stripe\.test\/cs_test_1$/);
-  const expected = quote({ material: "mdf", thicknessMm: 2.5, quantity: 2, deliveryType: "NORMAL", widthMm: 82.3, heightMm: 142, cutLengthMm: out.order.widthMm ? out.quote.cutLengthMm : 0, pathCount: 2 });
+  const expected = quote({ material: "kraft-black", thicknessMm: 0.3, quantity: 2, deliveryType: "NORMAL", widthMm: 82.3, heightMm: 142, cutLengthMm: out.order.widthMm ? out.quote.cutLengthMm : 0, pathCount: 2 });
   assert.equal(out.quote.totalPrice, expected.totalPrice);
   assert.notEqual(out.quote.totalPrice, 1, "client total ignored");
   const order = await store.getOrder("TF-00001");
@@ -326,7 +326,7 @@ test("stripe helpers: form encoding, signature round trip and env config", async
   assert.equal(configFromEnv({ APP_ENV: " Development ", MAIL_MODE: "Console" }).appEnv, "development");
   assert.equal(configFromEnv({ APP_ENV: "development", MAIL_MODE: "Console" }).mailMode, "console");
   const app = createApp({ store: memoryStore(), bucket: memoryBucket(), config: cfg });
-  const q = await (await app(new Request("https://x/api/quote", { method: "POST", body: JSON.stringify({ material: "mdf", thicknessMm: 3, quantity: 5, deliveryType: "NORMAL", widthMm: 50, heightMm: 50 }) }))).json();
+  const q = await (await app(new Request("https://x/api/quote", { method: "POST", body: JSON.stringify({ material: "kraft-black", thicknessMm: 0.3, quantity: 5, deliveryType: "NORMAL", widthMm: 50, heightMm: 50 }) }))).json();
   assert.equal(q.quote.inquiryRequired, true, "env bulk threshold applies");
 });
 
@@ -349,7 +349,7 @@ test("notifications (#9): one customer mail and one admin mail on the first PAID
   assert.match(customer.body.text, /発送予定: 2026-09-21 まで/);
   assert.match(customer.body.text, new RegExp(`order/\\?order=TF-00001&token=${created.accessToken}`));
   assert.match(customer.body.text, /https:\/\/example\.com\/contact/);
-  assert.match(customer.body.text, /MDF 2\.5 mm[\s\S]*数量: 2[\s\S]*納期: 通常/);
+  assert.match(customer.body.text, /黒クラフトペーパー 0\.3 mm[\s\S]*数量: 2[\s\S]*納期: 通常/);
   for (const pii of ["千代田区", "1000001", "0300000000", "東京都"]) assert.ok(!customer.body.text.includes(pii), `customer mail must not contain ${pii}`);
   assert.deepEqual(admin.body.to, ["owner@typefab.test"]);
   assert.match(admin.body.subject, /^新規注文 TF-00001 ¥/);

@@ -33,8 +33,8 @@ const state = {
   fileName: "",
   fromEditor: false,
   analysis: null,
-  material: "mdf",
-  thicknessMm: 2.5,
+  material: "kraft-black",
+  thicknessMm: 0.3,
   quantity: 1,
   deliveryType: "NORMAL",
   quote: null,
@@ -186,6 +186,8 @@ async function readFile(file) {
 // ---- options & quote --------------------------------------------------------
 function renderOptions() {
   const c = state.catalog;
+  // A draft from an earlier catalogue may name a material that is gone.
+  if (!c.materials.some((m) => m.id === state.material)) state.material = c.materials[0]?.id ?? null;
   $("#material").innerHTML = c.materials.map((m) => `<option value="${m.id}" ${m.id === state.material ? "selected" : ""}>${esc(m.name)}</option>`).join("");
   const mat = c.materials.find((m) => m.id === state.material);
   const ths = mat?.thicknesses ?? [];

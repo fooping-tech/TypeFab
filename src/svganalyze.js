@@ -183,7 +183,8 @@ const same = (a, b) => Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6;
 // Full analysis. `errors` block ordering; `warnings` are shown to the user.
 export function analyzeSVG(text, options = {}) {
   const bytes = new TextEncoder().encode(text).length;
-  const limits = { maxWidthMm: 300, maxHeightMm: 200, minSizeMm: 5, maxSvgBytes: 2 * 1024 * 1024, ...options.limits };
+  // Defaults mirror CATALOG.limits in pricing.js (A4 minus a 10 mm margin).
+  const limits = { maxWidthMm: 277, maxHeightMm: 190, sizeNote: "A4 用紙（210 × 297 mm）から周囲 10 mm のマージンを除いた範囲", minSizeMm: 5, maxSvgBytes: 2 * 1024 * 1024, ...options.limits };
   const result = {
     bytes,
     size: null,
@@ -223,7 +224,7 @@ export function analyzeSVG(text, options = {}) {
   else {
     const { widthMm: w, heightMm: h } = result.size;
     const fits = (w <= limits.maxWidthMm && h <= limits.maxHeightMm) || (h <= limits.maxWidthMm && w <= limits.maxHeightMm);
-    if (!fits) result.errors.push(`サイズが大きすぎます（${w.toFixed(1)} × ${h.toFixed(1)} mm、最大 ${limits.maxWidthMm} × ${limits.maxHeightMm} mm）。`);
+    if (!fits) result.errors.push(`サイズが大きすぎます（${w.toFixed(1)} × ${h.toFixed(1)} mm。最大 ${limits.maxWidthMm} × ${limits.maxHeightMm} mm${limits.sizeNote ? `、${limits.sizeNote}` : ""}）。`);
     if (w < limits.minSizeMm || h < limits.minSizeMm) result.errors.push(`サイズが小さすぎます（最小 ${limits.minSizeMm} mm）。`);
   }
   let shapes;

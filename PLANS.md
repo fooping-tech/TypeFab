@@ -537,3 +537,21 @@
 - 注意: 本番の `wrangler.toml` に `APP_ENV = "production"` を入れたため、次回デプロイ以降は Cloudflare Access（`ACCESS_TEAM_DOMAIN`/`ACCESS_AUD`）が未設定だと管理画面が使えない（`ADMIN_TOKEN` は無視）。Access を設定してからデプロイする。
 - 公開: コミット `bb74ac6` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/35135353857 は success（`npm test` 189 件・build・デプロイ）。https://fooping-tech.github.io/TypeFab/ と `/app/` は HTTP 200。Worker 側（`wrangler.toml` の `APP_ENV`、`MAIL_MODE`）は利用者の `cd worker && npm run deploy` で反映される。
 
+## 注文の最大サイズを A4−マージン10 mm に、材料を黒クラフトペーパーのみに（2026-09-17）
+
+### 要求
+- 発注できる SVG の最大サイズを A4（210 × 297 mm）から周囲 10 mm のマージンを除いた範囲（277 × 190 mm、縦横どちらでも可）にする。
+- 材料は黒クラフトペーパーのみにする。
+
+### 実装
+- `src/pricing.js`: `CATALOG.sheet = { name: "A4", widthMm: 210, heightMm: 297, marginMm: 10 }` を追加し、`limits.maxWidthMm = 277`、`maxHeightMm = 190`、`limits.sizeNote`（エラー文に付ける説明）を設定。`materials` を `kraft-black`（黒クラフトペーパー、厚さ 0.3 mm、料金係数は仮）1 件だけにし、MDF・アクリル・「その他（要相談）」を削除。複数材料・厚さ・`inquiryOnly` の仕組みはコードに残した。`publicCatalog` に `sheet` を追加。サイズ超過のエラー文は「最大 277 × 190 mm、A4 用紙（210 × 297 mm）から周囲 10 mm のマージンを除いた範囲」。
+- `src/svganalyze.js`: 既定の limits も 277 × 190 に合わせ、同じ説明文を付ける（Worker 側の検査は `CATALOG.limits` を渡すので同じ値）。
+- `src/order.js`: 初期値を `kraft-black` / 0.3 mm に。以前の下書き（`sessionStorage`）にカタログにない材料が残っていればカタログ先頭に置き換える。`order/index.html` のドロップ領域に材料と最大サイズの案内を追加。`index.html`（紹介ページ）の ORDER 節の説明を更新。
+- README「使い方（注文する側）」を更新（最大サイズ、材料）。
+- テスト: `tests/pricing.test.js` に A4−マージンの境界テスト（277 × 190・190 × 277 は可、277.1 × 190・200 × 200・210 × 297・300 × 100 は不可）と材料 1 件の検証を追加。`tests/worker.test.js` の材料指定と通知メール本文の期待値を更新。
+
+### 検証結果
+- `npm test`: 190 件すべて成功。`npm run build`: 成功。
+- `vite preview` + Chromium（Playwright）で注文ページを確認: 材料セレクトは「黒クラフトペーパー」のみ、厚さは 0.3 mm のみ、案内文が表示される。277 × 190 mm と 190 × 277 mm の SVG は検査を通り概算が出る（宅配便）。280 × 190 mm と 210 × 297 mm は「サイズが大きすぎます（… 最大 277 × 190 mm、A4 用紙（210 × 297 mm）から周囲 10 mm のマージンを除いた範囲）」で注文不可。console error なし。
+- 未変更・未検証: 送料区分（コンパクト便 200 × 150 mm・3 個まで）は変えていないため、A4 近くの紙は宅配便扱いになる。料金係数（材料費 0.3 円/cm²、加工費 0.1 円/mm、下限 100 円）は仮の値。既存注文の `material` 列に残る `mdf` などは表示上 ID のまま出る。
+
