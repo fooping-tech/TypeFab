@@ -8,6 +8,9 @@ import {
   exportSVG,
   shapeContours,
   automaticBridges,
+  bridgeSize,
+  AUTO_BRIDGE_DEFAULTS,
+  AUTO_BRIDGE_LIMITS,
   bounds,
   transform,
   crossesContour,
@@ -649,6 +652,7 @@ $("#app").innerHTML = `
 <dialog id="font-gallery" class="font-gallery" aria-labelledby="font-gallery-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">FONTS</div><h2 id="font-gallery-title">フォント一覧</h2><div class="gallery-body"></div><button class="text-link" data-open-licenses>フォントライセンスを見る</button></dialog>
 <dialog id="font-licenses" class="font-licenses" aria-labelledby="font-licenses-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">FONT LICENSES</div><h2 id="font-licenses-title">フォントライセンス</h2><div class="licenses-body"></div></dialog>
 <dialog id="font-policy" class="font-policy" aria-labelledby="font-policy-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">USER FONTS</div><h2 id="font-policy-title">ユーザー追加フォントについて</h2><div class="policy-body">${FONT_POLICY_TEXT.split("\n\n").map((t) => `<p>${esc(t)}</p>`).join("")}</div><label class="check policy-check"><input type="checkbox" id="font-policy-agree"> このフォントを使用するために必要な権利・許諾を有していることを確認しました。</label><div class="policy-actions"><button class="text-link" data-open-licenses>詳細を見る（規約全文・標準フォントのライセンス）</button><button id="font-policy-accept" class="primary" disabled>確認してフォントを選ぶ</button></div><p class="note">規約バージョン ${FONT_POLICY_VERSION} · 同意はこのブラウザに保存され、規約が更新されると再確認します。</p></dialog>
+<dialog id="auto-bridge-dialog" class="auto-bridge-dialog" aria-labelledby="auto-bridge-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">AUTO BRIDGE</div><h2 id="auto-bridge-title">自動ブリッジの設定</h2><form method="dialog" id="auto-bridge-form"><div class="fields"><label>幅 <span>mm</span><input id="auto-bridge-width" type="number" step="0.1" min="${AUTO_BRIDGE_LIMITS.min}" max="${AUTO_BRIDGE_LIMITS.max}" required></label><label>高さ <span>mm</span><input id="auto-bridge-height" type="number" step="0.1" min="${AUTO_BRIDGE_LIMITS.min}" max="${AUTO_BRIDGE_LIMITS.max}" required></label></div><p><b>幅</b>はカット線が途切れる長さ（切り残しの太さ）、<b>高さ</b>はカット線と直交する方向の帯の広がりです。文字の穴をつなぐ切り抜きブリッジでは、高さは輪郭の外へのはみ出し量になります（帯の長さは穴と外側の距離から自動で決まります）。穴のない矩形・楕円の保持ブリッジは幅 × 高さの帯になります。${AUTO_BRIDGE_LIMITS.min}〜${AUTO_BRIDGE_LIMITS.max} mm。材料の強度は保証しません。</p><p class="auto-bridge-target" id="auto-bridge-target"></p><div class="policy-actions"><button type="button" class="text-link" id="auto-bridge-reset">既定値（${AUTO_BRIDGE_DEFAULTS.width} × ${AUTO_BRIDGE_DEFAULTS.height} mm）に戻す</button><button type="submit" class="primary" id="auto-bridge-apply">ブリッジを追加</button></div></form></dialog>
 <div id="context-menu" class="context-menu" role="menu" aria-label="編集メニュー" hidden></div>
 <div id="text-editor" class="text-editor" hidden><textarea id="canvas-text" aria-label="文字を編集" maxlength="500" rows="2"></textarea><small>入力はすぐに反映 · Esc / ${shortcut("Enter")} で確定</small></div>`;
 
@@ -2502,7 +2506,50 @@ function togglePreview() {
   tool = "select";
   render();
 }
+// Size used by the automatic bridges; the last values are remembered per
+// browser (no personal data).
+const AUTO_BRIDGE_KEY = "typefab-auto-bridge";
+function loadAutoBridgeSize() {
+  try {
+    return bridgeSize(JSON.parse(localStorage.getItem(AUTO_BRIDGE_KEY) || "null") ?? AUTO_BRIDGE_DEFAULTS);
+  } catch {
+    return { ...AUTO_BRIDGE_DEFAULTS };
+  }
+}
+function saveAutoBridgeSize(size) {
+  try {
+    localStorage.setItem(AUTO_BRIDGE_KEY, JSON.stringify(size));
+  } catch {}
+}
+// Opens the size dialog; the bridges are added when it is submitted.
 function applyAutoBridges() {
+  const ids = selectedItems()
+    .filter((i) => i.type !== "bridge")
+    .map((i) => i.id);
+  if (!ids.length) {
+    notify("自動ブリッジを適用するアイテムを選択してください。");
+    return;
+  }
+  const dialog = $("#auto-bridge-dialog"),
+    size = loadAutoBridgeSize();
+  $("#auto-bridge-width").value = size.width;
+  $("#auto-bridge-height").value = size.height;
+  $("#auto-bridge-target").textContent = `対象: 選択中の ${ids.length} アイテム`;
+  dialog.showModal();
+  $("#auto-bridge-width").focus();
+  $("#auto-bridge-width").select();
+}
+function readAutoBridgeSize() {
+  const w = Number($("#auto-bridge-width").value),
+    h = Number($("#auto-bridge-height").value);
+  const ok = (v) => Number.isFinite(v) && v >= AUTO_BRIDGE_LIMITS.min && v <= AUTO_BRIDGE_LIMITS.max;
+  if (!ok(w) || !ok(h)) {
+    notify(`ブリッジの幅・高さは ${AUTO_BRIDGE_LIMITS.min}〜${AUTO_BRIDGE_LIMITS.max} mm で指定してください。`);
+    return null;
+  }
+  return { width: w, height: h };
+}
+function runAutoBridges(size) {
   const ids = selectedItems()
     .filter((i) => i.type !== "bridge")
     .map((i) => i.id);
@@ -2518,7 +2565,7 @@ function applyAutoBridges() {
     .map((i) => i.id);
   const added = automaticBridges(
     visibleItems(project).filter((i) => !obsolete.includes(i.id)),
-    1.5,
+    size,
     ids,
   );
   if (!added.length) {
@@ -2535,10 +2582,23 @@ function applyAutoBridges() {
   preview = true;
   commit();
   notify(
-    `選択した ${ids.length} アイテムに ${added.length} 個のブリッジを追加しました。`,
+    `選択した ${ids.length} アイテムに ${added.length} 個のブリッジ（幅 ${size.width} × 高さ ${size.height} mm）を追加しました。`,
   );
 }
 $("#auto-bridge").onclick = applyAutoBridges;
+$("#auto-bridge-form").onsubmit = (e) => {
+  e.preventDefault();
+  const size = readAutoBridgeSize();
+  if (!size) return;
+  saveAutoBridgeSize(size);
+  $("#auto-bridge-dialog").close();
+  runAutoBridges(size);
+};
+$("#auto-bridge-reset").onclick = () => {
+  $("#auto-bridge-width").value = AUTO_BRIDGE_DEFAULTS.width;
+  $("#auto-bridge-height").value = AUTO_BRIDGE_DEFAULTS.height;
+};
+$("#auto-bridge-dialog [data-close]").onclick = () => $("#auto-bridge-dialog").close();
 function applyBoolean(operation) {
   try {
     const chosen = selectedItems(),
@@ -3800,6 +3860,7 @@ window.addEventListener("keydown", (e) => {
   if (
     /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) ||
     $("#help").open ||
+    $("#auto-bridge-dialog").open ||
     !menu.hidden
   )
     return;

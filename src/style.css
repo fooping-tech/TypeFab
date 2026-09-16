@@ -822,6 +822,42 @@ dialog p {
 dialog .primary {
   margin-top: 10px;
 }
+.auto-bridge-dialog {
+  max-width: 440px;
+}
+.auto-bridge-dialog .fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.auto-bridge-dialog .fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #56697a;
+}
+.auto-bridge-dialog .fields label span {
+  color: #9aa8b3;
+}
+.auto-bridge-dialog .fields input {
+  font-size: 15px;
+  padding: 7px 9px;
+  border: 1px solid #d7e0e7;
+  border-radius: 6px;
+}
+.auto-bridge-dialog .auto-bridge-target {
+  color: #344b5c;
+  font-weight: 600;
+}
+.auto-bridge-dialog .policy-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
 @media (min-width: 1600px) {
   main {
     grid-template-columns: 250px minmax(350px, 1fr) 285px;

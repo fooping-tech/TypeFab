@@ -9,6 +9,8 @@ import {
   flatten,
   exportSVG,
   automaticBridges,
+  bridgeSize,
+  AUTO_BRIDGE_DEFAULTS,
   cutGeometry,
   transform,
 } from "../src/geometry.js";
@@ -131,4 +133,52 @@ test("import rejects attribute injection in object identifiers", () => {
       items: [{ ...square, id: 'x" onload="alert(1)' }],
     }),
   );
+});
+
+test("bridgeSize accepts a number or {width,height}, clamps and falls back to the defaults", () => {
+  assert.deepEqual(bridgeSize(1.5), { width: 1.5, height: 1.5 });
+  assert.deepEqual(bridgeSize({ width: 2, height: 3 }), { width: 2, height: 3 });
+  assert.deepEqual(bridgeSize({ width: "abc", height: -1 }), { ...AUTO_BRIDGE_DEFAULTS });
+  assert.deepEqual(bridgeSize(undefined), { ...AUTO_BRIDGE_DEFAULTS });
+  assert.deepEqual(bridgeSize({ width: 0.01, height: 999 }), { width: 0.2, height: 50 });
+});
+test("automatic bridge width and height: stencil strip thickness and overlap, holding tab along the longest edge", () => {
+  // Ring: 20 × 20 outer contour with a 6 × 6 hole.
+  const ring = {
+    id: "ring",
+    type: "outline",
+    x: 0,
+    y: 0,
+    rotation: 0,
+    // shapeContours() starts at the origin, so centre the hole inside the outer square.
+    contours: [shapeContours("rect", 20, 20)[0], shapeContours("rect", 6, 6)[0].map((q) => ({ x: q.x + 7, y: q.y + 7 }))],
+  };
+  const legacy = automaticBridges([ring], 1.5);
+  const sized = automaticBridges([ring], { width: 2, height: 3 });
+  assert.equal(legacy.length, 2);
+  assert.equal(sized.length, 2);
+  for (const b of legacy) {
+    assert.equal(b.bridgeMode, "stencil");
+    assert.equal(b.h, 1.5, "strip thickness = width");
+    assert.ok(Math.abs(b.w - (7 + 1.5)) < 1e-6, "span = hole-to-outer distance + overlap");
+  }
+  for (const b of sized) {
+    assert.equal(b.h, 2, "strip thickness = width");
+    assert.ok(Math.abs(b.w - (7 + 3)) < 1e-6, "span = distance + height");
+  }
+  assert.deepEqual(automaticBridges([ring]), legacy, "default equals the previous 1.5 mm behaviour");
+  assert.equal(cutGeometry([ring, ...sized]).unbridgedIslands, 0);
+  // Holding tab on a hole-less rectangle: width along the edge, height across it.
+  const wide = { ...square, id: "wide", w: 30, h: 10, contours: shapeContours("rect", 30, 10) };
+  const [tab] = automaticBridges([wide], { width: 3, height: 1 });
+  assert.equal(tab.bridgeMode, "holding");
+  assert.equal(tab.w, 3);
+  assert.equal(tab.h, 1);
+  assert.equal(Math.abs(tab.rotation) % 180, 0, "aligned with the long horizontal edge");
+  const runs = cutContour(wide.contours[0], [tab]);
+  const length = runs.reduce((sum, r) => sum + r.slice(1).reduce((acc, q, i) => acc + Math.hypot(q.x - r[i].x, q.y - r[i].y), 0), 0);
+  assert.ok(Math.abs(length - (80 - 3)) < 1e-6, "the gap in the cut line equals the width");
+  const [rotatedTab] = automaticBridges([{ ...wide, id: "r", rotation: 30, contours: wide.contours }], { width: 3, height: 1 });
+  assert.ok(Math.abs(((rotatedTab.rotation % 180) + 180) % 180 - 30) < 1e-6, "tab follows the rotated edge");
+  assert.equal(cutGeometry([wide, tab]).untouched, 0);
 });

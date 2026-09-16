@@ -489,3 +489,18 @@
 - 実ブラウザ（Chromium、`vite preview` 4173 ＋ `wrangler dev` 8787 ＋ モック Stripe／Resend 4242、Playwright 42 項目）: プライバシーページの表示と横スクロールなし、旧 `localStorage` ドラフトの削除、フォーム・確認画面のプライバシーリンクと領収書・適格請求書の案内、決済前後の `localStorage` / `sessionStorage` に個人情報なし（選択肢のみ `sessionStorage`）、決済後にトークンが URL から消える、注文状況ページに PAID・受付メールの案内・領収書ボタン・個人情報なし、モックへ届いたメール 2 通の宛先・件名・本文（購入者に住所なし、管理者に住所・電話・メールなし、管理画面 URL あり、API キーは Bearer）、Checkout への `receipt_email`、購入者 API の内容と誤トークンの 404、Worker 配信の管理画面（トークン誤り→拒否、一覧に住所なし、詳細で配送先・通知送信済み・領収書リンク、PROCESSING→READY→SHIPPED→COMPLETED、COMPLETED 後の詳細で個人情報なし、削除の dry run 0 件）、管理 API に GitHub Pages origin の CORS 許可なし、開発 origin の preflight 許可、公開 API が未知 origin を拒否、キャンセル決済で領収書なし・メールなし、iPad / iPhone 幅で横スクロールなし、console error なし — すべて通過。実 D1（SQLite）で `updated_at` を 100 日前にした COMPLETED 注文を `purge` し、氏名・メール・住所が NULL、SVG が 410、`order_notifications` の UPSERT が 2 回目で `attempts=2` になることを確認。
 - 未検証・利用者側の作業: Cloudflare Access の実アプリケーション（メール限定・MFA・AUD）、Resend のドメイン認証（SPF / DKIM / DMARC）と実メール到達、Stripe 本番の領収書メール、Cron Trigger の本番実行は利用者のアカウントが必要で未実施（手順は README）。実 Stripe / 実 Resend に対する送信は行っていない。状態変更の通知メール、返金状態の同期、適格請求書は未実装（Issue の将来拡張のとおり）。
 - 公開: コミット `e8c9f5c` を `main` へ push。Actions https://github.com/fooping-tech/TypeFab/actions/runs/35040618090 は success。`https://fooping-tech.github.io/TypeFab/`、`/privacy/`、`/order/` が HTTP 200、`/admin/` は意図どおり 404（管理画面は Worker 配信へ移行）。公開ページのプライバシーポリシー（最終更新 2026-09-16）と注文ページ・紹介ページからのリンクを確認（2026-09-16）。
+
+## 自動ブリッジの幅・高さを適用前に設定（2026-09-16）
+
+### 要求
+- 「選択にブリッジ」「選択アイテムに自動ブリッジ」（右クリック・コマンドも含む）を押したとき、適用前にブリッジの幅と高さを mm で設定できるようにする。既定値は従来と同じ 1.5 mm で、前回の値を記憶する。
+- 幅＝カット線が途切れる長さ（切り残しの太さ）、高さ＝カット線に直交する方向の帯の広がり（切り抜きブリッジでは輪郭の外へのはみ出し量、保持ブリッジでは帯の奥行き）と定義し、切り抜き（stencil）と保持（holding）の両方式に同じ意味で適用する。
+- 完了条件: `automaticBridges()` が幅・高さを受け取り既定では従来と同じ形状を返す、ダイアログの入力検証、テスト追加、README 更新、実ブラウザ確認、GitHub Pages への反映。
+
+### 実装結果（2026-09-16）
+- `src/geometry.js`: `automaticBridges(items, size, targetIds)` の `size` を数値（従来互換、幅＝高さ）または `{ width, height }` で受け取る `bridgeSize()`（0.2〜50 mm にクランプ、不正値は既定 1.5）と `AUTO_BRIDGE_DEFAULTS` / `AUTO_BRIDGE_LIMITS` を追加。切り抜きブリッジは帯の太さ `h = width`、長さ `w = 穴と外側の距離 + height`（既定では従来と同一形状）。保持ブリッジは最も長い辺に沿って回転し `w = width`（カット線の途切れ）、`h = height`（線に直交する奥行き）にした（従来は回転 0 の正方形）。
+- `src/main.js`: 「選択にブリッジ」「選択アイテムに自動ブリッジ」「自動ブリッジ」コマンド／右クリックはすべて `<dialog id="auto-bridge-dialog">`（幅・高さの数値入力、説明、対象件数、既定値に戻す、ブリッジを追加）を開き、送信時に検証してから適用。値は `localStorage` の `typefab-auto-bridge` に記憶。ダイアログ表示中はエディタのキーボードショートカットを無効化。通知メッセージにサイズを表示。`src/style.css` にダイアログのスタイル。
+- README「アイテムごとの自動ブリッジ」と手順 5 を更新。
+- テスト: `tests/geometry.test.js` に `bridgeSize` の正規化と、リング形状での切り抜きブリッジ（`h = width`、`w = 距離 + height`、既定が従来と一致）・保持ブリッジ（幅 × 高さ、最長辺に沿う回転、カット線の途切れ長＝幅、回転した矩形への追従）の 2 件を追加。`npm test`: 186 passed。`npm run build` 成功。
+- 実ブラウザ（Chromium、production preview、Playwright 17 項目）: ダイアログの既定値 1.5 × 1.5、対象件数、送信前はブリッジ未追加、範囲外の値は送信されない、Esc でキャンセル、2.5 × 4 で文字に 6 個の切り抜きブリッジ（`h = 2.5`、対象付き）、通知メッセージ、値の記憶と再表示、既定値に戻す、ダイアログ内で Delete を押しても選択は消えない、Undo で一括削除、新規長方形に 3 × 1 の保持ブリッジ、console error なし — すべて通過。
+- 未検証: 実機加工での帯の強度（幅・高さは形状の指定であり強度の保証ではない）。

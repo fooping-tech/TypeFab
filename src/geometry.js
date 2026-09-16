@@ -457,7 +457,28 @@ function nearestConnection(a, b) {
     }
   return best;
 }
-export function automaticBridges(items, width = 1.5, targetIds = null) {
+// Size of the automatic bridges: `width` is the length of the gap left in
+// the cut line (the thickness of the material strip), `height` how far the
+// band extends across the cut line (overlap beyond the contours for stencil
+// bridges, depth of the tab for holding bridges).
+export const AUTO_BRIDGE_DEFAULTS = Object.freeze({ width: 1.5, height: 1.5 });
+export const AUTO_BRIDGE_LIMITS = Object.freeze({ min: 0.2, max: 50 });
+export function bridgeSize(size) {
+  const clampMm = (v, fallback) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? Math.min(AUTO_BRIDGE_LIMITS.max, Math.max(AUTO_BRIDGE_LIMITS.min, n)) : fallback;
+  };
+  if (typeof size === "number") {
+    const width = clampMm(size, AUTO_BRIDGE_DEFAULTS.width);
+    return { width, height: width };
+  }
+  return {
+    width: clampMm(size?.width, AUTO_BRIDGE_DEFAULTS.width),
+    height: clampMm(size?.height, AUTO_BRIDGE_DEFAULTS.height),
+  };
+}
+export function automaticBridges(items, size = AUTO_BRIDGE_DEFAULTS, targetIds = null) {
+  const { width, height } = bridgeSize(size);
   const existing = items.filter((i) => i.type === "bridge"),
     added = [];
   for (const item of items.filter(
@@ -526,7 +547,9 @@ export function automaticBridges(items, width = 1.5, targetIds = null) {
           ...base,
           x: p.x,
           y: p.y,
-          w: connection.distance + width,
+          // Along the connection: span both contours plus the overlap; across
+          // it: the width of the strip that stays uncut.
+          w: connection.distance + height,
           h: width,
           rotation:
             (Math.atan2(
@@ -559,14 +582,18 @@ export function automaticBridges(items, width = 1.5, targetIds = null) {
           index = i;
         }
       }
-      const p = mid(ps[index - 1], ps[index]);
+      const p = mid(ps[index - 1], ps[index]),
+        a = ps[index - 1],
+        b = ps[index];
+      // Tab aligned with the segment: `width` along the cut line, `height`
+      // across it (centred on the line, so height/2 on each side).
       added.push({
         ...base,
         x: p.x,
         y: p.y,
         w: width,
-        h: width,
-        rotation: 0,
+        h: height,
+        rotation: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI,
         name: "自動ブリッジ",
         bridgeMode: "holding",
       });
