@@ -584,3 +584,4 @@
 ### 検証結果
 - コードブロック内に ` # ` を含む行が README に残っていないことを確認（0 行）。`npm run db:local` はルートから `npm --prefix worker run db:local` を呼ぶ配線のままで、利用者のログでも wrangler 自体は起動している（余分な引数だけが原因）。
 
+- 公開: コミット `4058200` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/35150423613 は success、https://fooping-tech.github.io/TypeFab/ は HTTP 200。
