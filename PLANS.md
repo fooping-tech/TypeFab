@@ -605,3 +605,4 @@
 - ローカル D1（`worker/.wrangler/state`）に `npm run db:migrate:local` を適用（下記）。本番 D1 は利用者が `cd worker && npm run db:migrate:remote` を適用してからデプロイする必要がある（適用前に Worker をデプロイすると注文作成が列不足で失敗する）。
 - 未検証: 実機での用紙配置・封筒への収まり。
 
+- 公開: コミット `2201a74` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/35153469574 は success、https://fooping-tech.github.io/TypeFab/order/ は HTTP 200 で新しい案内文を含む。Worker 側は利用者が `npm run db:migrate:remote` → `cd worker && npm run deploy` の順で反映する。
