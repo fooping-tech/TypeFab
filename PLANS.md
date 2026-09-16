@@ -504,3 +504,4 @@
 - テスト: `tests/geometry.test.js` に `bridgeSize` の正規化と、リング形状での切り抜きブリッジ（`h = width`、`w = 距離 + height`、既定が従来と一致）・保持ブリッジ（幅 × 高さ、最長辺に沿う回転、カット線の途切れ長＝幅、回転した矩形への追従）の 2 件を追加。`npm test`: 186 passed。`npm run build` 成功。
 - 実ブラウザ（Chromium、production preview、Playwright 17 項目）: ダイアログの既定値 1.5 × 1.5、対象件数、送信前はブリッジ未追加、範囲外の値は送信されない、Esc でキャンセル、2.5 × 4 で文字に 6 個の切り抜きブリッジ（`h = 2.5`、対象付き）、通知メッセージ、値の記憶と再表示、既定値に戻す、ダイアログ内で Delete を押しても選択は消えない、Undo で一括削除、新規長方形に 3 × 1 の保持ブリッジ、console error なし — すべて通過。
 - 未検証: 実機加工での帯の強度（幅・高さは形状の指定であり強度の保証ではない）。
+- 公開: コミット `4f0adb0` を `main` へ push。Actions https://github.com/fooping-tech/TypeFab/actions/runs/35044419605 は success。`https://fooping-tech.github.io/TypeFab/app/` が HTTP 200 で、配信中のエディタのバンドルに `auto-bridge-dialog` が含まれることを確認（2026-09-16）。
