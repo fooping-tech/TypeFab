@@ -535,4 +535,5 @@
 - `wrangler dev --var STRIPE_SECRET_KEY:sk_live_dummy` では `/api/health`・`/api/orders` が 500 `{"error":"Worker の設定に誤りがあります。","details":["STRIPE_SECRET_KEY is a live key …"]}` を返し、ログに `typefab config error` が出た（`--var` が `.dev.vars` より優先されることも同時に確認）。
 - 未検証: 実際の Stripe Test Mode の鍵での Checkout と Stripe CLI（`stripe listen`）による Webhook 受信（CLI 未インストール・利用者の鍵は使っていない）。本番 Worker への `APP_ENV=production` デプロイと、Access 未設定時の 503 の実機表示（デプロイは利用者が行う）。`scripts/dev.mjs` の `.dev.vars` 欠如・`sk_live_` 拒否の分岐は利用者の `.dev.vars` を変更せずに済ませたため、コードの確認のみ。
 - 注意: 本番の `wrangler.toml` に `APP_ENV = "production"` を入れたため、次回デプロイ以降は Cloudflare Access（`ACCESS_TEAM_DOMAIN`/`ACCESS_AUD`）が未設定だと管理画面が使えない（`ADMIN_TOKEN` は無視）。Access を設定してからデプロイする。
+- 公開: コミット `bb74ac6` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/35135353857 は success（`npm test` 189 件・build・デプロイ）。https://fooping-tech.github.io/TypeFab/ と `/app/` は HTTP 200。Worker 側（`wrangler.toml` の `APP_ENV`、`MAIL_MODE`）は利用者の `cd worker && npm run deploy` で反映される。
 
