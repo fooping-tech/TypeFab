@@ -570,5 +570,5 @@
 ### 検証結果
 - `npm test`: 190 件すべて成功。`npm run build`: 成功。
 - `vite preview` + Chromium（Playwright）で注文ページを確認: 案内文が「最大サイズは 215 × 100 mm（長形3号封筒 120 × 235 mm から周囲 10 mm のマージンを除いた範囲）」になり、215 × 100・100 × 215・50 × 148 mm の SVG は検査を通り概算が出る。220 × 100 mm と 120 × 235 mm（封筒そのもの）は「サイズが大きすぎます（… 最大 215 × 100 mm、長形3号封筒（120 × 235 mm）から周囲 10 mm のマージンを除いた範囲）」で注文不可。console error なし。
-- 未変更: 送料区分（コンパクト便 200 × 150 mm・3 個まで）は据え置きのため、長さ 200 mm 超のデザインは宅配便扱いになる。封筒で発送するなら送料表の見直しが必要。
+- 未変更: 送料区分（コンパクト便 200 × 150 mm・3 個まで）は据え置きのため、長さ 200 mm 超のデザインは宅配便扱いになる。封筒で発送するなら送料表の見直しが必要。- 公開: コミット `92a8ac8` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/35142451731 は success。https://fooping-tech.github.io/TypeFab/order/ は HTTP 200 で新しい案内文（最大サイズ 215 × 100 mm）を含む。Worker 側は利用者の `cd worker && npm run deploy` で反映。
 
