@@ -244,10 +244,12 @@ Node.js 22以降で実行します。
 
 ```sh
 npm ci
-npm run dev        # Vite 開発サーバー + 注文API Worker（ローカル D1・R2）を同時起動
+npm run dev
 npm test
 npm run build
 ```
+
+`npm run dev` は Vite 開発サーバーと注文API Worker（ローカル D1・R2）を同時に起動します。
 
 ローカル: http://127.0.0.1:5173/TypeFab/ （紹介ページ）、http://127.0.0.1:5173/TypeFab/app/ （エディタ）、http://127.0.0.1:5173/TypeFab/order/ （加工注文）、http://127.0.0.1:8787/admin/ （注文管理）
 
@@ -380,14 +382,18 @@ Development（npm run dev）              Production（cd worker && npm run depl
 
 ### ローカル開発（development）
 
-初回だけ:
+初回だけ（リポジトリのルートで、1行ずつ実行します）:
 
 ```sh
-npm ci                                          # ルート
-cd worker && npm ci && cd ..                    # wrangler
-cp worker/.dev.vars.example worker/.dev.vars    # Stripe のテストキー（sk_test_…）だけ入れる。git 管理外
-npm run db:local                                # ローカル D1 にスキーマを作成（worker/.wrangler/state）
+npm ci
+npm --prefix worker ci
+cp worker/.dev.vars.example worker/.dev.vars
+npm run db:local
 ```
+
+1. `npm ci` はルートの依存、`npm --prefix worker ci` は Worker の依存（wrangler）を入れます。
+2. `cp` で作った `worker/.dev.vars`（git 管理外）を開き、`STRIPE_SECRET_KEY` に Stripe のテストキー（`sk_test_…`）を入れます。ほかの値はそのままで動きます。
+3. `npm run db:local` がローカル D1（`worker/.wrangler/state`）にスキーマを作ります。
 
 通常:
 
@@ -417,10 +423,13 @@ npm run dev
 ### 本番環境（production）: Cloudflare Workers のセットアップ
 
 ```sh
-npm ci                 # ルート（Workerも src/ のモジュールを使います）
-cd worker && npm ci    # wrangler
+npm ci
+npm --prefix worker ci
+cd worker
 npx wrangler login
 ```
+
+ルートの `npm ci` は Worker も使う `src/` のモジュールのため、`npm --prefix worker ci` は wrangler のためです。以降の `npx wrangler …` は `worker/` で実行します。
 
 1. **D1**: `npx wrangler d1 create typefab-orders` を実行し、表示された `database_id` を `worker/wrangler.toml` に書きます。スキーマを適用します: `npm run db:remote`（ルートからも `npm run db:remote`）。既存 DB は `npm run db:migrate:remote`（`migrations/0002_privacy_mail_receipt.sql`）を適用します。
 2. **R2**: `npx wrangler r2 bucket create typefab-order-svgs`（名前を変えた場合は `wrangler.toml` の `bucket_name` も変更）。

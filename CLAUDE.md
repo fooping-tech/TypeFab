@@ -24,6 +24,8 @@ npm run build    # dist/ を生成
 npm run preview
 ```
 
+README のシェル用コードブロックには行末コメント（`# …`）を書かない。対話型 zsh は行中の `#` をコメントにしないため、コピペすると `cd .. # wrangler` などが壊れる（2026-09-17 に実際に発生）。説明はコードブロックの外に書く。
+
 Worker をローカルで動かす初回準備は `cd worker && npm ci`、`cp worker/.dev.vars.example worker/.dev.vars`（Stripe のテストキーのみ。`sk_live_` は拒否される）、`npm run db:local`。`.dev.vars` が無ければ `npm run dev` は Vite だけを起動する。dev/prod の分離（`APP_ENV`、`MAIL_MODE=console`、本番では `ADMIN_TOKEN` 無効）は README「開発環境と本番環境（Issue #11）」を参照。`worker/.dev.vars` は読んでも内容（鍵）を出力しない。
 
 プレビューサーバーの起動にはサンドボックスのネットワーク待ち受け許可が必要な場合がある。ブラウザ確認は `@playwright/cli` を直接使った実績がある（`.playwright-cli/` と `output/` は `.gitignore` 済み）。

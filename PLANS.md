@@ -572,3 +572,15 @@
 - `vite preview` + Chromium（Playwright）で注文ページを確認: 案内文が「最大サイズは 215 × 100 mm（長形3号封筒 120 × 235 mm から周囲 10 mm のマージンを除いた範囲）」になり、215 × 100・100 × 215・50 × 148 mm の SVG は検査を通り概算が出る。220 × 100 mm と 120 × 235 mm（封筒そのもの）は「サイズが大きすぎます（… 最大 215 × 100 mm、長形3号封筒（120 × 235 mm）から周囲 10 mm のマージンを除いた範囲）」で注文不可。console error なし。
 - 未変更: 送料区分（コンパクト便 200 × 150 mm・3 個まで）は据え置きのため、長さ 200 mm 超のデザインは宅配便扱いになる。封筒で発送するなら送料表の見直しが必要。- 公開: コミット `92a8ac8` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/35142451731 は success。https://fooping-tech.github.io/TypeFab/order/ は HTTP 200 で新しい案内文（最大サイズ 215 × 100 mm）を含む。Worker 側は利用者の `cd worker && npm run deploy` で反映。
 
+## README のセットアップコマンドをコピペ可能に（2026-09-17）
+
+### 要求
+- 利用者が README「ローカル開発」の初回セットアップをコピペしたところ、`cd worker && npm ci && cd .. # wrangler` が `cd: too many arguments`、`cp … # …` が `Not a directory`、`npm run db:local # …` が wrangler の `Unknown arguments` で失敗した。対話型 zsh は行中の `#` をコメントにしないため、行末コメントがコマンド引数として渡っていた。
+
+### 実装
+- README のシェル用コードブロックから行末コメントをすべて除去し、説明はブロックの外（番号付きリスト・段落）に移した。対象: 「開発」節の `npm run dev`、「ローカル開発（development）」の初回手順（`npm ci` / `npm --prefix worker ci` / `cp worker/.dev.vars.example worker/.dev.vars` / `npm run db:local`）、「本番環境（production）」の `npm ci` / `npm --prefix worker ci` / `cd worker` / `npx wrangler login`。
+- CLAUDE.md に「README のコードブロックに行末コメントを書かない」を追記。
+
+### 検証結果
+- コードブロック内に ` # ` を含む行が README に残っていないことを確認（0 行）。`npm run db:local` はルートから `npm --prefix worker run db:local` を呼ぶ配線のままで、利用者のログでも wrangler 自体は起動している（余分な引数だけが原因）。
+
