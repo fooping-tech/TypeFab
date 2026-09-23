@@ -128,6 +128,11 @@ import {
   STYLES as SC_STYLES,
   LIMITS as SC_LIMITS,
 } from "./smart-connect.js";
+import {
+  freehandItem,
+  FREEHAND_DEFAULTS,
+  FREEHAND_LIMITS,
+} from "./freehand.js";
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 let typography;
 const typographyReady = import("./typography.js").then((m) => (typography = m));
@@ -248,6 +253,7 @@ const icons = {
   circle: "◯",
   polygon: "⬡",
   line: "╱",
+  freehand: "✎",
   bridge: "⊣⊢",
 };
 const labels = {
@@ -256,15 +262,43 @@ const labels = {
   rect: "長方形",
   circle: "楕円",
   line: "線分",
+  freehand: "描く",
   bridge: "ブリッジ",
 };
+// Freehand strokes (freehand.js): smoothing and auto-close, kept in this
+// browser like the auto-bridge size.
+const FREEHAND_KEY = "typefab-freehand";
+const freehandParams = { ...FREEHAND_DEFAULTS };
+try {
+  const saved = JSON.parse(localStorage.getItem(FREEHAND_KEY) ?? "null");
+  if (saved && typeof saved === "object") {
+    const v = Number(saved.smoothing);
+    if (Number.isFinite(v))
+      freehandParams.smoothing = Math.max(
+        FREEHAND_LIMITS.smoothing.min,
+        Math.min(FREEHAND_LIMITS.smoothing.max, v),
+      );
+    if (typeof saved.autoClose === "boolean")
+      freehandParams.autoClose = saved.autoClose;
+  }
+} catch {}
+function saveFreehandParams() {
+  try {
+    localStorage.setItem(FREEHAND_KEY, JSON.stringify(freehandParams));
+  } catch {}
+}
+// Phone layout (style.css): panels become bottom sheets, the toolbars a
+// sheet of their own, and the header keeps only what fits.
+const mobileQuery = matchMedia("(max-width: 860px)");
+const isMobile = () => mobileQuery.matches;
 function notify(message) {
   $("#message").textContent = message;
+  $("footer").classList.add("has-message");
   clearTimeout(statusTimer);
-  statusTimer = setTimeout(
-    () => ($("#message").textContent = "ブラウザ内で編集 · mm"),
-    7000,
-  );
+  statusTimer = setTimeout(() => {
+    $("#message").textContent = "ブラウザ内で編集 · mm";
+    $("footer").classList.remove("has-message");
+  }, 7000);
 }
 function saveNow() {
   clearTimeout(saveTimer);
@@ -627,9 +661,9 @@ function exportFile() {
 }
 
 $("#app").innerHTML = `
-<header><a class="brand" href="./"><span class="brand-mark">t<span>f</span></span>TypeFab<span class="beta">BETA</span></a><div class="document-title"><span id="project-name"></span><small id="save-status">ローカルプロジェクト</small></div><div class="header-actions"><button id="new-project" title="新規プロジェクト">新規</button><button id="open-project" title="TypeFabプロジェクト（.json）を開く、またはSVGの図形を読み込む（キャンバスへのドロップも可）">開く</button><button id="save-project">保存</button><button id="export" class="primary">↗ SVGを書き出す</button><button id="order" title="現在のデザインのSVGをそのまま加工注文ページへ渡します">⚒ このデザインを加工注文する</button></div></header>
+<header><a class="brand" href="./"><span class="brand-mark">t<span>f</span></span><span class="brand-name">TypeFab</span><span class="beta">BETA</span></a><div class="document-title"><span id="project-name"></span><small id="save-status">ローカルプロジェクト</small></div><div class="mobile-actions"><button data-mobile-action="undo" title="元に戻す" aria-label="元に戻す">↶</button><button data-mobile-action="redo" title="やり直す" aria-label="やり直す">↷</button><button id="more-button" title="メニュー" aria-label="メニュー" aria-haspopup="menu">⋯</button><button id="mobile-help" class="help-round" aria-label="使い方">?</button></div><div class="header-actions"><button id="new-project" title="新規プロジェクト">新規</button><button id="open-project" title="TypeFabプロジェクト（.json）を開く、またはSVGの図形を読み込む（キャンバスへのドロップも可）">開く</button><button id="save-project">保存</button><button id="export" class="primary">↗ <span class="long">SVGを書き出す</span><span class="short">SVG</span></button><button id="order" title="現在のデザインのSVGをそのまま加工注文ページへ渡します">⚒ このデザインを加工注文する</button></div></header>
 <div class="workspace-tabs"><span class="workspace-title">DESIGN WORKSPACE</span><span class="tab active">スケッチ</span><span class="subtle">文字から、ものづくりへ。</span><button id="help-button">? 使い方</button></div>
-<nav class="toolbar" aria-label="スケッチツール"><div class="tool-group">${Object.entries(
+<div id="tools" class="toolbars"><div class="panel-heading sheet-only">ツール<span class="eyebrow">TOOLS</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><nav class="toolbar" aria-label="スケッチツール"><div class="tool-group">${Object.entries(
   labels,
 )
   .flatMap((entry) =>
@@ -642,10 +676,11 @@ $("#app").innerHTML = `
   .join(
     "",
   )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="smart-connect" class="tool" title="文字どうし・文字内の部位を接続形状でつないで1つの輪郭にする（Smart Connect）"><span class="tool-icon">⟟</span>スマート接続</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button><button id="group" class="tool" title="選択をグループ化 (${shortcut("G")})"><span class="tool-icon">▣</span>グループ化</button><button id="ungroup" class="tool" title="グループを解除、または文字を1文字ずつ・部位ごとに分解 (${shortcut("G", true)})"><span class="tool-icon">⊞</span>グループ化解除</button><button id="warp" class="tool" title="文字のアウトラインをエンベロープで変形（Text Warp）"><span class="tool-icon">⌒</span>ワープ</button><button id="edit-path" class="tool" title="パスのノードを直接編集（ダブルクリックでも開始）"><span class="tool-icon">✎</span>パス編集</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
-<nav class="toolbar cad-toolbar" aria-label="2D CADツール">${CAD_GROUPS.map((g) => `<div class="tool-group"><span class="tool-group-label">${g}</span>${Object.entries(CAD_TOOLS).filter(([, t]) => t.group === g).map(([id, t]) => `<button data-tool="${id}" class="tool cad-tool" title="${t.hint}"><span class="tool-icon">${t.icon}</span>${t.label}</button>`).join("")}</div>`).join("")}<span class="subtle cad-note">拘束なしの2D編集 · 結果は通常のパス · 寸法は参照のみ</span></nav>
-<main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
-<section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
-<aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
+<nav class="toolbar cad-toolbar" aria-label="2D CADツール">${CAD_GROUPS.map((g) => `<div class="tool-group"><span class="tool-group-label">${g}</span>${Object.entries(CAD_TOOLS).filter(([, t]) => t.group === g).map(([id, t]) => `<button data-tool="${id}" class="tool cad-tool" title="${t.hint}"><span class="tool-icon">${t.icon}</span>${t.label}</button>`).join("")}</div>`).join("")}<span class="subtle cad-note">拘束なしの2D編集 · 結果は通常のパス · 寸法は参照のみ</span></nav></div>
+<main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
+<section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/><path id="ink" fill="none" stroke="#c8793f" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><button class="canvas-btn draw-btn" data-tool="freehand" title="フリーハンドで描く">✎ 描く</button><button class="canvas-btn select-btn" data-tool="select" title="選択">↖ 選択</button><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
+<aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
+<nav class="mobile-bar" aria-label="モバイル操作"><button data-sheet="objects"><span>☰</span>オブジェクト</button><button data-sheet="tools"><span>✚</span>ツール</button><button data-sheet="inspector"><span>⚙</span>編集<small id="bar-badge"></small></button><button id="mobile-preview"><span>◎</span>プレビュー</button><button id="mobile-fit"><span>⛶</span>全体</button></nav>
 <footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <button id="font-licenses-button" class="text-link">フォントライセンス</button> <span class="subtle">TypeFab / 0.12</span></span></footer>
 <input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,.svg,application/json,image/svg+xml">
 <dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「開く」でSVGの図形も読み込めます。「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
@@ -903,11 +938,18 @@ function renderProperties() {
     $("#board-height").value = project.height;
     return;
   }
+  const freehandSection =
+    tool === "freehand"
+      ? `<section class="freehand-panel"><div class="object-type">FREEHAND / 描く</div><h3>フリーハンド</h3><label class="full-label">なめらかさ <output id="freehand-smoothing-value">${freehandParams.smoothing.toFixed(1)}</output><input id="freehand-smoothing" type="range" min="${FREEHAND_LIMITS.smoothing.min}" max="${FREEHAND_LIMITS.smoothing.max}" step="0.5" value="${freehandParams.smoothing}"></label><label class="check freehand-check"><input type="checkbox" id="freehand-close" ${freehandParams.autoClose ? "checked" : ""}> 始点の近くで終えたら閉じる</label><p class="note">ペン・指・マウスでドラッグして描きます。線はなめらかなベジェ曲線に変換され（はっきりした角は角のまま）、パス編集でノードを調整できます。なめらかさは画面上の大きさ（ピクセル）で決まるので、拡大して描くほど細かく残ります。閉じた図形は切り抜く形、開いた線はそのままカット線になります。</p></section>`
+      : "";
   $("#properties").innerHTML = i
     ? `<section><div class="object-type">${i.type === "bridge" ? "BRIDGE / 非カット" : i.type === "text" ? "TYPOGRAPHY" : "SKETCH / パス"}</div><h3>${esc(i.name)}</h3><h4>配置 <span>mm</span></h4><div class="fields">${field("x", "X", i.x, 0.5)}${field("y", "Y", i.y, 0.5)}${field("rotation", "回転 °", i.rotation, 1, -360, 360)}</div></section>
   ${i.type === "text" ? `<section><h4>テキスト</h4><textarea id="text-content" maxlength="500" aria-label="文字内容">${esc(i.text)}</textarea>${fontField(i)}<div class="fields">${field("size", "サイズ mm", i.size, 0.5, 1, 300)}${field("spacing", "字間 mm", i.spacing, 0.1, -100, 100)}${field("stretch", "長体・平体 %", (i.stretch ?? 1) * 100, 1, 5, 2000)}</div><label class="check vertical-check"><input type="checkbox" id="vertical" ${i.vertical ? "checked" : ""}> 縦書き（右から左）</label><p class="note">四隅のハンドルで拡縮すると、サイズと長体・平体が変わります。キャンバスでダブルクリックすると文字を編集できます。</p></section><section><h4>ワープ・パス</h4><button id="enter-warp" class="wide-button">⌒ ワープ（エンベロープ変形）</button><p class="note">${i.warp ? `現在: ${esc(warpLabel(i.warp))} · ` : ""}文字のアウトラインそのものを曲線のエンベロープで変形します。</p><button id="outline-edit" class="wide-button">✎ アウトライン化してパス編集</button><p class="note">文字の輪郭をベジェ曲線のパスに変換し、ノードを直接編集します。</p></section>` : ""}
   ${["bridge", "rect", "circle", "line"].includes(i.type) ? `<section><h4>${i.type === "bridge" ? "切り残し領域" : "寸法"} <span>mm</span></h4><div class="fields">${field("w", "幅", i.w, 0.1, i.type === "line" ? 0 : 0.1)}${field("h", "高さ", i.h, 0.1, i.type === "line" ? 0 : 0.1)}${i.type === "rect" ? field("radius", "フィレット R", i.radius ?? 0, 0.1, 0, 1000) : ""}</div>${i.type === "rect" ? '<p class="note">4つの角を半径Rで丸めます。最大は短辺の半分です。</p>' : ""}${i.type === "bridge" ? '<p class="note">オレンジ色の領域に重なったカット線を除去します。</p>' : ""}</section>` : ""}`
-    : '<section class="no-selection"><span>↖</span><h3>オブジェクトを選択</h3><p>キャンバスや左の一覧から選択して、文字・位置・寸法を編集できます。</p></section>';
+    : freehandSection ||
+      '<section class="no-selection"><span>↖</span><h3>オブジェクトを選択</h3><p>キャンバスや左の一覧から選択して、文字・位置・寸法を編集できます。</p></section>';
+  if (i && freehandSection)
+    $("#properties").innerHTML = freehandSection + $("#properties").innerHTML;
   if (i && i.type !== "text" && canWarp(i))
     $("#properties").innerHTML +=
       `<section><h4>パス・ワープ</h4><button id="enter-path" class="wide-button">✎ パスを編集（ノード）</button><p class="note">ダブルクリックでも開始できます。${i.path ? "" : "最初の編集で編集用パスに変換されます。"}</p><button id="enter-warp" class="wide-button">⌒ ワープ（エンベロープ変形）</button><p class="note">${i.warp ? `現在: ${esc(warpLabel(i.warp))} · ` : ""}輪郭そのものを曲線のエンベロープで変形します。</p></section>`;
@@ -1123,8 +1165,10 @@ function renderCanvas() {
         : pathEdit
           ? "ノード・ハンドルをドラッグ · Shiftで追加選択 · パス上をダブルクリックで追加 · Deleteで削除 · Escで終了"
           : tool === "select"
-            ? "空白からドラッグで範囲選択 · 右クリックで編集メニュー · 2本指スワイプで移動 · ピンチでズーム"
-            : (CAD_TOOLS[tool]?.hint ?? `${labels[tool]}を配置する場所をクリック`);
+            ? "空白からドラッグで範囲選択 · 右クリック／長押しで編集メニュー · 2本指スワイプで移動 · ピンチでズーム"
+            : tool === "freehand"
+              ? "ペン・指・マウスでドラッグして描く · 始点の近くで終えると閉じた図形 · タップで選択"
+              : (CAD_TOOLS[tool]?.hint ?? `${labels[tool]}を配置する場所をクリック`);
   $("#board-label").textContent = `${project.width} × ${project.height} mm`;
   $("#zoom-reset").textContent = `${Math.round(zoom * 100)}%`;
 }
@@ -1171,6 +1215,11 @@ function render({ properties = true } = {}) {
   $("#preview").classList.toggle("active", preview);
   $("#undo").disabled = !history.length;
   $("#redo").disabled = !future.length;
+  $('[data-mobile-action="undo"]').disabled = !history.length;
+  $('[data-mobile-action="redo"]').disabled = !future.length;
+  $("#mobile-preview").classList.toggle("active", preview);
+  const chosenCount = selectedItems().length;
+  $("#bar-badge").textContent = chosenCount ? String(chosenCount) : "";
   $("#outline").disabled =
     selectedItems().length !== 1 || selectedItem()?.type !== "text";
   $("#auto-bridge").disabled = !selectedItems().some(
@@ -1247,6 +1296,10 @@ $("#properties").addEventListener("change", (e) => {
     updateSelected(el.dataset.prop, el.valueAsNumber);
   } else if (el.id === "font-select") chooseFont(el.value);
   else if (el.id === "vertical") updateSelected("vertical", el.checked);
+  else if (el.id === "freehand-close") {
+    freehandParams.autoClose = el.checked;
+    saveFreehandParams();
+  } else if (el.id === "freehand-smoothing") saveFreehandParams();
   else if (el.id === "ratio-lock") updateSelected("ratioLocked", el.checked);
   else if (el.id === "warp-bend") liveSession = null;
   else if (el.dataset.nodeProp)
@@ -1322,6 +1375,12 @@ $("#properties").addEventListener("input", (e) => {
   }
   if (e.target.id === "text-content") liveText(e.target.value);
   if (e.target.id === "warp-bend") liveBend(e.target.valueAsNumber);
+  if (e.target.id === "freehand-smoothing") {
+    freehandParams.smoothing = e.target.valueAsNumber;
+    $("#freehand-smoothing-value").textContent =
+      freehandParams.smoothing.toFixed(1);
+    saveFreehandParams();
+  }
 });
 $("#properties").addEventListener("focusout", (e) => {
   if (e.target.id === "warp-bend") liveSession = null;
@@ -3135,6 +3194,54 @@ function pathPointerDown(e, p) {
   e.preventDefault();
   return true;
 }
+// A stroke in progress is drawn as a raw polyline until the pen lifts.
+function drawInk(points) {
+  $("#ink").setAttribute("d", points.length > 1 ? pathData([points]) : "");
+}
+// The lifted stroke becomes a fixed path (freehand.js); a tap selects what
+// is under it instead, so the tool doubles as a picker on touch screens.
+function finishStroke(done) {
+  drawInk([]);
+  try {
+    const layer = project.layers.find((l) => l.id === activeLayer);
+    if (!layer?.visible || layer.locked)
+      throw Error("表示中のロックされていないレイヤーを選んでください。");
+    // Smoothing is set in screen pixels: what looks jittery at this zoom.
+    const made = freehandItem(
+      done.points,
+      { ...freehandParams, unit: 1 / $("#canvas").getScreenCTM().a },
+      { id: uid(), layerId: activeLayer },
+    );
+    if (!made) {
+      if (done.hit && isEditable(project, project.items.find((i) => i.id === done.hit)))
+        selectGroupOf(done.hit);
+      else selectItem(null);
+      render();
+      return;
+    }
+    if (project.items.length >= 2000)
+      throw Error("オブジェクトが多すぎます。オブジェクトは全体で2000個までです。");
+    checkpoint();
+    project.items.push(made.item);
+    selectItem(made.item.id);
+    commit();
+    const nodes = nodeKeys(made.item.path).length;
+    notify(
+      made.closed
+        ? `閉じた図形にしました（ノード ${nodes} 個${made.corners ? `・角 ${made.corners} 個` : ""}）。続けて描けます。選択ツールでダブルタップするとノードを編集できます。`
+        : `線を追加しました（ノード ${nodes} 個）。始点の近くで終えると閉じた図形になります。`,
+    );
+  } catch (e) {
+    notify(e.message);
+  }
+}
+// Touch long-press opens the edit menu (iOS sends no contextmenu event).
+let longPress = null,
+  longPressAt = null;
+function cancelLongPress() {
+  clearTimeout(longPress);
+  longPress = null;
+}
 $("#canvas").addEventListener("pointerdown", (e) => {
   if (loading || e.button !== 0 || preview) return;
   // On a Mac, Ctrl+click is a right click and opens the menu instead.
@@ -3144,6 +3251,36 @@ $("#canvas").addEventListener("pointerdown", (e) => {
     scPointerDown(e, p);
     e.preventDefault();
     return;
+  }
+  if (tool === "freehand") {
+    if (drag) return;
+    drag = {
+      kind: "draw",
+      pointerId: e.pointerId,
+      pointerType: e.pointerType,
+      points: [p],
+      hit: e.target.closest("[data-object]")?.dataset.object ?? null,
+      moved: false,
+    };
+    $("#canvas").setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
+  if (e.pointerType === "touch" && tool === "select" && !cad) {
+    cancelLongPress();
+    longPressAt = { x: e.clientX, y: e.clientY };
+    const target = e.target;
+    longPress = setTimeout(() => {
+      longPress = null;
+      if (drag?.moved || pinchActive) return;
+      drag = null;
+      $("#marquee").setAttribute("hidden", "");
+      // The finger is still down: the click it sends on release must not
+      // pick a menu item, so the menu ignores clicks until shortly after.
+      menuGuard = Infinity;
+      openCanvasMenu(longPressAt.x, longPressAt.y + 16, target);
+      if (menu.hidden) menuGuard = 0;
+    }, 550);
   }
   const annotation = e.target.closest("[data-annotation]");
   if (annotation && !cad) {
@@ -3257,7 +3394,21 @@ $("#canvas").addEventListener("pointerdown", (e) => {
   render();
 });
 $("#canvas").addEventListener("pointermove", (e) => {
+  if (
+    longPress &&
+    Math.hypot(e.clientX - longPressAt.x, e.clientY - longPressAt.y) > 8
+  )
+    cancelLongPress();
   if (!drag) return;
+  if (drag.kind === "draw") {
+    if (e.pointerId !== drag.pointerId) return;
+    const events = e.getCoalescedEvents?.() ?? [];
+    for (const ev of events.length ? events : [e])
+      drag.points.push(canvasPoint(ev));
+    drag.moved = true;
+    drawInk(drag.points);
+    return;
+  }
   const p = canvasPoint(e);
   if (drag.kind === "sc-handle") {
     drag.current = p;
@@ -3395,8 +3546,18 @@ $("#canvas").addEventListener("pointermove", (e) => {
   renderCanvas();
 });
 for (const event of ["pointerup", "pointercancel"])
-  $("#canvas").addEventListener(event, () => {
+  $("#canvas").addEventListener(event, (e) => {
+    cancelLongPress();
+    if (menuGuard === Infinity) menuGuard = performance.now() + 500;
     if (drag) drag.label = null;
+    if (drag?.kind === "draw") {
+      if (e.pointerId !== drag.pointerId) return;
+      const done = drag;
+      drag = null;
+      if (event === "pointerup") finishStroke(done);
+      else drawInk([]);
+      return;
+    }
     if (drag?.kind === "sc-handle") {
       const done = drag;
       if (event === "pointerup" && done.moved) scPointerUp(done.current);
@@ -3521,6 +3682,12 @@ $("#canvas-scroll").addEventListener(
   "pointerdown",
   (e) => {
     if (loading || e.pointerType !== "touch") return;
+    // A palm resting on the screen must not interrupt a pen stroke.
+    if (drag?.kind === "draw" && drag.pointerType === "pen") {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     touchPoints.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
     if (touchPoints.size === 2) {
       if (drag?.moved && ["move", "resize"].includes(drag.kind)) {
@@ -3528,6 +3695,8 @@ $("#canvas-scroll").addEventListener(
         future = [];
         persist();
       }
+      if (drag?.kind === "draw") drawInk([]);
+      cancelLongPress();
       drag = null;
       $("#marquee").setAttribute("hidden", "");
       pinchActive = true;
@@ -3597,7 +3766,8 @@ $("#canvas-scroll").addEventListener(
 new ResizeObserver(() => renderCanvas()).observe($("#canvas-scroll"));
 // Right-click edit menu, listing Fusion-style commands for the selection.
 const menu = $("#context-menu");
-let menuReturn = null;
+let menuReturn = null,
+  menuGuard = 0;
 const menuActions = {
   cut: cutSelection,
   copy: copySelection,
@@ -3640,8 +3810,42 @@ const menuActions = {
   undo,
   redo,
   preview: togglePreview,
+  new: () => $("#new-project").click(),
+  open: () => $("#project-file").click(),
+  save: () => $("#save-project").click(),
+  export: exportFile,
+  order: orderDesign,
+  help: () => $("#help").showModal(),
+  licenses: openFontLicenses,
 };
+// The phone header's 「⋯」 menu: file actions, then the toolbar buttons
+// that do not fit on a small screen (their enabled state is the buttons').
+function overflowEntries() {
+  const button = (id, label) => [`click:#${id}`, label, "", !$(`#${id}`).disabled];
+  return [
+    ["new", "新規プロジェクト", "", true],
+    ["open", "開く（JSON / SVG）", "", true],
+    ["save", "保存（JSON）", "", true],
+    ["export", "SVGを書き出す", "", true],
+    ["order", "このデザインを加工注文する", "", true],
+    "-",
+    ["select-all", "すべて選択", "", true],
+    button("auto-bridge", "選択にブリッジ"),
+    button("smart-connect", sc ? "スマート接続を終了" : "スマート接続"),
+    button("outline", "アウトライン化"),
+    button("group", "グループ化"),
+    button("ungroup", "グループ化解除"),
+    button("warp", warpId ? "ワープを完了" : "ワープ"),
+    button("edit-path", pathEdit ? "パス編集を終了" : "パス編集"),
+    "-",
+    ["preview", preview ? "スケッチに戻る" : "加工プレビュー", "", true],
+    "-",
+    ["help", "使い方", "", true],
+    ["licenses", "フォントライセンス", "", true],
+  ];
+}
 function menuEntries(onObject) {
+  if (onObject === "overflow") return overflowEntries();
   if (onObject === "path") {
     const any = pathEdit.selection.size > 0;
     return [
@@ -3733,7 +3937,9 @@ function menuEntries(onObject) {
 function openMenu(x, y, onObject) {
   const chosen = selectedItems(),
     title =
-      onObject === "path"
+      onObject === "overflow"
+        ? "メニュー"
+        : onObject === "path"
         ? `パス編集 · ノード ${pathEdit.selection.size} 個選択`
         : !onObject
           ? "キャンバス"
@@ -3776,9 +3982,11 @@ function openMenuForSelection() {
 }
 menu.addEventListener("click", (e) => {
   const b = e.target.closest("[data-action]");
-  if (!b || b.disabled) return;
+  if (!b || b.disabled || performance.now() < menuGuard) return;
   closeMenu();
-  menuActions[b.dataset.action]();
+  const action = b.dataset.action;
+  if (action.startsWith("click:")) $(action.slice(6)).click();
+  else menuActions[action]();
 });
 menu.addEventListener("keydown", (e) => {
   const items = [...menu.querySelectorAll("button:not(:disabled)")],
@@ -3808,28 +4016,69 @@ document.addEventListener(
 );
 window.addEventListener("resize", () => closeMenu(false));
 window.addEventListener("blur", () => closeMenu(false));
-$("#canvas").addEventListener("contextmenu", (e) => {
-  e.preventDefault();
-  if (loading || drag?.moved || sc) return;
+function openCanvasMenu(clientX, clientY, target) {
+  if (loading || drag?.moved || sc || !menu.hidden) return;
   // A touch long-press opens the menu instead of starting a drag.
   drag = null;
   $("#marquee").setAttribute("hidden", "");
-  const id = e.target.closest("[data-object]")?.dataset.object,
+  const id = target.closest("[data-object]")?.dataset.object,
     item = id && project.items.find((i) => i.id === id),
     onObject = Boolean(item && isEditable(project, item));
   // In Path Edit Mode the menu edits nodes; a right-clicked node is selected.
   if (pathItem() && (!id || id === pathEdit.id)) {
-    const node = e.target.closest("[data-node]")?.dataset.node;
+    const node = target.closest("[data-node]")?.dataset.node;
     if (node && !pathEdit.selection.has(node))
       pathEdit.selection = new Set([node]);
     render();
-    openMenu(e.clientX, e.clientY, "path");
+    openMenu(clientX, clientY, "path");
     return;
   }
   if (onObject && !selectionIds().includes(id)) selectGroupOf(id);
   tool = "select";
   render();
-  openMenu(e.clientX, e.clientY, onObject);
+  openMenu(clientX, clientY, onObject);
+}
+$("#canvas").addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  cancelLongPress();
+  openCanvasMenu(e.clientX, e.clientY, e.target);
+});
+// Phone layout: bottom sheets for the object browser, the tools and the
+// inspector, opened from the bar under the canvas.
+let sheet = null;
+function openSheet(name) {
+  sheet = sheet === name ? null : name;
+  if (sheet) document.body.dataset.sheet = sheet;
+  else delete document.body.dataset.sheet;
+  document
+    .querySelectorAll(".mobile-bar [data-sheet]")
+    .forEach((b) => b.classList.toggle("active", b.dataset.sheet === sheet));
+}
+const closeSheet = () => sheet && openSheet(sheet);
+document
+  .querySelectorAll(".mobile-bar [data-sheet]")
+  .forEach((b) => (b.onclick = () => openSheet(b.dataset.sheet)));
+document
+  .querySelectorAll("[data-close-sheet]")
+  .forEach((b) => (b.onclick = closeSheet));
+// Choosing a tool or an action closes the tools sheet.
+$("#tools").addEventListener("click", (e) => {
+  if (isMobile() && e.target.closest("button:not([data-close-sheet])") && !e.target.closest("#preview"))
+    closeSheet();
+});
+$("#mobile-preview").onclick = togglePreview;
+$("#mobile-fit").onclick = () => setZoom(1);
+$("#mobile-help").onclick = () => $("#help").showModal();
+$("#more-button").onclick = () => {
+  if (!menu.hidden) return closeMenu();
+  const box = $("#more-button").getBoundingClientRect();
+  openMenu(box.left, box.bottom + 4, "overflow");
+};
+for (const b of document.querySelectorAll("[data-mobile-action]"))
+  b.onclick = () => ({ undo, redo })[b.dataset.mobileAction]();
+mobileQuery.addEventListener("change", () => {
+  if (!isMobile()) closeSheet();
+  renderCanvas();
 });
 $("#layers").addEventListener("contextmenu", (e) => {
   const row = e.target.closest("[data-layer]:not(:disabled)"),
@@ -3977,6 +4226,7 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "Escape") {
+    closeSheet();
     selectItem(null);
     tool = "select";
     render();

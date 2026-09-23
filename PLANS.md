@@ -628,3 +628,28 @@
 - 補足: 利用者が `cp worker/.dev.vars.example worker/.dev.vars` を実行済みのため、ローカル Worker の `.dev.vars` は雛形（`sk_test_xxx`、`MAIL_MODE=console`、モック URL なし）になっている。検証では `.dev.vars` を変更せず `wrangler dev --var STRIPE_API_BASE:… --var MAIL_API_BASE:… --var SITE_URL:http://127.0.0.1:4173/TypeFab/` で差し替えた。
 
 - 公開: コミット `b4b35b3` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/35154927541 は success、https://fooping-tech.github.io/TypeFab/order/ は HTTP 200 で「ご注文前の注意」「ご確認と同意」を含む。Worker 側は `npm run db:migrate:remote`（0003: `piece_width_mm` / `piece_height_mm` / `terms_accepted_at`）→ `cd worker && npm run deploy` で反映する。
+
+## エディタのスマートフォン対応とフリーハンド描画（2026-09-23）
+
+### 要求
+- エディタ（`/app/`）をスマートフォンで使えるようにする。UI は https://fooping-tech.github.io/MandalaFab/ を参考にする: 上部のメニューに入りきらない項目は「…」メニューに入れ、「描く」などのボタンはキャンバス下部に置き、パネルは下から出るシートにする。
+- タッチペン（スタイラス）でフリーハンドに描いた線を、きれいな曲線（ベジェのパス）にする。
+
+### 完了条件
+- 幅 860 px 以下でヘッダーが 1 行に収まり、ツール・オブジェクト一覧・プロパティは下部バーから開くシートで使える。「…」メニューにファイル操作・編集操作・ヘルプが入る。
+- 「描く」ツールでペン・指・マウスのストロークが平滑化・コーナー検出・ベジェ近似されて固定パス（`outline`）になり、始点付近で終わると閉じた図形になる。パス編集・ブリッジ・図形演算・SVG 書き出しにそのまま使える。
+- `npm test` と `npm run build` が通り、Chromium（モバイル viewport・タッチ）で確認し、GitHub Pages に公開する。
+
+### 実装
+- `src/freehand.js`（新規）: ストロークの点列（mm）を「画面ピクセル基準」で処理する。`unit`（描いたときの 1 画面 px あたりの mm）で定数を換算し、0.5 px 間隔で再サンプリング → 軽い平滑化（σ = なめらかさ/2、1〜3 px）した点列で角を検出（±5 px の窓での折れ角が 60° 超、かつ ±10 px の窓で 1.5 倍以上に増えない＝弧ではない。隣接候補は最大のものだけ残す）→ 角と角の間ごとにガウス平滑化（σ = なめらかさ px、既定 3）→ `path.js` の `fitStroke` でベジェ近似（許容誤差 0.4 + 0.2σ px）。始点付近（8〜40 px、長さの 10%）で終わる／通り過ぎるストロークは頭と尾の最近接点で閉じる。長さ 6 px 未満はタップ扱い。結果は固定パス（`outline`、`path` + 平坦化 `contours`、名前「フリーハンド」／「フリーハンド（線）」）。
+- `src/path.js`: `fitStroke(points, { closed, corners, error })` を追加（`fitContour` に閉合と角の指定を渡せるようにした。`pathFromContours` は従来どおり）。
+- `src/main.js`: 「描く」ツール（`labels.freehand`、ツールバーの線分の隣、キャンバス右下の `.canvas-btn`）。`pointerdown` で `drag.kind = "draw"`、`pointermove` は `getCoalescedEvents` で全サンプルを集めて `#ink` に生の線を描画、`pointerup` で `freehandItem` に渡す（`unit = 1 / getScreenCTM().a`）。動かさずに離すとその場所のオブジェクトを選択。ペンで描画中は指（手のひら）の `pointerdown` を無視しピンチを始めない。プロパティに「フリーハンド」節（なめらかさ 0〜10 のスライダー、始点の近くで終えたら閉じる。`localStorage` の `typefab-freehand` に記憶）。
+- スマートフォン用レイアウト（`matchMedia("(max-width: 860px)")`、CSS は `style.css` 末尾）: ヘッダーはブランドマーク・元に戻す・やり直す・「⋯」・「?」・「SVG」だけ。「⋯」は右クリックメニューと同じ部品で、ファイル操作（新規・開く・保存・書き出し・注文）と、ツールバーのボタン（`click:#id` でボタンをクリックし、有効／無効はボタンと同期）と、使い方・フォントライセンス。`main` は絶対配置のキャンバスだけになり、`.layers-panel`／`.inspector`／2 本のツールバー（`#tools` で包んだ）は `body[data-sheet]` で下から出る 62% 高さのシート。下部バー（オブジェクト・ツール・編集（選択数バッジ）・プレビュー・全体）。ツールを選ぶとツールシートは閉じる。メッセージ（`footer`）は画面上部のトーストとして 7 秒表示。オブジェクトの長押し（550 ms、8 px 以内）で編集メニューを開く（iOS は `contextmenu` を送らないため。指を離したときのクリックがメニュー項目を押さないよう、離してから 0.5 秒はメニューのクリックを無視）。`app/index.html` の viewport に `viewport-fit=cover`。
+- README「フリーハンドで描く（描く）」「スマートフォン・タブレットでの操作」、CLAUDE.md の構成表を更新。テスト `tests/freehand.test.js`（再サンプリング、平滑化、角の検出（L・円・小さな輪・ノイズ付き三角形）、閉合（開いた弧・ほぼ閉じた円・通り過ぎ・短い線・画面スケール）、ノイズ付き円→閉じた滑らかな 12 ノード以下、手描き矩形→角 4 つ、開いた線、なめらかさとノード数、`fitStroke`、固定パスとして検証・カット・SVG 出力）。
+
+### 検証結果
+- `npm test`: 204 件すべて成功（追加 10 件を含む）。`npm run build`: 成功。
+- `vite preview` + Chromium（Playwright、`~/Library/Caches/ms-playwright/chromium_headless_shell-1234` を `executablePath` で指定）:
+  - デスクトップ 1440 × 900: モバイル用のヘッダー・下部バーは非表示。マウスで描いた円（±0.6 px の揺れ）→「閉じた図形にしました（ノード 4 個）」、L 字（±1.5 px の揺れ）→ 開いた線 24 ノード・角 3（両端＋角）。プロパティに「フリーハンド」節と描いた線の節が表示される。
+  - iPhone 相当 390 × 844（タッチ）: 横スクロールなし、ヘッダー 52 px、キャンバスは残り全面、下部バー 5 ボタン。「⋯」に 16 項目、ツールシート（スケッチ・CAD ツールが折り返して並ぶ、MODIFY／PATTERN の見出しは横書き）、ツールを選ぶとシートが閉じる。オブジェクト・編集シートの表示と × で閉じる。「✎ 描く」→ CDP のタッチイベントで円（±0.7 px の揺れ）を描くと `#ink` に生の線が出て、離すと「閉じた図形にしました（ノード 3 個）」、固定パスが追加され選択される。描くモードで空白をタップすると選択解除。選択ツールでオブジェクトを 750 ms 押すと編集メニュー（項目名は対象の名前）が開き、指を離しても閉じず、項目をタップすると実行（右に 90° 回転 → rotation 90）。2 本指のピンチで 100% → 300%、「全体」で 100%、「プレビュー」で加工プレビュー。横向き 844 × 390 も 1 画面に収まる。console error なし。
+- 未検証: 実機（iPhone／iPad／Android）でのペン入力・手のひら検出・Safari の長押し挙動、実際のタッチペンの筆跡。テストはノイズを合成したストロークで行った。

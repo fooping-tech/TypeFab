@@ -1644,3 +1644,405 @@ dialog .primary {
 .sc-handle:active {
   cursor: grabbing;
 }
+
+/* Desktop: the phone-only controls stay out of the way. */
+.mobile-actions,
+.mobile-bar,
+.sheet-only,
+.sheet-close,
+.canvas-btn,
+#export .short {
+  display: none;
+}
+.toolbars {
+  display: contents;
+}
+.help-round {
+  border: 2px solid #3f85b7;
+  color: #3f85b7;
+  background: #fff;
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  font-weight: 700;
+  font-size: 16px;
+}
+#canvas {
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.freehand-panel output {
+  float: right;
+  color: #a4602f;
+  font-variant-numeric: tabular-nums;
+}
+.freehand-panel input[type="range"] {
+  width: 100%;
+  accent-color: #c27a45;
+  padding: 0;
+  margin: 8px 0 4px;
+}
+.freehand-panel .full-label {
+  margin-top: 0;
+}
+.freehand-check {
+  margin: 12px 0;
+  color: #52697c;
+}
+
+/* Phone / small tablet layout, after MandalaFab: a one-row header with a
+   「⋯」 menu, the canvas filling the screen with floating draw / zoom
+   buttons, and a bar at the bottom that opens the object browser, the tools
+   and the inspector as sheets. */
+@media (max-width: 860px) {
+  html,
+  body {
+    height: 100%;
+    overscroll-behavior: none;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+  }
+  header {
+    height: 52px;
+    min-height: 52px;
+    flex-wrap: nowrap;
+    padding: 0 8px 0 10px;
+    gap: 6px;
+  }
+  .brand {
+    gap: 0;
+  }
+  .brand-name,
+  .brand .beta,
+  .document-title,
+  .workspace-tabs,
+  .canvas-hint,
+  .toolbars .history,
+  .canvas-bottom .check,
+  .canvas-bottom .axis,
+  .header-actions #new-project,
+  .header-actions #open-project,
+  .header-actions #save-project,
+  .header-actions #order,
+  #export .long,
+  footer > span:last-child {
+    display: none;
+  }
+  .brand-mark {
+    width: 30px;
+    height: 30px;
+    font-size: 20px;
+  }
+  .mobile-actions {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-left: auto;
+  }
+  .mobile-actions button {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    font-size: 22px;
+    line-height: 1;
+  }
+  .mobile-actions .help-round {
+    width: 32px;
+    height: 32px;
+    font-size: 15px;
+    margin-left: 4px;
+  }
+  .header-actions {
+    margin-left: 0;
+    gap: 0;
+  }
+  .header-actions #export {
+    padding: 9px 12px;
+    font-size: 12px;
+  }
+  #export .short {
+    display: inline;
+  }
+  .sheet-only {
+    display: flex;
+  }
+  .sheet-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    margin-left: 8px;
+    font-size: 20px;
+    color: #5b6b7a;
+  }
+  .panel-heading .eyebrow {
+    display: inline;
+    margin-left: auto;
+  }
+  main {
+    display: block;
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    height: auto;
+  }
+  .canvas-panel {
+    position: absolute;
+    inset: 0;
+    height: auto;
+  }
+  .canvas-top {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 5;
+    height: auto;
+    min-height: 0;
+    padding: 4px 8px;
+    font-size: 9px;
+    gap: 10px;
+    background: #ffffffcc;
+    border-radius: 6px;
+    pointer-events: none;
+  }
+  #canvas-scroll {
+    padding: 0;
+  }
+  #canvas-stage {
+    padding: 36px 20px 76px;
+  }
+  .canvas-bottom {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    z-index: 5;
+    height: auto;
+    padding: 0;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+  .canvas-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid #d5dbe2;
+    background: #fff;
+    color: #5b6b7a;
+    border-radius: 6px;
+    font-size: 12px;
+    box-shadow: 0 1px 3px #0000001a;
+    white-space: nowrap;
+  }
+  .canvas-btn.active {
+    background: #e2eef7;
+    color: #2f7bb5;
+    border-color: #2f7bb5;
+  }
+  .zoom-controls {
+    background: #fff;
+    box-shadow: 0 1px 3px #0000001a;
+  }
+  .zoom-controls button {
+    height: 34px;
+    min-width: 34px;
+    padding: 0 8px;
+    font-size: 15px;
+  }
+  .zoom-controls #zoom-reset {
+    font-size: 11px;
+    min-width: 46px;
+  }
+  .layers-panel,
+  .inspector,
+  .toolbars {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 62%;
+    max-height: none;
+    min-height: 0;
+    z-index: 20;
+    overflow: auto;
+    border: 0;
+    border-top: 1px solid #d5dbe2;
+    border-radius: 12px 12px 0 0;
+    background: #f7f8fa;
+    box-shadow: 0 -8px 30px #141e2838;
+    order: 0;
+    grid-column: auto;
+  }
+  body[data-sheet="objects"] .layers-panel {
+    display: flex;
+    flex-direction: column;
+  }
+  body[data-sheet="inspector"] .inspector {
+    display: block;
+  }
+  body[data-sheet="tools"] .toolbars {
+    display: block;
+  }
+  .layers-panel .panel-heading,
+  .inspector .panel-heading,
+  .toolbars .panel-heading {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    height: 44px;
+    min-height: 44px;
+    padding: 0 8px 0 16px;
+    background: #f7f8fa;
+  }
+  #layers {
+    display: block;
+    overflow: visible;
+  }
+  .layer-group {
+    min-width: 0;
+    flex: none;
+  }
+  .layers-panel .left-bottom {
+    display: none;
+  }
+  .toolbar {
+    height: auto;
+    flex-wrap: wrap;
+    overflow: visible;
+    padding: 8px 10px;
+    gap: 8px;
+    border-bottom: 1px solid #e3e7eb;
+  }
+  .tool-group {
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    gap: 4px;
+    border-right: 0;
+    padding-right: 0;
+  }
+  .tool {
+    min-width: 62px;
+    height: 58px;
+    font-size: 10px;
+  }
+  .tool-group-label {
+    width: 100%;
+    writing-mode: horizontal-tb;
+    transform: none;
+    margin: 0;
+    padding: 0 4px;
+    height: auto;
+    text-align: left;
+  }
+  .preview-button {
+    margin: 0;
+  }
+  .inspector section,
+  .inspector #properties > section {
+    padding: 14px 16px;
+  }
+  .inspector #properties {
+    display: block;
+  }
+  .inspector .board-settings,
+  .inspector .cut-check {
+    display: block;
+    width: auto;
+  }
+  .fields input,
+  .inspector select,
+  .inspector textarea {
+    font-size: 16px;
+  }
+  .mobile-bar {
+    display: flex;
+    align-items: stretch;
+    flex: none;
+    min-height: 56px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-top: 1px solid #d5dbe2;
+    background: #f7f8fa;
+  }
+  .mobile-bar button {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 4px 0;
+    border-radius: 0;
+    font-size: 10px;
+    color: #5b6b7a;
+  }
+  .mobile-bar button span {
+    font-size: 19px;
+    line-height: 1;
+  }
+  .mobile-bar button.active {
+    color: #2f7bb5;
+  }
+  .mobile-bar button small {
+    position: absolute;
+    top: 4px;
+    right: calc(50% - 22px);
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: #c8793f;
+    color: #fff;
+    font-size: 9px;
+    line-height: 16px;
+    text-align: center;
+  }
+  .mobile-bar button small:empty {
+    display: none;
+  }
+  footer {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    top: 60px;
+    bottom: auto;
+    z-index: 30;
+    height: auto;
+    padding: 8px 12px;
+    border: 1px solid #d5dbe2;
+    border-radius: 8px;
+    box-shadow: 0 6px 20px #1e2d3c26;
+    font-size: 11px;
+    line-height: 1.5;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  footer.has-message {
+    opacity: 1;
+  }
+  .context-menu {
+    font-size: 14px;
+  }
+  .context-menu button {
+    padding: 10px 12px;
+  }
+  .text-editor {
+    width: calc(100vw - 16px);
+    left: 8px !important;
+  }
+  dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+}

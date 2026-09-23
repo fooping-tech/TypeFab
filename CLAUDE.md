@@ -38,7 +38,7 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | --- | --- |
 | `index.html` / `app/index.html` / `order/index.html` / `privacy/index.html` | Viteのマルチページ入口：紹介ページ・エディタ・加工注文・プライバシーポリシー（`vite.config.js` の `rollupOptions.input`） |
 | `admin/index.html` / `vite.admin.config.js` | 注文管理画面。`npm run build:admin` で `worker/admin-dist` に別ビルドし、Worker の Static Assets として `/admin/` で配信（GitHub Pages には含めない） |
-| `src/main.js` | 編集UI全体（ツールバー、キャンバス操作、プロパティ、Undo/Redo、自動保存、「このデザインを加工注文する」） |
+| `src/main.js` | 編集UI全体（ツールバー、キャンバス操作、プロパティ、Undo/Redo、自動保存、「このデザインを加工注文する」）。幅 860 px 以下はスマートフォン用レイアウト（ヘッダーの「⋯」メニュー、下部バーから開くシート、キャンバス右下の「描く」、長押しの編集メニュー）。MandalaFab の UI を参考にしている |
 | `src/landing.js` / `src/landing.css` / `src/landing-glyphs.js` | 紹介ページ。`landing-glyphs.js` は `scripts/landing-glyphs.mjs` が同梱フォントと `geometry.js` から生成 |
 | `src/pricing.js` / `src/svganalyze.js` / `src/cutpiece.js` | 加工注文の料金カタログ（材料は黒クラフトペーパーのみ）・状態遷移・サイズ規則（SVG は A4 横の用紙 `CATALOG.sheet`、切り抜き後の紙片は長形3号封筒 `CATALOG.envelope`、どちらも周囲 10 mm マージン）、SVGの寸法・カット長・検査・サニタイズ・用紙配置（`analysis.layout`）と紙片（`analysis.piece`）、切断線から紙片を求める幾何（フロントと `worker/` で共用） |
 | `src/order.js` / `src/admin.js` / `src/order.css` / `src/privacy.js` | 加工注文ページ（個人情報はブラウザ保存なし、領収書リンク）、注文管理ページ（Access／トークン、一覧は個人情報なし・詳細で配送先、通知再送、保持期限削除）、プライバシーポリシー |
@@ -51,6 +51,7 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | `src/grouping.js` | グループ（`groupId`）の作成・解除、1文字ずつの文字アイテム、部位ごとの固定パス、対象付きブリッジの引き継ぎ |
 | `src/interaction.js` | 範囲選択の判定、ブラウザのShift範囲選択、レイヤー間移動の検証、ホイール／ピンチのズーム計算 |
 | `src/warp.js` | ワープ：12点のエンベロープ（4辺のベジェ）、Coonsパッチ、プリセット、許容誤差内の細分化。対象は文字・長方形・楕円・固定パス（固定パスは `warp.source` に変形前の輪郭を保持） |
+| `src/freehand.js` | フリーハンド（「描く」ツール）: 画面ピクセル基準の再サンプリング・角の検出（窓幅の倍化で弧と区別）・ガウス平滑化・閉合判定（始点付近で終了／通り過ぎ）と `path.js` の `fitStroke` によるベジェ近似。結果は固定パス（`outline`） |
 | `src/path.js` | パスのノード編集モデル：サブパス＋ノード（アンカー・in/outハンドル・smooth）、SVG path dの解析（MLHVCSQTZ）と出力（M/L/C/Z）、グリフ命令・長方形・楕円からの変換、輪郭のベジェ近似（Schneider）、ノード操作。固定パスは `item.path` に保持し、`contours` はその平坦化 |
 | `src/svgimport.js` | SVGファイルの読み込み：要素（path/rect/circle/ellipse/line/polyline/polygon）、transform・viewBox・単位のmm換算、Inkscapeレイヤー。ブラウザはDOMParser、Nodeのテストは同梱の簡易XMLパーサーを使う |
 | `src/edit.js` | 重ね順（最前面へ／前面へ／背面へ／最背面へ）、複製・貼り付け用のコピー |

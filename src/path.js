@@ -436,11 +436,26 @@ const CORNER = (45 * Math.PI) / 180;
 export function pathFromContours(contours, error = TOLERANCE) {
   return markSmooth(contours.map((c) => fitContour(c, error)).filter(Boolean));
 }
-function fitContour(contour, error) {
-  const closed = contour.length > 3 && same(contour[0], contour.at(-1)),
-    pts = [];
-  for (const p of closed ? contour.slice(0, -1) : contour)
+// One polyline whose closure and corners are already known (freehand
+// strokes, see freehand.js): `corners` are indices into `points`; every
+// other node is smooth. A closed stroke ends before its first point.
+export function fitStroke(
+  points,
+  { closed = false, corners = [], error = TOLERANCE } = {},
+) {
+  const sub = fitContour(points, error, { closed, corners });
+  return sub ? markSmooth([sub]) : [];
+}
+function fitContour(contour, error, forced = null) {
+  const closed = forced
+      ? forced.closed
+      : contour.length > 3 && same(contour[0], contour.at(-1)),
+    pts = [],
+    index = [];
+  for (const p of closed && !forced ? contour.slice(0, -1) : contour) {
     if (!pts.length || !same(pts.at(-1), p)) pts.push(P(p.x, p.y));
+    index.push(pts.length - 1);
+  }
   if (closed && pts.length > 1 && same(pts[0], pts.at(-1))) pts.pop();
   const n = pts.length;
   if (n < (closed ? 3 : 2)) return null;
@@ -450,9 +465,16 @@ function fitContour(contour, error) {
     return Math.acos(Math.max(-1, Math.min(1, dot(a, b))));
   };
   let corners = [];
-  for (let i = 0; i < n; i++)
-    if ((!closed && (i === 0 || i === n - 1)) || turn(i) > CORNER)
-      corners.push(i);
+  if (forced) {
+    const set = new Set(
+      forced.corners.map((i) => index[i] ?? 0).map((i) => (i >= n ? 0 : i)),
+    );
+    if (!closed) set.add(0).add(n - 1);
+    corners = [...set].sort((a, b) => a - b);
+  } else
+    for (let i = 0; i < n; i++)
+      if ((!closed && (i === 0 || i === n - 1)) || turn(i) > CORNER)
+        corners.push(i);
   const loop = closed && !corners.length;
   if (loop) corners = [0];
   const curves = [],
