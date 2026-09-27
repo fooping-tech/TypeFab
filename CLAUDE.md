@@ -51,6 +51,7 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | `src/grouping.js` | グループ（`groupId`）の作成・解除、1文字ずつの文字アイテム、部位ごとの固定パス、対象付きブリッジの引き継ぎ |
 | `src/interaction.js` | 範囲選択の判定、ブラウザのShift範囲選択、レイヤー間移動の検証、ホイール／ピンチのズーム計算 |
 | `src/warp.js` | ワープ：12点のエンベロープ（4辺のベジェ）、Coonsパッチ、プリセット、許容誤差内の細分化。対象は文字・長方形・楕円・固定パス（固定パスは `warp.source` に変形前の輪郭を保持） |
+| `src/snapping.js` | 整列スナップ: 移動・配置・拡縮中のボックス（世界座標の AABB）の中心／端を、他オブジェクトと加工エリアの中心／端に画面 6 px 以内で吸着させ、ガイド線の情報を返す（`alignmentSnap`・`pointSnap`）。1 mm スナップより優先 |
 | `src/freehand.js` | フリーハンド（「描く」ツール）: 画面ピクセル基準の再サンプリング・角の検出（窓幅の倍化で弧と区別）・ガウス平滑化・閉合判定（始点付近で終了／通り過ぎ）と `path.js` の `fitStroke` によるベジェ近似。結果は固定パス（`outline`） |
 | `src/path.js` | パスのノード編集モデル：サブパス＋ノード（アンカー・in/outハンドル・smooth）、SVG path dの解析（MLHVCSQTZ）と出力（M/L/C/Z）、グリフ命令・長方形・楕円からの変換、輪郭のベジェ近似（Schneider）、ノード操作。固定パスは `item.path` に保持し、`contours` はその平坦化 |
 | `src/svgimport.js` | SVGファイルの読み込み：要素（path/rect/circle/ellipse/line/polyline/polygon）、transform・viewBox・単位のmm換算、Inkscapeレイヤー。ブラウザはDOMParser、Nodeのテストは同梱の簡易XMLパーサーを使う |

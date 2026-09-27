@@ -133,6 +133,13 @@ import {
   FREEHAND_DEFAULTS,
   FREEHAND_LIMITS,
 } from "./freehand.js";
+import {
+  alignmentSnap,
+  pointSnap,
+  unionBox,
+  boardBox,
+  ALIGN_THRESHOLD_PX,
+} from "./snapping.js";
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 let typography;
 const typographyReady = import("./typography.js").then((m) => (typography = m));
@@ -287,6 +294,51 @@ function saveFreehandParams() {
     localStorage.setItem(FREEHAND_KEY, JSON.stringify(freehandParams));
   } catch {}
 }
+// Alignment snapping (snapping.js): objects being placed, moved or resized
+// pull to the centre and edge lines of the others and of the board.
+const ALIGN_SNAP_KEY = "typefab-align-snap";
+let alignSnap = true;
+try {
+  alignSnap = localStorage.getItem(ALIGN_SNAP_KEY) !== "off";
+} catch {}
+function setAlignSnap(on) {
+  alignSnap = on;
+  $("#align-snap").checked = on;
+  try {
+    localStorage.setItem(ALIGN_SNAP_KEY, on ? "on" : "off");
+  } catch {}
+  notify(on ? "整列スナップをオンにしました。" : "整列スナップをオフにしました。");
+}
+// World-space axis-aligned bounds of an item (its local box, rotated).
+function worldBox(item) {
+  const b = itemBounds(item);
+  return bounds([
+    [
+      [b.x, b.y],
+      [b.x + b.w, b.y],
+      [b.x, b.y + b.h],
+      [b.x + b.w, b.y + b.h],
+    ].map(([x, y]) => transform({ x, y }, item)),
+  ]);
+}
+// What a moving selection can align with: the other visible objects (not
+// bridges, not bridges scoped to the selection) and the board.
+function snapTargets(excludeIds) {
+  const skip = new Set(excludeIds);
+  return [
+    ...visibleItems(project)
+      .filter(
+        (i) =>
+          i.type !== "bridge" &&
+          !skip.has(i.id) &&
+          !(i.targetId && skip.has(i.targetId)),
+      )
+      .map(worldBox),
+    boardBox(project),
+  ];
+}
+const alignThreshold = () =>
+  ALIGN_THRESHOLD_PX / ($("#canvas").getScreenCTM()?.a || 1);
 // Phone layout (style.css): panels become bottom sheets, the toolbars a
 // sheet of their own, and the header keeps only what fits.
 const mobileQuery = matchMedia("(max-width: 860px)");
@@ -570,6 +622,11 @@ function addItem(type, x = 35, y = 45) {
       });
       item.contours = shapeContours(type, item.w, item.h);
     }
+    if (alignSnap) {
+      const r = alignmentSnap(worldBox(item), snapTargets([]), alignThreshold());
+      item.x += r.dx ?? 0;
+      item.y += r.dy ?? 0;
+    }
     checkpoint();
     project.items.push(item);
     selectItem(item.id);
@@ -678,7 +735,7 @@ $("#app").innerHTML = `
   )}</div><div class="tool-group"><button id="auto-bridge" class="tool"><span class="tool-icon">✧</span>選択にブリッジ</button><button id="smart-connect" class="tool" title="文字どうし・文字内の部位を接続形状でつないで1つの輪郭にする（Smart Connect）"><span class="tool-icon">⟟</span>スマート接続</button><button id="outline" class="tool"><span class="tool-icon">T̲</span>アウトライン化</button><button id="group" class="tool" title="選択をグループ化 (${shortcut("G")})"><span class="tool-icon">▣</span>グループ化</button><button id="ungroup" class="tool" title="グループを解除、または文字を1文字ずつ・部位ごとに分解 (${shortcut("G", true)})"><span class="tool-icon">⊞</span>グループ化解除</button><button id="warp" class="tool" title="文字のアウトラインをエンベロープで変形（Text Warp）"><span class="tool-icon">⌒</span>ワープ</button><button id="edit-path" class="tool" title="パスのノードを直接編集（ダブルクリックでも開始）"><span class="tool-icon">✎</span>パス編集</button></div><div class="tool-group history"><button id="undo" title="元に戻す (Ctrl/⌘ Z)">↶</button><button id="redo" title="やり直す (Ctrl/⌘ Shift Z)">↷</button></div><button id="preview" class="preview-button">◎ 加工プレビュー</button></nav>
 <nav class="toolbar cad-toolbar" aria-label="2D CADツール">${CAD_GROUPS.map((g) => `<div class="tool-group"><span class="tool-group-label">${g}</span>${Object.entries(CAD_TOOLS).filter(([, t]) => t.group === g).map(([id, t]) => `<button data-tool="${id}" class="tool cad-tool" title="${t.hint}"><span class="tool-icon">${t.icon}</span>${t.label}</button>`).join("")}</div>`).join("")}<span class="subtle cad-note">拘束なしの2D編集 · 結果は通常のパス · 寸法は参照のみ</span></nav></div>
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
-<section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/><path id="ink" fill="none" stroke="#c8793f" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><button class="canvas-btn draw-btn" data-tool="freehand" title="フリーハンドで描く">✎ 描く</button><button class="canvas-btn select-btn" data-tool="select" title="選択">↖ 選択</button><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
+<section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/><path id="ink" fill="none" stroke="#c8793f" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><label class="check" title="ほかのオブジェクトや加工エリアの中心・端にそろえる"><input type="checkbox" id="align-snap" checked> 整列スナップ</label><button class="canvas-btn draw-btn" data-tool="freehand" title="フリーハンドで描く">✎ 描く</button><button class="canvas-btn select-btn" data-tool="select" title="選択">↖ 選択</button><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
 <nav class="mobile-bar" aria-label="モバイル操作"><button data-sheet="objects"><span>☰</span>オブジェクト</button><button data-sheet="tools"><span>✚</span>ツール</button><button data-sheet="inspector"><span>⚙</span>編集<small id="bar-badge"></small></button><button id="mobile-preview"><span>◎</span>プレビュー</button><button id="mobile-fit"><span>⛶</span>全体</button></nav>
 <footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <button id="font-licenses-button" class="text-link">フォントライセンス</button> <span class="subtle">TypeFab / 0.12</span></span></footer>
@@ -1067,6 +1124,22 @@ function rotateOverlay(items, scale) {
     cx = (Math.min(...xs) + Math.max(...xs)) / 2;
   return `<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" fill="none" stroke="#3b85b5" stroke-width="${px}" stroke-dasharray="${4 * px} ${3 * px}" pointer-events="none"/>${knob(cx, Math.min(...ys) - 24 * px, Math.min(...ys))}`;
 }
+// Alignment guides while dragging: a dashed line through the aligned
+// centre / edge, across the board when the board itself is aligned.
+function guideOverlay(guides, scale) {
+  const px = 1 / scale;
+  return guides
+    .map((g) => {
+      const from = g.board ? 0 : g.from - 6 * px,
+        to = g.board ? (g.axis === "x" ? project.height : project.width) : g.to + 6 * px,
+        at =
+          g.axis === "x"
+            ? `x1="${g.value}" x2="${g.value}" y1="${from}" y2="${to}"`
+            : `y1="${g.value}" y2="${g.value}" x1="${from}" x2="${to}"`;
+      return `<line class="align-guide ${g.kind}" ${at} stroke="#e0508c" stroke-width="${px}" stroke-dasharray="${g.kind === "center" ? `${5 * px} ${3 * px}` : "none"}" pointer-events="none"/>`;
+    })
+    .join("");
+}
 // Lines and outlines made only of open contours (trimmed paths, offset
 // polylines, filleted line pairs) are drawn as strokes, not filled areas.
 const openOnly = (i) =>
@@ -1135,6 +1208,7 @@ function renderCanvas() {
   if (!preview && !warpId && !pathEdit && chosen.length && !cad && !sc)
     overlay += rotateOverlay(chosen, scale);
   overlay += annotationsOverlay(scale) + cadOverlay(scale) + scOverlay(scale);
+  if (drag?.guides?.length) overlay += guideOverlay(drag.guides, scale);
   $("#selection").innerHTML = overlay;
   $("#canvas").style.cursor = preview
     ? "default"
@@ -1165,7 +1239,7 @@ function renderCanvas() {
         : pathEdit
           ? "ノード・ハンドルをドラッグ · Shiftで追加選択 · パス上をダブルクリックで追加 · Deleteで削除 · Escで終了"
           : tool === "select"
-            ? "空白からドラッグで範囲選択 · 右クリック／長押しで編集メニュー · 2本指スワイプで移動 · ピンチでズーム"
+            ? "ドラッグ中はほかの中心・端に整列スナップ · 空白からドラッグで範囲選択 · 右クリック／長押しで編集メニュー · ピンチでズーム"
             : tool === "freehand"
               ? "ペン・指・マウスでドラッグして描く · 始点の近くで終えると閉じた図形 · タップで選択"
               : (CAD_TOOLS[tool]?.hint ?? `${labels[tool]}を配置する場所をクリック`);
@@ -1983,6 +2057,8 @@ $("#layers").addEventListener("click", (e) => {
 $("#add-text").onclick = () => addItem("text");
 $("#preview").onclick = togglePreview;
 $("#snap").onchange = (e) => (snap = e.target.checked);
+$("#align-snap").checked = alignSnap;
+$("#align-snap").onchange = (e) => setAlignSnap(e.target.checked);
 $("#undo").onclick = undo;
 $("#redo").onclick = redo;
 function remove() {
@@ -3342,6 +3418,7 @@ $("#canvas").addEventListener("pointerdown", (e) => {
       kind: "resize",
       before: structuredClone(selectedItem()),
       corner: handle.dataset.resize.split(",").map(Number),
+      targets: snapTargets([selectedItem().id]),
       start: p,
       moved: false,
     };
@@ -3386,6 +3463,8 @@ $("#canvas").addEventListener("pointerdown", (e) => {
       kind: "move",
       double: twice ? id : null,
       before: chosen.map((i) => structuredClone(i)),
+      box: unionBox(chosen.map(worldBox)),
+      targets: snapTargets(chosen.map((i) => i.id)),
       start: p,
       moved: false,
     };
@@ -3511,7 +3590,14 @@ $("#canvas").addEventListener("pointermove", (e) => {
   } else if (drag.kind === "resize") {
     const before = drag.before,
       current = project.items.find((i) => i.id === before.id);
-    const point = snap ? { x: Math.round(p.x), y: Math.round(p.y) } : p;
+    // The dragged corner pulls to the others' lines, else to the 1 mm grid.
+    let point = snap ? { x: Math.round(p.x), y: Math.round(p.y) } : p;
+    drag.guides = null;
+    if (alignSnap) {
+      const r = pointSnap(p, drag.targets, alignThreshold());
+      point = { x: r.snappedX ? r.x : point.x, y: r.snappedY ? r.y : point.y };
+      drag.guides = r.guides;
+    }
     try {
       replaceItem(
         current,
@@ -3531,15 +3617,36 @@ $("#canvas").addEventListener("pointermove", (e) => {
     }
   } else {
     const ids = drag.before.map((i) => i.id);
+    // The selection's box aligns with the others first; an axis without an
+    // alignment falls back to the 1 mm grid.
+    let tx = p.x - drag.start.x,
+      ty = p.y - drag.start.y,
+      alignedX = false,
+      alignedY = false;
+    drag.guides = null;
+    if (alignSnap && drag.box) {
+      const r = alignmentSnap(
+        { ...drag.box, x: drag.box.x + tx, y: drag.box.y + ty },
+        drag.targets,
+        alignThreshold(),
+      );
+      if (r.dx !== null) {
+        tx += r.dx;
+        alignedX = true;
+      }
+      if (r.dy !== null) {
+        ty += r.dy;
+        alignedY = true;
+      }
+      drag.guides = r.guides;
+    }
     for (const before of drag.before) {
       if (before.targetId && ids.includes(before.targetId)) continue;
       const current = project.items.find((i) => i.id === before.id);
-      let x = before.x + p.x - drag.start.x,
-        y = before.y + p.y - drag.start.y;
-      if (snap) {
-        x = Math.round(x);
-        y = Math.round(y);
-      }
+      let x = before.x + tx,
+        y = before.y + ty;
+      if (snap && !alignedX) x = Math.round(x);
+      if (snap && !alignedY) y = Math.round(y);
       replaceItem(current, { ...current, x, y });
     }
   }
@@ -3817,6 +3924,7 @@ const menuActions = {
   order: orderDesign,
   help: () => $("#help").showModal(),
   licenses: openFontLicenses,
+  "align-snap": () => setAlignSnap(!alignSnap),
 };
 // The phone header's 「⋯」 menu: file actions, then the toolbar buttons
 // that do not fit on a small screen (their enabled state is the buttons').
@@ -3839,6 +3947,7 @@ function overflowEntries() {
     button("edit-path", pathEdit ? "パス編集を終了" : "パス編集"),
     "-",
     ["preview", preview ? "スケッチに戻る" : "加工プレビュー", "", true],
+    ["align-snap", `整列スナップ: ${alignSnap ? "オン" : "オフ"}（切り替え）`, "", true],
     "-",
     ["help", "使い方", "", true],
     ["licenses", "フォントライセンス", "", true],
