@@ -699,3 +699,4 @@
 - `npm test`: 213 件すべて成功。`npm run build`: 成功。
 - `vite preview` + Chromium 1440 × 900: 行の ◉ で「MAKE IT YOURS」を非表示 → キャンバスの描画が 3 → 2、行が薄くなり `hidden` が保存、加工チェックの数が減る。もう一度で復帰。右クリック「非表示にする」で選択が解除され非表示、空白の右クリック「非表示をすべて表示」で復帰。プロパティの「最前面へ」「背面へ」で配列順が変わる。ブラウザで「MAKE IT YOURS」を「アクセントライン」の行の上半分に落とすと前面（配列の末尾）、下半分に落とすと背面へ（通知「…の前面へ移動しました」）。線分を選んで「選択だけをSVGで書き出す」→ ダウンロード `typefab-selection.svg` は `width="170mm" height="0.1mm" viewBox="0 0 170 0.1"`、レイヤーの `<g>` に path 1 本。390 px 幅の「⋯」メニューに 5 項目すべてあり。console error なし。
 - 未検証: タッチ操作でのブラウザ行のドラッグ（HTML5 ドラッグはモバイルブラウザで動かないことが多い。スマートフォンでは「⋯」とプロパティのボタンで並べ替える）。
+- 公開: コミット `1c06b84` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/36303292314 は success（`npm test` 213 件・build・デプロイ）。https://fooping-tech.github.io/TypeFab/app/ は HTTP 200 で、配信されるエディタの JS（`/TypeFab/assets/editor-CrIRQgVj.js`）に目ボタン（`data-item-visible`）と `typefab-selection.svg` を含む。
