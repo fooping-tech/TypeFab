@@ -248,10 +248,34 @@ export function pathData(paths) {
     )
     .join(" ");
 }
-export function exportSVG(project) {
-  const visible = visibleItems(project),
-    result = cutGeometry(visible);
+// The cut SVG of the visible items. With `ids`, only those items (and the
+// bridges that apply to them: their own and unscoped ones) are exported, and
+// with `crop` the document is the size of the cut lines, moved to the origin.
+export function exportSVG(project, { ids = null, crop = false } = {}) {
+  let visible = visibleItems(project);
+  if (ids) {
+    const set = new Set(ids);
+    visible = visible.filter(
+      (i) =>
+        set.has(i.id) ||
+        (i.type === "bridge" && (!i.targetId || set.has(i.targetId))),
+    );
+  }
+  const result = cutGeometry(visible);
   if (!result.paths.length) throw new Error("出力できるカット線がありません。");
+  let ox = 0,
+    oy = 0,
+    width = project.width,
+    height = project.height;
+  if (crop) {
+    const b = bounds(result.paths);
+    ox = b.x;
+    oy = b.y;
+    width = Math.max(b.w, 0.1);
+    height = Math.max(b.h, 0.1);
+  }
+  const shift = (paths) =>
+    crop ? paths.map((ps) => ps.map((p) => ({ x: p.x - ox, y: p.y - oy }))) : paths;
   const xml = (s) =>
     String(s).replace(
       /[&<>"']/g,
@@ -265,7 +289,7 @@ export function exportSVG(project) {
         })[c],
     );
   const path = (paths) =>
-    `<path d="${pathData(paths)}" fill="none" stroke="#ff0000" stroke-width="0.1" stroke-linecap="butt"/>`;
+    `<path d="${pathData(shift(paths))}" fill="none" stroke="#ff0000" stroke-width="0.1" stroke-linecap="butt"/>`;
   const bridges = visible.filter((i) => i.type === "bridge");
   const body = project.layers
     ? project.layers
@@ -283,7 +307,7 @@ export function exportSVG(project) {
         })
         .join("\n")
     : path(result.paths);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${num(project.width)}mm" height="${num(project.height)}mm" viewBox="0 0 ${num(project.width)} ${num(project.height)}">\n<title>TypeFab laser cut paths</title>\n<desc>Units: mm. Flattening tolerance: 0.02 mm. Bridges are gaps in cut paths.</desc>\n${body}\n</svg>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${num(width)}mm" height="${num(height)}mm" viewBox="0 0 ${num(width)} ${num(height)}">\n<title>TypeFab laser cut paths</title>\n<desc>Units: mm. Flattening tolerance: 0.02 mm. Bridges are gaps in cut paths.</desc>\n${body}\n</svg>\n`;
 }
 export function shapeContours(type, w, h, radius = 0) {
   if (type === "rect" && radius > 0) return [roundedRect(w, h, radius)];

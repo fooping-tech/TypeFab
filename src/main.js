@@ -45,6 +45,7 @@ import {
 import { svgShapes, shapeItem, parseXML, fromDOM } from "./svgimport.js";
 import {
   arrangeItems,
+  reorderItems,
   cloneItems,
   rotateAbout,
   selectionCenter,
@@ -748,8 +749,11 @@ $("#app").innerHTML = `
 <div id="context-menu" class="context-menu" role="menu" aria-label="編集メニュー" hidden></div>
 <div id="text-editor" class="text-editor" hidden><textarea id="canvas-text" aria-label="文字を編集" maxlength="500" rows="2"></textarea><small>入力はすぐに反映 · Esc / ${shortcut("Enter")} で確定</small></div>`;
 
+// A row per object: the selectable row and an eye that hides just this
+// object (hidden objects stay listed, dimmed, so they can be shown again).
 function layerRow(i) {
-  return `<button class="layer ${selectionIds().includes(i.id) ? "selected" : ""} ${i.type === "bridge" ? "bridge-layer" : ""}" draggable="${isEditable(project, i)}" data-layer="${i.id}" ${!isEditable(project, i) ? "disabled" : ""}><span class="layer-icon">${i.warp ? "⌒" : icons[i.type] || "⌘"}</span><span>${esc(i.name)}</span><small>${i.type === "bridge" ? "TAB" : i.warp ? "WARP" : i.type === "text" ? "TEXT" : "PATH"}</small></button>`;
+  const layer = project.layers.find((l) => l.id === i.layerId);
+  return `<div class="layer-row ${i.hidden ? "hidden-item" : ""}"><button class="layer ${selectionIds().includes(i.id) ? "selected" : ""} ${i.type === "bridge" ? "bridge-layer" : ""}" draggable="${isEditable(project, i)}" data-layer="${i.id}" ${!isEditable(project, i) ? "disabled" : ""}><span class="layer-icon">${i.warp ? "⌒" : icons[i.type] || "⌘"}</span><span>${esc(i.name)}</span><small>${i.type === "bridge" ? "TAB" : i.warp ? "WARP" : i.type === "text" ? "TEXT" : "PATH"}</small></button><button class="layer-eye" data-item-visible="${i.id}" title="${i.hidden ? "表示する" : "非表示にする"}" aria-label="${esc(i.name)}の表示切替" aria-pressed="${!i.hidden}" ${layer?.locked ? "disabled" : ""}>${i.hidden ? "○" : "◉"}</button></div>`;
 }
 // Consecutive members of one group are shown under a group row.
 function layerRows(items) {
@@ -1024,7 +1028,7 @@ function renderProperties() {
       $("#properties").innerHTML +=
         `<section><label class="check"><input id="ratio-lock" type="checkbox" ${i.ratioLocked ? "checked" : ""}> 縦横比を固定</label><p class="note">四隅のハンドルをドラッグして拡縮。Shiftでも比率を固定できます。</p></section>`;
     $("#properties").innerHTML +=
-      `<section><label class="full-label">所属レイヤー<select id="item-layer">${project.layers.map((l) => `<option value="${l.id}" ${i.layerId === l.id ? "selected" : ""} ${l.locked || !l.visible ? "disabled" : ""}>${esc(l.name)}</option>`).join("")}</select></label><button id="item-auto-bridge" class="wide-button">✧ 選択アイテムに自動ブリッジ</button>${chosen.some((c) => ["text", "outline"].includes(c.type)) ? '<button id="item-smart-connect" class="wide-button">⟟ スマート接続（文字を一体化）</button><p class="note">文字どうし・文字内の部位を接続形状でつなぎ、1つの閉じた輪郭として切り出せるようにします。</p>' : ""}${i.targetId ? '<p class="note">このブリッジは対象アイテムのみに適用され、移動に追従します。</p>' : ""}</section>`;
+      `<section><label class="full-label">所属レイヤー<select id="item-layer">${project.layers.map((l) => `<option value="${l.id}" ${i.layerId === l.id ? "selected" : ""} ${l.locked || !l.visible ? "disabled" : ""}>${esc(l.name)}</option>`).join("")}</select></label><h4>重なり順 <span>同じレイヤー内</span></h4><div class="arrange-actions"><button data-arrange="front">最前面へ</button><button data-arrange="forward">前面へ</button><button data-arrange="backward">背面へ</button><button data-arrange="back">最背面へ</button></div><button id="item-hide" class="wide-button">○ 非表示にする <small>ブラウザの ○ で再表示</small></button><button id="export-selection" class="wide-button">↗ 選択だけをSVGで書き出す <small>カット線の範囲に切り詰め</small></button><button id="item-auto-bridge" class="wide-button">✧ 選択アイテムに自動ブリッジ</button>${chosen.some((c) => ["text", "outline"].includes(c.type)) ? '<button id="item-smart-connect" class="wide-button">⟟ スマート接続（文字を一体化）</button><p class="note">文字どうし・文字内の部位を接続形状でつなぎ、1つの閉じた輪郭として切り出せるようにします。</p>' : ""}${i.targetId ? '<p class="note">このブリッジは対象アイテムのみに適用され、移動に追従します。</p>' : ""}</section>`;
   }
   $("#board-width").value = project.width;
   $("#board-height").value = project.height;
@@ -1501,6 +1505,10 @@ $("#properties").addEventListener("click", (e) => {
   if (e.target.closest("#add-font")) requestFontFile();
   if (e.target.closest("#font-gallery-button")) openFontGallery();
   if (e.target.closest("#item-auto-bridge")) applyAutoBridges();
+  if (e.target.closest("#item-hide")) hideSelection();
+  if (e.target.closest("#export-selection")) exportSelection();
+  const arrangeButton = e.target.closest("[data-arrange]");
+  if (arrangeButton) arrange(arrangeButton.dataset.arrange);
   if (e.target.closest("#item-smart-connect")) startSmartConnect();
   if (e.target.closest("#item-ungroup")) ungroup();
   if (e.target.closest("#item-group")) groupSelection();
@@ -1539,8 +1547,99 @@ function moveSelectionToLayer(ids, layerId) {
 let layerDragIds = [];
 function clearLayerDrop() {
   document
-    .querySelectorAll(".drop-target,.drop-rejected")
-    .forEach((el) => el.classList.remove("drop-target", "drop-rejected"));
+    .querySelectorAll(".drop-target,.drop-rejected,.drop-above,.drop-below")
+    .forEach((el) =>
+      el.classList.remove("drop-target", "drop-rejected", "drop-above", "drop-below"),
+    );
+}
+// Which side of a browser row the pointer is on. Rows list the front item
+// first, so "above" a row means after it in stacking order.
+function dropSide(row, e) {
+  const box = row.getBoundingClientRect();
+  return e.clientY < box.top + box.height / 2 ? "after" : "before";
+}
+// Drops the dragged rows next to a row: a stacking-order change, and a layer
+// move when the row is on another layer.
+function reorderTo(ids, targetId, position) {
+  ids = expandGroups(project, ids);
+  const target = project.items.find((i) => i.id === targetId);
+  try {
+    if (!target) throw Error("移動先のアイテムが見つかりません。");
+    const moved = layerMovePlan(project, ids, target.layerId);
+    checkpoint();
+    project.items = reorderItems(
+      project.items,
+      moved.map((i) => i.id),
+      targetId,
+      position,
+    );
+    activeLayer = target.layerId;
+    multi = ids;
+    selected = multi.at(-1) || null;
+    commit();
+    notify(
+      `${moved.length} アイテムを「${target.name}」の${position === "after" ? "前面" : "背面"}へ移動しました。`,
+    );
+  } catch (e) {
+    notify(e.message);
+  }
+}
+// Per-object visibility. Hidden objects leave the selection; their scoped
+// bridges follow them (layers.js).
+function setHidden(ids, hidden) {
+  const items = project.items.filter((i) => ids.includes(i.id));
+  if (!items.length) return;
+  checkpoint();
+  for (const i of items) {
+    if (hidden) i.hidden = true;
+    else delete i.hidden;
+  }
+  commit();
+  notify(
+    hidden
+      ? `${items.length} アイテムを非表示にしました。ブラウザの ○ か「非表示をすべて表示」で戻せます。`
+      : `${items.length} アイテムを表示しました。`,
+  );
+}
+const hideSelection = () =>
+  setHidden(
+    selectedItems().map((i) => i.id),
+    true,
+  );
+const showAllItems = () =>
+  setHidden(
+    project.items.filter((i) => i.hidden).map((i) => i.id),
+    false,
+  );
+// The selected objects alone (with the bridges that apply to them) as an SVG
+// the size of their cut lines.
+function exportSelection() {
+  try {
+    const chosen = selectedItems().filter((i) => i.type !== "bridge");
+    if (!chosen.length) throw Error("書き出すオブジェクトを選択してください。");
+    const ids = chosen.map((i) => i.id),
+      items = visibleItems(project).filter(
+        (i) =>
+          ids.includes(i.id) ||
+          (i.type === "bridge" && (!i.targetId || ids.includes(i.targetId))),
+      ),
+      result = cutGeometry(items);
+    if (result.vanished)
+      throw Error(
+        `${result.vanished} 個の輪郭がブリッジで完全に隠れています。ブリッジを小さくしてください。`,
+      );
+    const b = bounds(result.paths),
+      name = saveFile(
+        "typefab-selection.svg",
+        exportSVG(project, { ids, crop: true }),
+        "image/svg+xml",
+      );
+    notify(
+      `${name} をダウンロードしました · 選択した ${chosen.length} オブジェクト · ${Number(b.w.toFixed(2))} × ${Number(b.h.toFixed(2))} mm（左上を原点に移動）`,
+    );
+  } catch (e) {
+    notify(e.message);
+  }
 }
 $("#layers").addEventListener("dragstart", (e) => {
   const row = e.target.closest("[data-layer]");
@@ -1565,13 +1664,16 @@ $("#layers").addEventListener("dragstart", (e) => {
   e.dataTransfer.effectAllowed = "move";
 });
 $("#layers").addEventListener("dragover", (e) => {
-  const zone = e.target.closest("[data-drop-layer]");
+  const zone = e.target.closest("[data-drop-layer]"),
+    row = e.target.closest("[data-layer]");
   if (!layerDragIds.length || !zone) return;
   e.preventDefault();
   clearLayerDrop();
   try {
     layerMovePlan(project, layerDragIds, zone.dataset.dropLayer);
-    zone.classList.add("drop-target");
+    if (row && !layerDragIds.includes(row.dataset.layer))
+      row.classList.add(dropSide(row, e) === "after" ? "drop-above" : "drop-below");
+    else zone.classList.add("drop-target");
     e.dataTransfer.dropEffect = "move";
   } catch {
     zone.classList.add("drop-rejected");
@@ -1585,10 +1687,13 @@ $("#layers").addEventListener("drop", (e) => {
   const zone = e.target.closest("[data-drop-layer]");
   if (!layerDragIds.length || !zone) return;
   e.preventDefault();
-  const ids = [...layerDragIds];
+  const ids = [...layerDragIds],
+    row = e.target.closest("[data-layer]");
   layerDragIds = [];
   clearLayerDrop();
-  moveSelectionToLayer(ids, zone.dataset.dropLayer);
+  if (row && !ids.includes(row.dataset.layer))
+    reorderTo(ids, row.dataset.layer, dropSide(row, e));
+  else moveSelectionToLayer(ids, zone.dataset.dropLayer);
 });
 $("#layers").addEventListener("dragend", () => {
   layerDragIds = [];
@@ -1632,6 +1737,12 @@ $("#layers").addEventListener("click", (e) => {
   if (active) {
     activeLayer = active.dataset.activeLayer;
     render();
+    return;
+  }
+  const eye = e.target.closest("[data-item-visible]");
+  if (eye) {
+    const item = project.items.find((i) => i.id === eye.dataset.itemVisible);
+    if (item) setHidden([item.id], !item.hidden);
     return;
   }
   const action = e.target.closest("[data-layer-action]");
@@ -3925,6 +4036,9 @@ const menuActions = {
   help: () => $("#help").showModal(),
   licenses: openFontLicenses,
   "align-snap": () => setAlignSnap(!alignSnap),
+  hide: hideSelection,
+  "show-all": showAllItems,
+  "export-selection": exportSelection,
 };
 // The phone header's 「⋯」 menu: file actions, then the toolbar buttons
 // that do not fit on a small screen (their enabled state is the buttons').
@@ -3936,8 +4050,15 @@ function overflowEntries() {
     ["save", "保存（JSON）", "", true],
     ["export", "SVGを書き出す", "", true],
     ["order", "このデザインを加工注文する", "", true],
+    ["export-selection", "選択だけをSVGで書き出す", "", selectedItems().length > 0],
     "-",
     ["select-all", "すべて選択", "", true],
+    ["hide", "選択を非表示にする", "", selectedItems().length > 0],
+    ["show-all", "非表示をすべて表示", "", project.items.some((i) => i.hidden)],
+    ["front", "最前面へ", "", selectedItems().length > 0],
+    ["forward", "前面へ", "", selectedItems().length > 0],
+    ["backward", "背面へ", "", selectedItems().length > 0],
+    ["back", "最背面へ", "", selectedItems().length > 0],
     button("auto-bridge", "選択にブリッジ"),
     button("smart-connect", sc ? "スマート接続を終了" : "スマート接続"),
     button("outline", "アウトライン化"),
@@ -3976,6 +4097,7 @@ function menuEntries(onObject) {
       "-",
       ["paste", "貼り付け", shortcut("V"), clipboard],
       ["select-all", "すべて選択", shortcut("A"), true],
+      ["show-all", "非表示をすべて表示", "", project.items.some((i) => i.hidden)],
       "-",
       ["preview", preview ? "スケッチに戻る" : "加工プレビュー", "", true],
     ];
@@ -3989,6 +4111,8 @@ function menuEntries(onObject) {
     ["paste", "貼り付け", shortcut("V"), clipboard],
     ["duplicate", "複製", shortcut("D"), has],
     ["delete", "削除", "Delete", has],
+    ["hide", "非表示にする", "", has],
+    ["show-all", "非表示をすべて表示", "", project.items.some((i) => i.hidden)],
     "-",
     [
       "group",
@@ -4039,6 +4163,7 @@ function menuEntries(onObject) {
     ["backward", "背面へ", shortcut("["), has],
     ["back", "最背面へ", shortcut("[", true), has],
     "-",
+    ["export-selection", "選択だけをSVGで書き出す", "", has],
     ["find", "ブラウザで表示", "", has],
     ["select-all", "すべて選択", shortcut("A"), true],
   ];

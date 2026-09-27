@@ -44,9 +44,9 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | `src/order.js` / `src/admin.js` / `src/order.css` / `src/privacy.js` | 加工注文ページ（個人情報はブラウザ保存なし、領収書リンク）、注文管理ページ（Access／トークン、一覧は個人情報なし・詳細で配送先、通知再送、保持期限削除）、プライバシーポリシー |
 | `worker/` | Cloudflare Workers（D1・R2・Stripe Checkout・Webhook・Resend メール・Cloudflare Access JWT 検証・Cron の保持期限削除）。`src/index.js` が環境変数→設定（`configFromEnv`）と設定検証（`validateConfig`: development で `sk_live_` 拒否、production で `MAIL_MODE=console` 拒否）、`src/app.js` 本体、`src/access.js`、`src/mail.js`、`src/stripe.js`、`src/store.js`、`schema.sql`、`migrations/`、`.dev.vars.example`（ローカル設定の雛形）。`npm test` はルートから `worker/src` を直接テストする |
 | `scripts/dev.mjs` / `.env.development` | `npm run dev` の一括起動（Vite + `wrangler dev`）と、開発サーバーだけが読む `VITE_ORDER_API_URL=http://127.0.0.1:8787` |
-| `src/geometry.js` | 輪郭化、ブリッジ（線の途切れ／矩形差分）、加工チェック、SVG出力 |
+| `src/geometry.js` | 輪郭化、ブリッジ（線の途切れ／矩形差分）、加工チェック、SVG出力（`exportSVG(project, { ids, crop })` で選択だけをカット線の範囲に切り詰めて出力） |
 | `src/operations.js` | 拡縮ハンドル、ブーリアン演算（結合・切り抜き・交差・XOR） |
-| `src/layers.js` | レイヤー |
+| `src/layers.js` | レイヤーと、オブジェクト単位の非表示（`item.hidden`。`isVisible`／`visibleItems` が除外し、対象付きブリッジは親に従う） |
 | `src/typography.js` | 文字組版（`layoutGlyphs` は1文字ごとの輪郭と位置）、HarfBuzzによる縦書き（vert/vrt2） |
 | `src/grouping.js` | グループ（`groupId`）の作成・解除、1文字ずつの文字アイテム、部位ごとの固定パス、対象付きブリッジの引き継ぎ |
 | `src/interaction.js` | 範囲選択の判定、ブラウザのShift範囲選択、レイヤー間移動の検証、ホイール／ピンチのズーム計算 |
@@ -55,7 +55,7 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | `src/freehand.js` | フリーハンド（「描く」ツール）: 画面ピクセル基準の再サンプリング・角の検出（窓幅の倍化で弧と区別）・ガウス平滑化・閉合判定（始点付近で終了／通り過ぎ）と `path.js` の `fitStroke` によるベジェ近似。結果は固定パス（`outline`） |
 | `src/path.js` | パスのノード編集モデル：サブパス＋ノード（アンカー・in/outハンドル・smooth）、SVG path dの解析（MLHVCSQTZ）と出力（M/L/C/Z）、グリフ命令・長方形・楕円からの変換、輪郭のベジェ近似（Schneider）、ノード操作。固定パスは `item.path` に保持し、`contours` はその平坦化 |
 | `src/svgimport.js` | SVGファイルの読み込み：要素（path/rect/circle/ellipse/line/polyline/polygon）、transform・viewBox・単位のmm換算、Inkscapeレイヤー。ブラウザはDOMParser、Nodeのテストは同梱の簡易XMLパーサーを使う |
-| `src/edit.js` | 重ね順（最前面へ／前面へ／背面へ／最背面へ）、複製・貼り付け用のコピー |
+| `src/edit.js` | 重ね順（最前面へ／前面へ／背面へ／最背面へ）、ブラウザのドロップ位置への並べ替え（`reorderItems`）、複製・貼り付け用のコピー |
 | `src/cad.js` | 拘束なしの2D CAD：正多角形、ミラー、矩形／円形パターン、オフセット（Clipper）、トリム・延長（交点計算）、フィレット・面取り（パスのノード置換）、計測、参照寸法（`project.annotations`、SVGには出さない） |
 | `src/project.js` | プロジェクトJSONの入力検証、v1→v2移行 |
 | `src/fonts.js` / `src/font-previews.js` | 同梱フォントのカタログ（`FONT_CATALOG`）、遅延読み込み（`createFontLoader`）、ユーザー追加フォント規約（バージョン付き）。プレビューは `scripts/font-previews.mjs` で生成 |

@@ -89,6 +89,8 @@ export function validateProject(p) {
       throw Error("所属レイヤーがありません。");
     if (i.ratioLocked !== undefined && typeof i.ratioLocked !== "boolean")
       throw Error("比率ロックが不正です。");
+    if (i.hidden !== undefined && typeof i.hidden !== "boolean")
+      throw Error("表示設定が不正です。");
     if (
       i.groupId !== undefined &&
       (typeof i.groupId !== "string" ||

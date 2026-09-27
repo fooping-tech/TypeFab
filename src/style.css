@@ -2046,3 +2046,54 @@ dialog .primary {
     max-height: calc(100dvh - 16px);
   }
 }
+
+/* Browser rows: eye toggle per object, drop position while reordering,
+   stacking-order buttons in the inspector. */
+.layer-row {
+  display: flex;
+  align-items: stretch;
+}
+.layer-row .layer {
+  flex: 1;
+  min-width: 0;
+}
+.layer-eye {
+  flex: none;
+  padding: 0 10px;
+  border-radius: 0;
+  font-size: 13px;
+  color: #9ba9b5;
+}
+.layer-eye:hover {
+  color: #315f80;
+}
+.layer-row.hidden-item .layer {
+  opacity: 0.45;
+}
+.layer-row.hidden-item .layer-eye {
+  color: #c27a45;
+}
+.layer.drop-above {
+  box-shadow: inset 0 2px 0 #3788bb;
+}
+.layer.drop-below {
+  box-shadow: inset 0 -2px 0 #3788bb;
+}
+.arrange-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.arrange-actions button {
+  border: 1px solid #d3dee6;
+  background: #edf2f5;
+  font-size: 11px;
+  padding: 8px 6px;
+}
+@media (max-width: 860px) {
+  .layer-eye {
+    padding: 0 14px;
+    font-size: 16px;
+  }
+}

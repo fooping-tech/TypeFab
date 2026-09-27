@@ -15,11 +15,13 @@ export function ensureLayers(project) {
 export function layerOf(project, item) {
   return project.layers?.find((l) => l.id === item.layerId);
 }
+// Hidden items (item.hidden) and items on hidden layers are not drawn, cut
+// or exported; a scoped bridge follows its owner.
 export function isVisible(project, item) {
-  if (layerOf(project, item)?.visible === false) return false;
+  if (item.hidden || layerOf(project, item)?.visible === false) return false;
   const owner =
     item.targetId && project.items.find((i) => i.id === item.targetId);
-  return !owner || layerOf(project, owner)?.visible !== false;
+  return !owner || (!owner.hidden && layerOf(project, owner)?.visible !== false);
 }
 export function isEditable(project, item) {
   if (!item || !isVisible(project, item) || layerOf(project, item)?.locked)

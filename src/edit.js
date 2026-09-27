@@ -33,6 +33,21 @@ export function arrangeItems(items, ids, mode) {
   }
   return result;
 }
+// Drops the items (with their scoped bridges, in their current order) right
+// before or after `targetId` in stacking order, into the target's layer.
+export function reorderItems(items, ids, targetId, position = "after") {
+  const set = new Set(ids),
+    moving = items.filter((i) => set.has(i.id)),
+    rest = items.filter((i) => !set.has(i.id)),
+    target = rest.find((i) => i.id === targetId);
+  if (!target) throw Error("移動先のアイテムが見つかりません。");
+  if (!moving.length) return items;
+  const at = rest.indexOf(target) + (position === "after" ? 1 : 0),
+    placed = moving.map((i) =>
+      i.layerId === target.layerId ? i : { ...i, layerId: target.layerId },
+    );
+  return [...rest.slice(0, at), ...placed, ...rest.slice(at)];
+}
 // Copies the items with their scoped bridges under new ids. Bridge owners and
 // groups are remapped, so copies form their own groups. Returns the copies in
 // stacking order and the new ids of the requested items.
