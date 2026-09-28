@@ -44,10 +44,10 @@ PERSONAL_DATA_RETENTION_DAYS = "90"
 # Mail: "resend" sends through Resend (MAIL_API_KEY secret); "console" only
 # prints the mails to the log and is refused unless APP_ENV = "development".
 MAIL_MODE = "resend"
-# Sender and the address that receives new-order notifications.
+# Sender address (shown to buyers). The new-order notification address
+# (ADMIN_NOTIFICATION_EMAIL) and MAIL_REPLY_TO are secrets, not vars, so that a
+# personal address never lands in this public repository.
 MAIL_FROM = ""
-MAIL_REPLY_TO = ""
-ADMIN_NOTIFICATION_EMAIL = ""
 # Link in the admin notification mail. Defaults to <Worker origin>/admin/ when empty.
 ADMIN_URL = ""
 # Bulk-order threshold and lead times (days). Prices live in src/pricing.js.
@@ -58,14 +58,15 @@ EXPRESS_LEAD_TIME_DAYS = "3"
 CONTACT_URL = "https://github.com/fooping-tech/TypeFab/issues/new?title=%E5%A4%A7%E9%87%8F%E6%B3%A8%E6%96%87%E3%81%AE%E5%95%8F%E3%81%84%E5%90%88%E3%82%8F%E3%81%9B"
 
 # Secrets (never in this file):  npx wrangler secret put <NAME>   (run in worker/)
-#   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, MAIL_API_KEY
+#   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, MAIL_API_KEY,
+#   ADMIN_NOTIFICATION_EMAIL, MAIL_REPLY_TO (optional)
 # ADMIN_TOKEN is ignored in production (Cloudflare Access only) and belongs in
 # worker/.dev.vars together with the other local values (see .dev.vars.example).
 
 [[d1_databases]]
 binding = "DB"
 database_name = "typefab-orders"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "9a0dbc5b-bfc7-4f64-893a-375216a97ee9"
 
 [[r2_buckets]]
 binding = "SVG_BUCKET"

@@ -700,3 +700,16 @@
 - `vite preview` + Chromium 1440 × 900: 行の ◉ で「MAKE IT YOURS」を非表示 → キャンバスの描画が 3 → 2、行が薄くなり `hidden` が保存、加工チェックの数が減る。もう一度で復帰。右クリック「非表示にする」で選択が解除され非表示、空白の右クリック「非表示をすべて表示」で復帰。プロパティの「最前面へ」「背面へ」で配列順が変わる。ブラウザで「MAKE IT YOURS」を「アクセントライン」の行の上半分に落とすと前面（配列の末尾）、下半分に落とすと背面へ（通知「…の前面へ移動しました」）。線分を選んで「選択だけをSVGで書き出す」→ ダウンロード `typefab-selection.svg` は `width="170mm" height="0.1mm" viewBox="0 0 170 0.1"`、レイヤーの `<g>` に path 1 本。390 px 幅の「⋯」メニューに 5 項目すべてあり。console error なし。
 - 未検証: タッチ操作でのブラウザ行のドラッグ（HTML5 ドラッグはモバイルブラウザで動かないことが多い。スマートフォンでは「⋯」とプロパティのボタンで並べ替える）。
 - 公開: コミット `1c06b84` を `main` へ push。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/36303292314 は success（`npm test` 213 件・build・デプロイ）。https://fooping-tech.github.io/TypeFab/app/ は HTTP 200 で、配信されるエディタの JS（`/TypeFab/assets/editor-CrIRQgVj.js`）に目ボタン（`data-item-visible`）と `typefab-selection.svg` を含む。
+
+## 公開リポジトリで通知先メールアドレスを公開しない（2026-09-29）
+
+### 要求
+- リポジトリが public のため、本番設定の手順どおりに進めても個人のメールアドレスがリポジトリに載らないようにする。
+- 利用者が作成した本番 D1 の `database_id` を `worker/wrangler.toml` に反映する（D1 の ID は Cloudflare の API トークンなしでは使えないため公開してよい）。
+
+### 結果
+- 確認: `worker/.dev.vars`・`worker/.wrangler/` は `.gitignore` 済み。追跡中のファイルと git の全履歴に、実際の Stripe キー（`sk_live_`/`sk_test_`）・Webhook シークレット（`whsec_`）・Resend API キーの形をした値はない（見つかったのは説明文とテスト用のダミー値のみ）。
+- `worker/wrangler.toml`: `[vars]` から `ADMIN_NOTIFICATION_EMAIL` と `MAIL_REPLY_TO` を削除し、Secret（`npx wrangler secret put`）の一覧に追加した。Worker は `env` から読むためコードの変更はない。`MAIL_FROM` は購入者に届くメールの差出人として見えるため `[vars]` に残した。`database_id` を本番 D1 の値にした。
+- README「本番環境（production）」の手順 5・6 を、上の2つを Secret として登録する手順に変更した。
+- 検証: `npm test` 213 件成功、`npm run build` 成功、`wrangler deploy --dry-run` のバインディング一覧に上の2つが Environment Variable として出ないことを確認した。
+- 本番の状態（2026-09-29 時点で確認）: D1 は作成済みで、`orders`・`order_events`・`stripe_events`・`order_notifications` と 0003 までの列が適用済み。R2 はアカウントで未有効（`Please enable R2 through the Cloudflare Dashboard`）、Worker は未デプロイ、GitHub のリポジトリ変数 `ORDER_API_URL` は未設定。
