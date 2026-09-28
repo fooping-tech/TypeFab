@@ -713,3 +713,4 @@
 - README「本番環境（production）」の手順 5・6 を、上の2つを Secret として登録する手順に変更した。
 - 検証: `npm test` 213 件成功、`npm run build` 成功、`wrangler deploy --dry-run` のバインディング一覧に上の2つが Environment Variable として出ないことを確認した。
 - 本番の状態（2026-09-29 時点で確認）: D1 は作成済みで、`orders`・`order_events`・`stripe_events`・`order_notifications` と 0003 までの列が適用済み。R2 はアカウントで未有効（`Please enable R2 through the Cloudflare Dashboard`）、Worker は未デプロイ、GitHub のリポジトリ変数 `ORDER_API_URL` は未設定。
+- 公開: GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/36457700410 は success、https://fooping-tech.github.io/TypeFab/ は HTTP 200。
