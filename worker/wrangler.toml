@@ -37,8 +37,8 @@ ADMIN_ALLOWED_ORIGINS = ""
 # Cloudflare Access (Zero Trust) protecting /admin* and /api/admin*:
 # team domain and the Application Audience (AUD) tag. Leave both empty to
 # fall back to the ADMIN_TOKEN bearer (local development only).
-ACCESS_TEAM_DOMAIN = ""
-ACCESS_AUD = ""
+ACCESS_TEAM_DOMAIN = "broken-scene-4352.cloudflareaccess.com"
+ACCESS_AUD = "d1e5903c1d0abeaf629ebbf83204d8b2ff63544b16effeec5f44e2a1d1238eaf"
 # Days after COMPLETED/CANCELLED before name, e-mail, address, phone and the SVG are deleted.
 PERSONAL_DATA_RETENTION_DAYS = "90"
 # Mail: "resend" sends through Resend (MAIL_API_KEY secret); "console" only
