@@ -47,7 +47,7 @@ MAIL_MODE = "resend"
 # Sender address (shown to buyers). The new-order notification address
 # (ADMIN_NOTIFICATION_EMAIL) and MAIL_REPLY_TO are secrets, not vars, so that a
 # personal address never lands in this public repository.
-MAIL_FROM = ""
+MAIL_FROM = "TypeFab <orders@mail.chikuwa-tech.com>"
 # Link in the admin notification mail. Defaults to <Worker origin>/admin/ when empty.
 ADMIN_URL = ""
 # Bulk-order threshold and lead times (days). Prices live in src/pricing.js.
