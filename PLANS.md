@@ -765,3 +765,4 @@
 - テスト: `npm test` 215 件成功（特急の見積もり・注文が拒否されること、発送期限 7 日、メールに特急が出ないこと、特商法ページに特急がないこと）。`npm run build` 成功。
 - ブラウザ（Chromium、`vite preview`）: 注文ページに SVG（100 × 40 mm）を読み込み、納期のラジオは 1 件（通常）、ページ内に「特急」の文字なし、合計 ¥920。特商法ページに「特急」なし。console error なし。
 - Worker 側（特急の拒否、メール）は利用者の `npm run deploy` 後に反映。
+- 公開: GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/36637081454 は success。公開中の /legal/ に「特急」の文字なし。
