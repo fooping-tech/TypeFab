@@ -21,7 +21,7 @@ const base = {
   totalPrice: 1, // must be ignored by the server
   customer: { name: "山田 太郎", email: "taro@example.com" },
   shipping: { postalCode: "100-0001", prefecture: "東京都", address1: "千代田区1-1", address2: "", phone: "0300000000" },
-  agreedTerms: ["laser-marks", "neck-width", "letter-mail"],
+  agreedTerms: ["laser-marks", "neck-width", "letter-mail", "no-cancel"],
 };
 function setup(overrides = {}, { certs = null } = {}) {
   const store = memoryStore(), bucket = memoryBucket();
@@ -705,7 +705,7 @@ test("size rules (sheet vs envelope): a TypeFab work area larger than the envelo
 
 test("order terms: checkout is refused until every condition is accepted, and the acceptance time is stored", async () => {
   const s = setup();
-  for (const agreedTerms of [undefined, [], ["laser-marks", "neck-width"], "laser-marks,neck-width,letter-mail"]) {
+  for (const agreedTerms of [undefined, [], ["laser-marks", "neck-width"], ["laser-marks", "neck-width", "letter-mail"], "laser-marks,neck-width,letter-mail,no-cancel"]) {
     const res = await s.call("/api/orders", { method: "POST", body: { ...base, agreedTerms } });
     assert.equal(res.status, 400, JSON.stringify(agreedTerms));
     const body = await res.json();
@@ -714,7 +714,7 @@ test("order terms: checkout is refused until every condition is accepted, and th
   }
   assert.equal(s.store.orders.size, 0, "nothing is stored without consent");
   assert.equal(s.stripeCalls.length, 0, "Stripe is never called without consent");
-  const ok = await s.call("/api/orders", { method: "POST", body: { ...base, agreedTerms: ["letter-mail", "neck-width", "laser-marks", "extra"] } });
+  const ok = await s.call("/api/orders", { method: "POST", body: { ...base, agreedTerms: ["letter-mail", "no-cancel", "neck-width", "laser-marks", "extra"] } });
   assert.equal(ok.status, 201);
   const out = await ok.json();
   const stored = await s.store.getOrder(out.orderId);

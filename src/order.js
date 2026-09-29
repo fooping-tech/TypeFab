@@ -29,7 +29,7 @@ const STATUS_LABEL = {
 const state = {
   catalog: publicCatalog(CATALOG),
   online: false,
-  contactUrl: "https://github.com/fooping-tech/TypeFab/issues",
+  contactUrl: "mailto:tomei-kakushin@chikuwa-tech.com",
   svg: "",
   fileName: "",
   fromEditor: false,
@@ -323,7 +323,7 @@ function renderTerms() {
 function renderConsent() {
   const items = [
     ...(state.catalog.terms ?? []).map((t) => ({ id: t.id, html: esc(t.text) })),
-    { id: "privacy", html: `個人情報の取り扱いは <a href="../privacy/" target="_blank" rel="noopener">プライバシーポリシー</a> のとおりです。` },
+    { id: "privacy", html: `個人情報の取り扱いは <a href="../privacy/" target="_blank" rel="noopener">プライバシーポリシー</a>、販売条件は <a href="../legal/" target="_blank" rel="noopener">特定商取引法に基づく表記</a> のとおりです。` },
   ];
   $("#consent").innerHTML = items.map((t) => `<label><input type="checkbox" data-term="${esc(t.id)}" /><span>${t.html}</span></label>`).join("");
   updatePayButton();
@@ -415,7 +415,7 @@ async function showStatus(orderId, token, result) {
             order.receiptUrl ? `<dt>領収書</dt><dd><a href="${esc(order.receiptUrl)}" target="_blank" rel="noopener" id="receipt-link"><button>領収書を表示（Stripe）</button></a><span class="note" style="display:block;margin:4px 0 0">Stripe が発行する領収書です。決済時のメールアドレスにも Stripe から領収書メールが届きます。</span></dd>` : PAID_LIKE.includes(order.status) ? `<dt>領収書</dt><dd><span class="note" style="margin:0">領収書を準備しています。しばらくしてからこのページを再読み込みしてください。</span></dd>` : ""
           }</dl>`
         : ""
-    }<p class="note">このページには配送先やメールアドレスを表示しません。注文受付メールに記載した確認用URLは第三者に共有しないでください。お問い合わせは注文番号を添えて <a href="${esc(state.contactUrl)}" target="_blank" rel="noopener">問い合わせ窓口</a> へ。 <a href="../privacy/">プライバシーポリシー</a></p><div class="actions"><a href="../app/"><button>エディタに戻る</button></a><a href="./"><button>別のSVGを注文する</button></a></div>`;
+    }<p class="note">このページには配送先やメールアドレスを表示しません。注文受付メールに記載した確認用URLは第三者に共有しないでください。お問い合わせは注文番号を添えて <a href="${esc(state.contactUrl)}" target="_blank" rel="noopener">問い合わせ窓口</a> へ。 <a href="../privacy/">プライバシーポリシー</a> · <a href="../legal/">特定商取引法に基づく表記</a></p><div class="actions"><a href="../app/"><button>エディタに戻る</button></a><a href="./"><button>別のSVGを注文する</button></a></div>`;
   };
   const fetchOrder = async () => {
     const res = await fetch(`${API}/api/orders/${encodeURIComponent(orderId)}?token=${encodeURIComponent(token)}`);

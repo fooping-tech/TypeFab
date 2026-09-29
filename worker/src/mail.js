@@ -59,7 +59,7 @@ export function customerPaidMail(order, { orderUrl, contactUrl }) {
     "領収書はStripeからも別途メールでお送りします。",
     "",
     "▼ お問い合わせ",
-    contactUrl,
+    String(contactUrl ?? "").replace(/^mailto:/, ""),
     "注文番号を添えてご連絡ください。",
     "",
     "このメールは自動送信です。",

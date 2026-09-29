@@ -38,6 +38,7 @@ export const CATALOG = {
     { id: "laser-marks", text: "レーザー加工するため、切断面に黒い焦げ粉や匂いがつく場合があります。匂いは数日で消えます。" },
     { id: "neck-width", text: "接続部位が小さいと千切れる可能性があります。推奨 4 mm 以上のネック幅を確保してください。" },
     { id: "letter-mail", text: "商品は折れ・水濡れ防止の梱包を行い、日本郵便の定形郵便で発送します。定形郵便には追跡番号・配達状況の確認・補償はありません。発送後の配送状況を個別に確認することはできません。" },
+    { id: "no-cancel", text: "オーダーメイド品のため、決済後のお客様のご都合によるキャンセル・返品・交換はお受けできません。当方の加工ミスによりご注文のデータと異なる商品が届いた場合は、到着から 7 日以内にご連絡ください。再製作または返金で対応します。" },
   ],
   // The only material offered is black kraft paper. The quote code still
   // supports several materials/thicknesses and `inquiryOnly` entries, so

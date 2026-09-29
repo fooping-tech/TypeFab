@@ -25,7 +25,7 @@ export function configFromEnv(env) {
     accessAud: env.ACCESS_AUD || undefined,
     siteUrl: env.SITE_URL || "https://fooping-tech.github.io/TypeFab/",
     adminUrl: env.ADMIN_URL || undefined,
-    contactUrl: env.CONTACT_URL || "https://github.com/fooping-tech/TypeFab/issues/new?title=%E5%A4%A7%E9%87%8F%E6%B3%A8%E6%96%87%E3%81%AE%E5%95%8F%E3%81%84%E5%90%88%E3%82%8F%E3%81%9B",
+    contactUrl: env.CONTACT_URL || "mailto:tomei-kakushin@chikuwa-tech.com",
     allowedOrigins: list(env.ALLOWED_ORIGINS || "https://fooping-tech.github.io,http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173"),
     adminAllowedOrigins: list(env.ADMIN_ALLOWED_ORIGINS || ""),
     bulkThreshold: Number(env.BULK_THRESHOLD) || undefined,

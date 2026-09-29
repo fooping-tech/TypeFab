@@ -83,6 +83,7 @@ test("Vite config builds the public pages under the /TypeFab/ base; the admin pa
   assert.ok(input.editor.endsWith("/app/index.html"));
   assert.ok(input.landing.endsWith("/TypeFab/index.html"));
   assert.ok(input.order.endsWith("/order/index.html") && input.privacy.endsWith("/privacy/index.html"));
+  assert.ok(input.legal.endsWith("/legal/index.html"));
   assert.equal(input.admin, undefined, "admin page is not published on GitHub Pages (issue #8)");
   const admin = (await import("../vite.admin.config.js")).default;
   assert.equal(admin.base, "/");
@@ -92,14 +93,27 @@ test("Vite config builds the public pages under the /TypeFab/ base; the admin pa
   // Landing page links to the privacy policy.
   const html = fs.readFileSync("index.html", "utf8");
   assert.match(html, /href="\.\/privacy\/"/);
+  assert.match(html, /href="\.\/legal\/"/);
 });
 
 test("privacy policy page states the collected data, Stripe, Cloudflare, retention and the contact window", () => {
   const html = fs.readFileSync("privacy/index.html", "utf8");
   for (const s of ["氏名", "メールアドレス", "住所", "電話番号", "SVG", "Stripe", "Cloudflare", "90日", "保持", "第三者", "削除", "お問い合わせ"]) assert.ok(html.includes(s), s);
   assert.match(html, /カード番号.*当サービスは受け取らず、保持しません/s);
-  assert.match(html, /github\.com\/fooping-tech\/TypeFab\/issues/);
+  assert.match(html, /mailto:tomei-kakushin@chikuwa-tech\.com/, "contact by mail, not a public GitHub issue");
+  assert.doesNotMatch(html, /github\.com\/fooping-tech\/TypeFab\/issues/);
   const order = fs.readFileSync("order/index.html", "utf8");
   assert.match(order, /href="\.\.\/privacy\/"/, "order page links to the privacy policy");
   assert.match(order, /領収書/, "order page explains receipts");
+  assert.match(order, /href="\.\.\/legal\/"/, "order page links to the 特定商取引法 page");
+});
+
+test("特定商取引法 page: required items, disclosure on request, mail contact and the cancellation policy", () => {
+  const html = fs.readFileSync("legal/index.html", "utf8");
+  for (const s of ["販売事業者", "所在地", "電話番号", "お問い合わせ先", "販売価格", "商品代金以外の必要料金", "支払方法", "支払時期", "商品の引き渡し時期", "返品・キャンセル"]) assert.ok(html.includes(`<th>${s}</th>`), s);
+  assert.equal(html.match(/請求があった場合、遅滞なく開示いたします。/g).length, 3);
+  assert.match(html, /mailto:tomei-kakushin@chikuwa-tech\.com/);
+  assert.match(html, /全国一律 300 円/);
+  assert.match(html, /通常納期は 7 日以内、特急は 3 日以内/);
+  assert.match(html, /キャンセル・返品・交換はお受けできません/);
 });

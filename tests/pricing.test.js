@@ -114,17 +114,18 @@ test("shipping: one flat letter-mail rule; size-based rules can still be put in 
   assert.match(CATALOG.shippingNote, /全国一律 300 円/);
 });
 
-test("order terms: laser marks, neck width and letter mail must all be accepted", () => {
-  assert.deepEqual(CATALOG.terms.map((t) => t.id), ["laser-marks", "neck-width", "letter-mail"]);
+test("order terms: laser marks, neck width, letter mail and no cancellation must all be accepted", () => {
+  assert.deepEqual(CATALOG.terms.map((t) => t.id), ["laser-marks", "neck-width", "letter-mail", "no-cancel"]);
   assert.match(CATALOG.terms[0].text, /焦げ粉や匂い/);
   assert.match(CATALOG.terms[1].text, /4 mm 以上のネック幅/);
   assert.match(CATALOG.terms[2].text, /追跡番号・配達状況の確認・補償はありません/);
-  assert.deepEqual(missingTerms(["laser-marks", "neck-width", "letter-mail"]), []);
-  assert.deepEqual(missingTerms(["laser-marks"]), ["neck-width", "letter-mail"]);
-  assert.deepEqual(missingTerms(undefined), ["laser-marks", "neck-width", "letter-mail"]);
-  assert.deepEqual(missingTerms("laser-marks"), ["laser-marks", "neck-width", "letter-mail"], "a string is not a list");
+  assert.match(CATALOG.terms[3].text, /決済後のお客様のご都合によるキャンセル・返品・交換はお受けできません/);
+  assert.deepEqual(missingTerms(["laser-marks", "neck-width", "letter-mail", "no-cancel"]), []);
+  assert.deepEqual(missingTerms(["laser-marks"]), ["neck-width", "letter-mail", "no-cancel"]);
+  assert.deepEqual(missingTerms(undefined), ["laser-marks", "neck-width", "letter-mail", "no-cancel"]);
+  assert.deepEqual(missingTerms("laser-marks"), ["laser-marks", "neck-width", "letter-mail", "no-cancel"], "a string is not a list");
   const p = JSON.parse(JSON.stringify(publicCatalog()));
-  assert.equal(p.terms.length, 3);
+  assert.equal(p.terms.length, 4);
   assert.equal(p.shippingNote, CATALOG.shippingNote);
 });
 

@@ -55,7 +55,7 @@ BULK_THRESHOLD = "10"
 NORMAL_LEAD_TIME_DAYS = "7"
 EXPRESS_LEAD_TIME_DAYS = "3"
 # Where "大量注文について問い合わせる" and the mails' contact line send people.
-CONTACT_URL = "https://github.com/fooping-tech/TypeFab/issues/new?title=%E5%A4%A7%E9%87%8F%E6%B3%A8%E6%96%87%E3%81%AE%E5%95%8F%E3%81%84%E5%90%88%E3%82%8F%E3%81%9B"
+CONTACT_URL = "mailto:tomei-kakushin@chikuwa-tech.com"
 
 # Secrets (never in this file):  npx wrangler secret put <NAME>   (run in worker/)
 #   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, MAIL_API_KEY,
