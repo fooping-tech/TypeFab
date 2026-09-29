@@ -751,3 +751,4 @@
 - テスト: `npm test` 215 件成功（特商法ページの必須項目・開示文言・メール・キャンセル条件、リンク、同意 4 項目、3 項目だけの同意は 400）。`npm run build` 成功（`dist/legal/index.html`）。
 - ブラウザ（Chromium、`vite preview`）: `/legal/` はデスクトップ・幅 390 px とも 10 行の表で横スクロールなし。注文ページの「ご注文前の注意」は 4 項目と特商法ページへのリンク。紹介ページのフッターとプライバシーポリシーにリンク、プライバシーポリシーの窓口は mailto。console error なし。
 - 未確認・注意: 表記の法的な十分性は確認していない（利用者が最終確認する）。事業者名等を「請求時に開示」とする書き方を Stripe の審査が受け入れるかは未確認。Worker 側の変更（同意 4 項目、`CONTACT_URL`、メール本文）は利用者の `npm run deploy` 後に反映される。
+- 公開: GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/36569063428 は success。https://fooping-tech.github.io/TypeFab/legal/ は HTTP 200 で開示文言 3 件を含む。
