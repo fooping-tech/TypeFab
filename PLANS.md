@@ -766,3 +766,22 @@
 - ブラウザ（Chromium、`vite preview`）: 注文ページに SVG（100 × 40 mm）を読み込み、納期のラジオは 1 件（通常）、ページ内に「特急」の文字なし、合計 ¥920。特商法ページに「特急」なし。console error なし。
 - Worker 側（特急の拒否、メール）は利用者の `npm run deploy` 後に反映。
 - 公開: GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/36637081454 は success。公開中の /legal/ に「特急」の文字なし。
+
+## 複数の SVG をまとめて注文（2026-09-30）
+
+### 要求
+- 1 回の注文に複数の SVG を入れられるようにする（送料をまとめたい利用者向け）。
+- 利用者の決定: 基本料金（500 円）は **SVG ごと**に加算。上限は全 SVG の**合計数量 9 個まで**（合計が `BULK_THRESHOLD`=10 以上は事前問い合わせ）。送料・梱包料は 1 注文につき 300 円（定形郵便 1 通）。
+- 設計: 材料・厚さ・納期は注文全体で共通、数量は SVG ごと。D1 に `order_items`（`migrations/0004_order_items.sql`）を追加し、`orders` には合計（数量・カット長・料金）と先頭の SVG を残す（旧注文は明細なしでも 1 件として表示）。R2 は SVG ごとに保存し、保持期限の削除で全件削除。Stripe の明細は SVG ごと＋送料。注文ページはカート（SVG のみ `localStorage`、個人情報は保存しない）で、エディタの「このデザインを加工注文する」は追加になる。管理画面は SVG ごとに表示・ダウンロード。メールは SVG ごとの明細。
+- 完了条件: テスト追加、ビルド、ブラウザで 2 件以上の SVG の追加・数量・削除・見積もり・確認画面を確認、公開。Worker と本番 D1 のマイグレーションは利用者が `npm run db:migrate:remote` → `npm run deploy` で反映。
+
+### 結果
+- `src/pricing.js`: `quoteOrder({ material, thicknessMm, deliveryType, items })` を追加（SVG ごとに基本料金＋材料費＋加工費＋数量加算、合計数量で大量注文判定、送料は 1 回、複数 SVG のときエラーに「ファイル名」を付ける）。`quote()` は 1 件の `quoteOrder` として互換を維持。`limits.maxItems = 20`、`limits.maxOrderSvgBytes = 8 MB`。
+- D1: `order_items`（`schema.sql`・`migrations/0004_order_items.sql`、`CREATE TABLE IF NOT EXISTS` で再実行可）。`db:migrate:local/remote` を 0004 に。`store.js` に `insertItems`（D1 は `batch`）・`listItems`・`legacyItems`（明細のない旧注文を 1 件として扱う）。
+- Worker（`app.js`）: `items` を受け付け（旧形式の 1 件も可）、SVG ごとに検査・R2 保存（`orders/<id>/<n>-<hash>.svg`）・明細保存。`orders` は合計と先頭の SVG。Stripe の明細は SVG ごと＋送料。購入者ビュー・管理 API の一覧／詳細に `items`（オブジェクトキーなし）。SVG ダウンロードは `?item=N`（既定は 1 件目、ファイル名 `<注文番号>-<N>-<名前>`）。保持期限の削除は全 SVG を削除し、明細行（サイズ・数量・料金）は残す。`MAX_BODY` を 12 MB に。メールは複数 SVG のとき「SVG: n 件（合計数量 m）」と各行。
+- 注文ページ: SVG の一覧（選択・数量・外す）、複数ファイルのドロップ／選択、エディタからの追加（同じ SVG は追加せず案内）、一覧は `localStorage` の `typefab-order-cart`（SVG・ファイル名・数量のみ、注文作成時に削除）。数量欄を一覧へ移し、材料・厚さ・納期は共通と表示。見積もりは SVG ごとの行＋送料 1 回、確認画面・注文状況ページも SVG ごと。プレビュー画像の URL は読み込み中に解放しないよう遅延解放。
+- 管理画面: SVG ごとの行（サイズ・切り抜き後・カット長・料金）と「表示」「ダウンロード」。
+- 文書: README、プライバシーポリシー（ブラウザに残るのは追加した SVG データ、最終更新 2026-09-30）、特定商取引法の表記（SVG ごとの基本料金、送料は 1 注文 1 回）、CLAUDE.md。
+- テスト: `npm test` 219 件成功（`quoteOrder`、複数 SVG の注文作成・R2・明細・Stripe 明細・購入者ビュー・メール・管理 API・`?item=`・保持期限削除、合計数量 10 で問い合わせ／9 は可、不正な SVG の位置、件数上限、旧注文の表示とダウンロード）。`npm run build` 成功。
+- ブラウザ（Chromium、手元のビルド → ローカル Worker（`wrangler dev`、ローカル D1 に `schema.sql` と 0004 を適用、R2 はローカル）＋モック Stripe／Resend）: エディタからの受け渡しで 1 件 → ファイル 2 件を同時追加で 3 件 → 数量変更で料金更新 → エディタから 2 件目を追加（`typefab-2.svg`、「追加しました」表示）→ 同じ SVG の追加は拒否 → 選択で詳細切り替え → 削除 → 合計 10 個で問い合わせ表示と確認ボタン無効 → 確認画面に 3 件 → 同意・決済 → モック Checkout → Webhook → 注文状況ページに 3 件・決済完了・領収書。Stripe への明細は ¥634＋¥860＋¥614＋送料 ¥300＝¥2,408、メールに 3 件の明細、決済後に一覧は削除。管理画面（トークン、ローカル）で 3 行表示、2 件目のダウンロード名 `TF-…-2-sample.svg` と内容を確認。幅 390 px で横スクロールなし。console error なし（初回に出たプレビュー画像の `ERR_FILE_NOT_FOUND` は遅延解放で解消）。
+- 本番への反映は利用者が `npm run db:migrate:remote`（0004）→ `cd worker && npm run deploy` の順で行う（マイグレーション前にデプロイすると注文作成が `order_items` なしで失敗する）。公開サイトの注文ページは引き続き Worker 未接続（受付は開始しない）。

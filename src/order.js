@@ -1,11 +1,15 @@
 import "./order.css";
-import { CATALOG, quote, publicCatalog } from "./pricing.js";
+import { CATALOG, quoteOrder, publicCatalog } from "./pricing.js";
 import { analyzeSVG, sanitizeSVG, withPhysicalSize } from "./svganalyze.js";
 import { BOOK_WIDTH_MM, BOOK_HEIGHT_MM, bookmarkPiece, bookmarkOrientation, bookmarkLayout, bookmarkWarnings, renderSingle, renderInBook, renderComparison, renderSheetLayout } from "./bookmark-preview.js";
 import { fitsWithin } from "./pricing.js";
 
 const API = (import.meta.env.VITE_ORDER_API_URL || "").replace(/\/$/, "");
 const HANDOFF_KEY = "typefab-order";
+// The SVGs added to this order (several per order since 2026-09-30). Only
+// the SVG data, file name and quantity are kept — never personal data — so
+// designs added from the editor one by one survive the round trips.
+const CART_KEY = "typefab-order-cart";
 // Only the fabrication options are remembered, and only for this tab
 // (sessionStorage). Name, e-mail, address and phone stay in the form and are
 // never written to browser storage (issue #8).
@@ -30,13 +34,16 @@ const state = {
   catalog: publicCatalog(CATALOG),
   online: false,
   contactUrl: "mailto:tomei-kakushin@chikuwa-tech.com",
+  // SVGs of the order: { svg, fileName, fromEditor, quantity, analysis, piece }.
+  items: [],
+  selected: -1,
+  // Mirror of the selected item for the detail panels below the list.
   svg: "",
   fileName: "",
   fromEditor: false,
   analysis: null,
   material: "kraft-black",
   thicknessMm: 0.3,
-  quantity: 1,
   deliveryType: "NORMAL",
   quote: null,
   // Finished-look mock-ups (issue #7): which view is open, whether a
@@ -44,7 +51,8 @@ const state = {
   // read from the SVG (null until the physical size is known).
   mockup: { view: "book", rotated: null, piece: null },
 };
-let previewUrl = null;
+let previewUrl = null,
+  previewSvg = null;
 
 function alertMsg(text) {
   const el = $("#alert");
@@ -58,24 +66,80 @@ function banner(text, kind = "") {
   el.textContent = text ?? "";
 }
 
-// ---- SVG ------------------------------------------------------------------
-function setSVG(text, fileName, fromEditor = false) {
-  state.svg = text;
-  state.fileName = fileName || "design.svg";
-  state.fromEditor = fromEditor;
-  state.analysis = analyzeSVG(text, { limits: state.catalog.limits, sheet: state.catalog.sheet });
-  state.mockup.piece = null;
-  state.mockup.rotated = null;
-  if (state.analysis.size?.known && !state.analysis.security.length) {
+// ---- SVGs of the order -------------------------------------------------------
+function analyzeItem(it) {
+  it.analysis = analyzeSVG(it.svg, { limits: state.catalog.limits, sheet: state.catalog.sheet });
+  it.piece = null;
+  if (it.analysis.size?.known && !it.analysis.security.length) {
     try {
-      state.mockup.piece = bookmarkPiece(text);
+      it.piece = bookmarkPiece(it.svg);
     } catch {
-      state.mockup.piece = null;
+      it.piece = null;
     }
   }
+  return it;
+}
+const current = () => state.items[state.selected] ?? null;
+// A name not used by another SVG of the order ("typefab.svg", "typefab-2.svg", …).
+function uniqueName(name) {
+  const taken = new Set(state.items.map((it) => it.fileName));
+  if (!taken.has(name)) return name;
+  const m = /^(.*?)(\.svg)?$/i.exec(name);
+  for (let n = 2; ; n++) if (!taken.has(`${m[1]}-${n}${m[2] ?? ""}`)) return `${m[1]}-${n}${m[2] ?? ""}`;
+}
+function addItem(text, fileName, fromEditor = false, quantity = 1) {
+  const same = state.items.findIndex((it) => it.svg === text);
+  if (same >= 0) {
+    selectItem(same);
+    return alertMsg(`同じ SVG（${state.items[same].fileName}）はすでに注文に入っています。数量で調整してください。`);
+  }
+  state.items.push(analyzeItem({ svg: text, fileName: uniqueName(fileName || "design.svg"), fromEditor, quantity: Math.max(1, Math.floor(Number(quantity) || 1)) }));
+  selectItem(state.items.length - 1);
+}
+function removeItem(i) {
+  state.items.splice(i, 1);
+  selectItem(Math.min(state.selected, state.items.length - 1));
+}
+function selectItem(i) {
+  state.selected = state.items.length ? Math.max(0, i) : -1;
+  const it = current();
+  state.svg = it?.svg ?? "";
+  state.fileName = it?.fileName ?? "";
+  state.fromEditor = it?.fromEditor ?? false;
+  state.analysis = it?.analysis ?? null;
+  state.mockup.piece = it?.piece ?? null;
+  state.mockup.rotated = null;
+  $("#confirm-width").value = "";
+  renderItems();
   renderSVG();
   renderMockup();
   updateQuote();
+}
+// Replaces the selected SVG (e.g. after the physical width was confirmed).
+function setSVG(text) {
+  const it = current();
+  if (!it) return;
+  it.svg = text;
+  analyzeItem(it);
+  selectItem(state.selected);
+}
+const itemOk = (it) => it.analysis?.ok;
+function renderItems() {
+  const list = $("#items");
+  list.innerHTML = state.items
+    .map((it, i) => {
+      const a = it.analysis;
+      const size = a?.size?.known ? `${a.size.widthMm.toFixed(1)} × ${a.size.heightMm.toFixed(1)} mm` : "実寸未確定";
+      return `<li class="item ${i === state.selected ? "selected" : ""} ${itemOk(it) ? "" : "bad"}" data-i="${i}">
+  <button type="button" class="item-name" data-action="select" aria-pressed="${i === state.selected}"><b>${i + 1}. ${esc(it.fileName)}</b><small>${esc(size)} · ${itemOk(it) ? "注文できます" : "問題があります（選んで確認）"}${it.fromEditor ? " · エディタから" : ""}</small></button>
+  <label class="item-qty">数量<input type="number" min="1" step="1" value="${it.quantity}" data-action="qty" aria-label="${esc(it.fileName)} の数量" /></label>
+  <button type="button" class="item-remove" data-action="remove" aria-label="${esc(it.fileName)} を注文から外す">外す</button>
+</li>`;
+    })
+    .join("");
+  list.classList.toggle("hidden", !state.items.length);
+  $("#detail-title").classList.toggle("hidden", state.items.length < 2);
+  $("#detail-title").textContent = current() ? `選択中: ${state.selected + 1}. ${current().fileName}` : "";
 }
 // ---- sheet layout ---------------------------------------------------------------
 // The SVG placed on the material sheet and the finished piece in the envelope.
@@ -151,28 +215,37 @@ function selectMockupView(view, focus = false) {
   renderMockup();
   if (focus) $(`#mockup-tab-${view}`)?.focus();
 }
+// The preview is the sanitised document inside <img>, which never runs
+// scripts or loads external resources. Rebuilt only when the SVG changes, so
+// the object URL the <img> is loading is not revoked under it.
+function renderPreview() {
+  if (state.svg && state.svg === previewSvg) return;
+  previewSvg = state.svg || null;
+  const a = state.analysis,
+    preview = $("#preview");
+  // The previous image may still be loading (several files added at once),
+  // so its URL is released a little later rather than under it.
+  const old = previewUrl;
+  if (old) setTimeout(() => URL.revokeObjectURL(old), 5000);
+  previewUrl = null;
+  if (!state.svg || !a || a.errors.some((e) => /読み込めません|SVGファイルではありません|大きすぎます（最大/.test(e))) {
+    preview.innerHTML = `<span class="empty">${state.svg ? "プレビューできません" : "SVGがまだありません"}</span>`;
+    return;
+  }
+  try {
+    previewUrl = URL.createObjectURL(new Blob([sanitizeSVG(state.svg)], { type: "image/svg+xml" }));
+    preview.innerHTML = `<img alt="注文するSVGのプレビュー" />`;
+    preview.querySelector("img").src = previewUrl;
+  } catch {
+    preview.innerHTML = `<span class="empty">プレビューできません</span>`;
+  }
+}
 function renderSVG() {
   const a = state.analysis;
   $("#file-line").innerHTML = state.svg
     ? `<code>${esc(state.fileName)}</code><span class="note" style="margin:0">${(state.svg.length / 1024).toFixed(1)} KB${state.fromEditor ? " · TypeFabのエディタから受け取ったデザイン" : ""}</span>`
     : "";
-  const preview = $("#preview");
-  if (previewUrl) URL.revokeObjectURL(previewUrl);
-  previewUrl = null;
-  if (!state.svg || !a || a.errors.some((e) => /読み込めません|SVGファイルではありません|大きすぎます（最大/.test(e))) {
-    preview.innerHTML = `<span class="empty">${state.svg ? "プレビューできません" : "SVGがまだありません"}</span>`;
-  } else {
-    // The preview is the sanitised document inside <img>, which never runs
-    // scripts or loads external resources.
-    try {
-      const clean = sanitizeSVG(state.svg);
-      previewUrl = URL.createObjectURL(new Blob([clean], { type: "image/svg+xml" }));
-      preview.innerHTML = `<img alt="注文するSVGのプレビュー" />`;
-      preview.querySelector("img").src = previewUrl;
-    } catch {
-      preview.innerHTML = `<span class="empty">プレビューできません</span>`;
-    }
-  }
+  renderPreview();
   const items = [];
   if (a) {
     if (!a.errors.some((e) => /読み込めません|SVGファイルではありません/.test(e))) items.push(["ok", "SVG形式"]);
@@ -198,11 +271,16 @@ function renderSVG() {
   $("#size-confirm").classList.toggle("hidden", !needSize);
   if (needSize && !$("#confirm-width").value) $("#confirm-width").value = a.size.suggestedWidthMm ?? "";
 }
-async function readFile(file) {
-  if (!file) return;
-  if (file.size > state.catalog.limits.maxSvgBytes) return alertMsg(`ファイルが大きすぎます（最大 ${Math.round(state.catalog.limits.maxSvgBytes / 1024 / 1024)} MB）。`);
+async function readFiles(files) {
   alertMsg("");
-  setSVG(await file.text(), file.name, false);
+  for (const file of files ?? []) {
+    if (state.items.length >= state.catalog.limits.maxItems) return alertMsg(`1回の注文に入れられるSVGは${state.catalog.limits.maxItems}個までです。`);
+    if (file.size > state.catalog.limits.maxSvgBytes) {
+      alertMsg(`${file.name} は大きすぎます（最大 ${Math.round(state.catalog.limits.maxSvgBytes / 1024 / 1024)} MB）。`);
+      continue;
+    }
+    addItem(await file.text(), file.name, false);
+  }
 }
 
 // ---- options & quote --------------------------------------------------------
@@ -218,7 +296,7 @@ function renderOptions() {
     ? ths.map((t) => `<option value="${t.mm}" ${t.mm === state.thicknessMm ? "selected" : ""}>${t.mm} mm</option>`).join("")
     : `<option value="">要相談</option>`;
   $("#thickness").disabled = !ths.length;
-  $("#quantity").value = state.quantity;
+  for (const el of document.querySelectorAll("[data-bulk-max]")) el.textContent = c.bulkThreshold - 1;
   $("#delivery").innerHTML = Object.entries(c.delivery)
     .map(
       ([id, d]) =>
@@ -227,45 +305,60 @@ function renderOptions() {
     .join("");
 }
 function updateQuote() {
-  const a = state.analysis;
-  const q = quote(
+  const items = state.items;
+  const q = quoteOrder(
     {
       material: state.material,
       thicknessMm: state.thicknessMm,
-      quantity: state.quantity,
       deliveryType: state.deliveryType,
-      widthMm: a?.size?.widthMm,
-      heightMm: a?.size?.heightMm,
-      pieceWidthMm: a?.piece?.widthMm,
-      pieceHeightMm: a?.piece?.heightMm,
-      cutLengthMm: a?.cutLengthMm ?? 0,
-      pathCount: a?.pathCount ?? 0,
+      items: items.map((it) => {
+        const a = it.analysis;
+        return {
+          label: it.fileName,
+          quantity: it.quantity,
+          widthMm: a?.size?.widthMm,
+          heightMm: a?.size?.heightMm,
+          pieceWidthMm: a?.piece?.widthMm,
+          pieceHeightMm: a?.piece?.heightMm,
+          cutLengthMm: a?.cutLengthMm ?? 0,
+          pathCount: a?.pathCount ?? 0,
+        };
+      }),
     },
     state.catalog,
   );
   state.quote = q;
   const rows = [];
-  if (!a) rows.push(["SVGを読み込むと料金を表示します", ""]);
+  const bad = items.find((it) => !itemOk(it));
+  if (!items.length) rows.push(["SVGを読み込むと料金を表示します", ""]);
+  else if (bad && items.length > 1) rows.push([`「${bad.fileName}」に問題があります。一覧で選んで確認してください。`, ""]);
   else if (!q.ok) rows.push([q.errors[0], ""]);
-  else {
-    rows.push(["基本料金", yen(q.baseFee)]);
-    rows.push([`材料費（${q.materialName} ${q.thicknessMm ?? "—"} mm）`, yen(q.materialFee)]);
-    rows.push([`加工費（カット長 ${Math.round(q.cutLengthMm).toLocaleString("ja-JP")} mm）`, yen(q.processingFee)]);
-    if (q.quantity > 1) rows.push([`数量加算（${q.quantity - 1} 個分）`, yen(q.quantityFee)]);
-    if (!q.inquiryRequired) {
-      rows.push(["加工料金", yen(q.processingPrice)]);
-      rows.push([`送料・梱包料（${q.shippingLabel}）`, yen(q.shippingPrice)]);
-      rows.push(["合計", yen(q.totalPrice), "total"]);
-      rows.push([`予測加工時間 約 ${q.estimatedProcessingMinutes} 分 · ${q.leadTimeDays} 日以内に発送`, "", "sub"]);
-    }
+  else if (q.items.length === 1) {
+    const it = q.items[0];
+    rows.push(["基本料金", yen(it.baseFee)]);
+    rows.push([`材料費（${q.materialName} ${q.thicknessMm ?? "—"} mm）`, yen(it.materialFee)]);
+    rows.push([`加工費（カット長 ${Math.round(it.cutLengthMm).toLocaleString("ja-JP")} mm）`, yen(it.processingFee)]);
+    if (it.quantity > 1) rows.push([`数量加算（${it.quantity - 1} 個分）`, yen(it.quantityFee)]);
+  } else {
+    // One line per SVG (base fee per SVG), then the shared shipping.
+    q.items.forEach((it, i) => {
+      rows.push([`${i + 1}. ${it.label} × ${it.quantity}`, yen(it.price)]);
+      rows.push([`基本 ${yen(it.baseFee)} + 材料 ${yen(it.materialFee)} + 加工 ${yen(it.processingFee)}${it.quantity > 1 ? ` + 数量加算 ${yen(it.quantityFee)}` : ""}`, "", "sub"]);
+    });
+  }
+  if (q.ok && !q.inquiryRequired && !(bad && items.length > 1)) {
+    rows.push(["加工料金", yen(q.processingPrice)]);
+    rows.push([`送料・梱包料（${q.shippingLabel}）`, yen(q.shippingPrice)]);
+    rows.push(["合計", yen(q.totalPrice), "total"]);
+    rows.push([`${items.length > 1 ? `SVG ${items.length} 件・合計 ${q.quantity} 個 · ` : ""}予測加工時間 約 ${q.estimatedProcessingMinutes} 分 · ${q.leadTimeDays} 日以内に発送`, "", "sub"]);
   }
   $("#quote").innerHTML = rows.map(([l, v, k = ""]) => `<div class="${k}">${esc(l)}</div><div class="amount ${k}">${esc(v)}</div>`).join("");
   const bulk = $("#bulk");
   if (q.ok && q.inquiryRequired) {
     bulk.classList.remove("hidden");
-    bulk.innerHTML = `<b>${state.quantity >= state.catalog.bulkThreshold ? `${state.catalog.bulkThreshold}個以上の大量注文について` : "この材料について"}</b><br>${esc(q.inquiryReasons.join(" "))}<br><a href="${esc(state.contactUrl)}" target="_blank" rel="noopener">大量注文について問い合わせる →</a>`;
+    bulk.innerHTML = `<b>${q.quantity >= state.catalog.bulkThreshold ? `合計${state.catalog.bulkThreshold}個以上の大量注文について` : "この材料について"}</b><br>${esc(q.inquiryReasons.join(" "))}<br><a href="${esc(state.contactUrl)}" target="_blank" rel="noopener">大量注文について問い合わせる →</a>`;
   } else bulk.classList.add("hidden");
-  $("#review").disabled = !(a?.ok && q.ok && !q.inquiryRequired && state.online);
+  $("#review").disabled = !(items.length && items.every(itemOk) && q.ok && !q.inquiryRequired && state.online);
   saveDraft();
 }
 
@@ -290,7 +383,25 @@ function validateCustomer() {
 }
 function saveDraft() {
   try {
-    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ material: state.material, thicknessMm: state.thicknessMm, quantity: state.quantity, deliveryType: state.deliveryType }));
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ material: state.material, thicknessMm: state.thicknessMm, deliveryType: state.deliveryType }));
+  } catch {}
+  saveCart();
+}
+let cartWarned = false;
+function saveCart() {
+  try {
+    if (state.items.length) localStorage.setItem(CART_KEY, JSON.stringify(state.items.map(({ svg, fileName, fromEditor, quantity }) => ({ svg, fileName, fromEditor, quantity }))));
+    else localStorage.removeItem(CART_KEY);
+  } catch {
+    // Storage full or blocked: the order still works in this tab.
+    if (!cartWarned) banner("SVG をブラウザに保存できませんでした。このページを閉じたり移動したりすると、追加した SVG は消えます。");
+    cartWarned = true;
+  }
+}
+function loadCart() {
+  try {
+    const list = JSON.parse(localStorage.getItem(CART_KEY) || "[]");
+    for (const it of Array.isArray(list) ? list : []) if (typeof it?.svg === "string" && it.svg) state.items.push(analyzeItem({ svg: it.svg, fileName: it.fileName || "design.svg", fromEditor: Boolean(it.fromEditor), quantity: Math.max(1, Math.floor(Number(it.quantity) || 1)) }));
   } catch {}
 }
 function loadDraft() {
@@ -299,13 +410,14 @@ function loadDraft() {
     for (const k of LEGACY_KEYS) localStorage.removeItem(k);
     const d = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null");
     if (!d) return;
-    Object.assign(state, { material: d.material ?? state.material, thicknessMm: d.thicknessMm ?? state.thicknessMm, quantity: d.quantity ?? 1, deliveryType: d.deliveryType in state.catalog.delivery ? d.deliveryType : "NORMAL" });
+    Object.assign(state, { material: d.material ?? state.material, thicknessMm: d.thicknessMm ?? state.thicknessMm, deliveryType: d.deliveryType in state.catalog.delivery ? d.deliveryType : "NORMAL" });
   } catch {}
 }
 function clearDraft() {
   try {
     sessionStorage.removeItem(DRAFT_KEY);
     localStorage.removeItem(HANDOFF_KEY);
+    localStorage.removeItem(CART_KEY);
     for (const k of LEGACY_KEYS) localStorage.removeItem(k);
   } catch {}
 }
@@ -337,17 +449,23 @@ function updatePayButton() {
 
 // ---- confirmation & checkout ------------------------------------------------
 function showConfirm() {
-  const a = state.analysis,
-    q = state.quote,
+  const q = state.quote,
     { customer: c, shipping: s } = customer();
   const d = state.catalog.delivery[q.deliveryType];
+  const mm = (w, h) => `${Number(w).toFixed(1)} × ${Number(h).toFixed(1)} mm`;
+  const svgRows =
+    q.items.length === 1
+      ? [
+          ["SVG", esc(q.items[0].label)],
+          ["サイズ", mm(q.items[0].widthMm, q.items[0].heightMm)],
+          ["切り抜き後", mm(q.items[0].pieceWidthMm, q.items[0].pieceHeightMm)],
+        ]
+      : [["SVG", `${q.items.length} 件<ol class="summary-items">${q.items.map((it) => `<li>${esc(it.label)} · ${mm(it.widthMm, it.heightMm)}（切り抜き後 ${mm(it.pieceWidthMm, it.pieceHeightMm)}） × ${it.quantity} · ${yen(it.price)}</li>`).join("")}</ol>`]];
   $("#summary").innerHTML = [
-    ["SVG", esc(state.fileName)],
-    ["サイズ", `${a.size.widthMm.toFixed(1)} × ${a.size.heightMm.toFixed(1)} mm`],
-    ["切り抜き後", `${Number(q.pieceWidthMm).toFixed(1)} × ${Number(q.pieceHeightMm).toFixed(1)} mm`],
+    ...svgRows,
     ["材料", esc(q.materialName)],
     ["厚さ", `${q.thicknessMm} mm`],
-    ["数量", String(q.quantity)],
+    [q.items.length > 1 ? "合計数量" : "数量", String(q.quantity)],
     ["納期", `${esc(d.label)} ${d.leadTimeDays}日以内発送`],
     ["加工料金", yen(q.processingPrice)],
     ["送料・梱包料", `${yen(q.shippingPrice)}（${esc(q.shippingLabel)}）`],
@@ -372,11 +490,9 @@ async function pay() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        svg: state.svg,
-        fileName: state.fileName,
+        items: state.items.map((it) => ({ svg: it.svg, fileName: it.fileName, quantity: it.quantity })),
         material: state.material,
         thicknessMm: state.thicknessMm,
-        quantity: state.quantity,
         deliveryType: state.deliveryType,
         agreedTerms: agreedTerms().filter((id) => id !== "privacy"),
         ...customer(),
@@ -400,6 +516,12 @@ async function pay() {
 }
 
 // ---- order status view (after Stripe redirects back) ------------------------
+// The SVGs of an order (`items`; older API responses only have the first).
+function statusItems(order) {
+  const list = order.items?.length ? order.items : [{ fileName: order.fileName, widthMm: order.widthMm, heightMm: order.heightMm, pieceWidthMm: order.pieceWidthMm, pieceHeightMm: order.pieceHeightMm, quantity: order.quantity }];
+  const line = (it) => `${esc(it.fileName)}（${Number(it.widthMm).toFixed(1)} × ${Number(it.heightMm).toFixed(1)} mm${it.pieceWidthMm ? `、切り抜き後 ${Number(it.pieceWidthMm).toFixed(1)} × ${Number(it.pieceHeightMm).toFixed(1)} mm` : ""}）`;
+  return list.length === 1 ? line(list[0]) : `<ol class="summary-items">${list.map((it) => `<li>${line(it)} × ${esc(it.quantity)}</li>`).join("")}</ol>`;
+}
 const PAID_LIKE = ["PAID", "PROCESSING", "READY", "SHIPPED", "COMPLETED"];
 async function showStatus(orderId, token, result) {
   clearDraft();
@@ -410,7 +532,7 @@ async function showStatus(orderId, token, result) {
   const render = (order, note) => {
     view.innerHTML = `<h2>注文 ${esc(orderId)}</h2>${note ? `<div class="banner ${order?.status === "PAID" ? "ok" : ""}">${note}</div>` : ""}${
       order
-        ? `<dl class="summary"><dt>ステータス</dt><dd><span class="badge status-${esc(order.status)}">${esc(STATUS_LABEL[order.status] ?? order.status)}</span></dd><dt>SVG</dt><dd>${esc(order.fileName)}（${Number(order.widthMm).toFixed(1)} × ${Number(order.heightMm).toFixed(1)} mm${order.pieceWidthMm ? `、切り抜き後 ${Number(order.pieceWidthMm).toFixed(1)} × ${Number(order.pieceHeightMm).toFixed(1)} mm` : ""}）</dd><dt>内容</dt><dd>${esc(order.material)} ${esc(order.thicknessMm)} mm × ${esc(order.quantity)} · ${esc(state.catalog.delivery[order.deliveryType]?.label ?? order.deliveryType)}</dd><dt>合計</dt><dd>${yen(order.totalPrice)}</dd>${order.shipBy ? `<dt>発送予定</dt><dd>${new Date(order.shipBy).toLocaleDateString("ja-JP")} まで</dd>` : ""}${order.trackingNumber ? `<dt>追跡番号</dt><dd>${esc(order.trackingNumber)}${order.carrier ? `（${esc(order.carrier)}）` : ""}</dd>` : ""}${
+        ? `<dl class="summary"><dt>ステータス</dt><dd><span class="badge status-${esc(order.status)}">${esc(STATUS_LABEL[order.status] ?? order.status)}</span></dd><dt>SVG</dt><dd>${statusItems(order)}</dd><dt>内容</dt><dd>${esc(order.material)} ${esc(order.thicknessMm)} mm · 合計 ${esc(order.quantity)} 個 · ${esc(state.catalog.delivery[order.deliveryType]?.label ?? order.deliveryType)}</dd><dt>合計</dt><dd>${yen(order.totalPrice)}</dd>${order.shipBy ? `<dt>発送予定</dt><dd>${new Date(order.shipBy).toLocaleDateString("ja-JP")} まで</dd>` : ""}${order.trackingNumber ? `<dt>追跡番号</dt><dd>${esc(order.trackingNumber)}${order.carrier ? `（${esc(order.carrier)}）` : ""}</dd>` : ""}${
             order.receiptUrl ? `<dt>領収書</dt><dd><a href="${esc(order.receiptUrl)}" target="_blank" rel="noopener" id="receipt-link"><button>領収書を表示（Stripe）</button></a><span class="note" style="display:block;margin:4px 0 0">Stripe が発行する領収書です。決済時のメールアドレスにも Stripe から領収書メールが届きます。</span></dd>` : PAID_LIKE.includes(order.status) ? `<dt>領収書</dt><dd><span class="note" style="margin:0">領収書を準備しています。しばらくしてからこのページを再読み込みしてください。</span></dd>` : ""
           }</dl>`
         : ""
@@ -444,13 +566,34 @@ async function showStatus(orderId, token, result) {
 function wire() {
   $("#prefecture").innerHTML = `<option value="">選択</option>` + PREFECTURES.map((p) => `<option>${p}</option>`).join("");
   const drop = $("#drop");
-  $("#file").onchange = (e) => readFile(e.target.files[0]);
+  $("#file").onchange = async (e) => {
+    await readFiles([...e.target.files]);
+    e.target.value = "";
+  };
   for (const ev of ["dragenter", "dragover"]) drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); });
   for (const ev of ["dragleave", "drop"]) drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); });
-  drop.addEventListener("drop", (e) => readFile(e.dataTransfer.files[0]));
+  drop.addEventListener("drop", (e) => readFiles([...e.dataTransfer.files]));
+  $("#items").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-action]"),
+      li = e.target.closest("li[data-i]");
+    if (!b || !li) return;
+    const i = Number(li.dataset.i);
+    if (b.dataset.action === "select") selectItem(i);
+    else if (b.dataset.action === "remove") {
+      alertMsg("");
+      removeItem(i);
+    }
+  });
+  $("#items").addEventListener("input", (e) => {
+    const li = e.target.closest("li[data-i]");
+    if (!li || e.target.dataset.action !== "qty") return;
+    const it = state.items[Number(li.dataset.i)];
+    it.quantity = Math.max(1, Math.floor(Number(e.target.value) || 1));
+    updateQuote();
+  });
   $("#confirm-apply").onclick = () => {
     try {
-      setSVG(withPhysicalSize(state.svg, Number($("#confirm-width").value)), state.fileName, state.fromEditor);
+      setSVG(withPhysicalSize(state.svg, Number($("#confirm-width").value)));
       alertMsg("");
     } catch (e) {
       alertMsg(e.message);
@@ -474,7 +617,6 @@ function wire() {
   $("#mockup-rotate").onchange = (e) => { state.mockup.rotated = e.target.checked; renderMockup(); };
   $("#material").onchange = (e) => { state.material = e.target.value; renderOptions(); updateQuote(); };
   $("#thickness").onchange = (e) => { state.thicknessMm = Number(e.target.value); updateQuote(); };
-  $("#quantity").oninput = (e) => { state.quantity = Math.max(1, Math.floor(Number(e.target.value) || 1)); updateQuote(); };
   $("#delivery").onchange = (e) => { state.deliveryType = e.target.value; updateQuote(); };
   $("#review").onclick = () => {
     const errors = validateCustomer();
@@ -524,9 +666,18 @@ async function init() {
   await loadConfig();
   renderOptions();
   renderTerms();
+  loadCart();
+  selectItem(0);
+  // A design sent by the editor's "このデザインを加工注文する" is added to
+  // the SVGs already in the order, then the hand-off entry is dropped.
   try {
     const handoff = JSON.parse(localStorage.getItem(HANDOFF_KEY) || "null");
-    if (handoff?.svg) setSVG(handoff.svg, handoff.fileName || "typefab.svg", true);
+    localStorage.removeItem(HANDOFF_KEY);
+    if (handoff?.svg) {
+      const before = state.items.length;
+      addItem(handoff.svg, handoff.fileName || "typefab.svg", true);
+      if (state.items.length > before && before) banner(`エディタのデザインを追加しました（SVG ${state.items.length} 件）。`, "ok");
+    }
   } catch {}
   updateQuote();
 }

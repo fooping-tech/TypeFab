@@ -9,7 +9,7 @@ export const DELIVERY = {
 };
 export const CATALOG = {
   currency: "JPY",
-  baseFee: 500, // per order
+  baseFee: 500, // per SVG in the order (2026-09-30)
   bulkThreshold: 10, // quantity at or above this needs an inquiry first
   // Two size rules. The SVG (its document size) is laid out on one A4
   // landscape sheet of black kraft paper; the finished piece after cutting
@@ -25,6 +25,10 @@ export const CATALOG = {
     minSizeMm: 5,
     maxSvgBytes: 2 * 1024 * 1024,
     maxQuantity: 999,
+    // SVGs per order (the bulk threshold usually stops earlier: every SVG is
+    // at least one piece) and their combined size.
+    maxItems: 20,
+    maxOrderSvgBytes: 8 * 1024 * 1024,
   },
   delivery: DELIVERY,
   // Everything goes by 日本郵便 定形郵便 (no tracking, no insurance) at one
@@ -105,61 +109,99 @@ export function shippingRule(catalog, { widthMm, heightMm, quantity }) {
   return catalog.shipping.find(fits) ?? catalog.shipping.at(-1);
 }
 const yen = (n) => Math.round(n);
-// Validates the order options and returns the price breakdown.
-//   fabricationPrice = baseFee + materialFee + processingFee + quantityFee
-//   processingPrice  = fabricationPrice × delivery multiplier (1 for NORMAL)
-//   totalPrice       = processingPrice + shippingPrice (never multiplied)
-// `inquiryRequired` is set instead of a price for bulk quantities or
-// inquiry-only materials; the Worker refuses checkout in that case.
-export function quote(input, catalog = CATALOG) {
+// Validates and prices one SVG of an order. `prefix` names the SVG in the
+// messages when the order holds several.
+function priceItem(catalog, th, item, prefix) {
   const errors = [];
-  const widthMm = Number(input.widthMm),
-    heightMm = Number(input.heightMm),
+  const widthMm = Number(item.widthMm),
+    heightMm = Number(item.heightMm),
     // Finished piece; defaults to the document when the caller has no cut analysis.
-    pieceWidthMm = Number(input.pieceWidthMm ?? input.widthMm),
-    pieceHeightMm = Number(input.pieceHeightMm ?? input.heightMm),
-    quantity = Number(input.quantity),
-    cutLengthMm = Number(input.cutLengthMm ?? 0),
-    pathCount = Number(input.pathCount ?? 0),
-    deliveryType = String(input.deliveryType ?? "NORMAL");
+    pieceWidthMm = Number(item.pieceWidthMm ?? item.widthMm),
+    pieceHeightMm = Number(item.pieceHeightMm ?? item.heightMm),
+    quantity = Number(item.quantity),
+    cutLengthMm = Number(item.cutLengthMm ?? 0),
+    pathCount = Number(item.pathCount ?? 0);
+  if (!Number.isInteger(quantity) || quantity < 1) errors.push(`${prefix}数量は1以上の整数です。`);
+  else if (quantity > catalog.limits.maxQuantity) errors.push(`${prefix}数量は${catalog.limits.maxQuantity}以下です。`);
+  if (!(widthMm > 0 && heightMm > 0)) errors.push(`${prefix}SVGの実寸（mm）が必要です。`);
+  else {
+    const { sheet, piece, minSizeMm } = catalog.limits;
+    if (!fitsWithin(widthMm, heightMm, sheet)) errors.push(`${prefix}SVGが用紙に収まりません（${widthMm.toFixed(1)} × ${heightMm.toFixed(1)} mm。${sizeLimitText(sheet)}）。`);
+    if (!(pieceWidthMm > 0 && pieceHeightMm > 0)) errors.push(`${prefix}切り抜き後のサイズが不正です。`);
+    else {
+      if (!fitsWithin(pieceWidthMm, pieceHeightMm, piece)) errors.push(`${prefix}切り抜き後のサイズが封筒に収まりません（${pieceWidthMm.toFixed(1)} × ${pieceHeightMm.toFixed(1)} mm。${sizeLimitText(piece)}）。`);
+      if (pieceWidthMm < minSizeMm || pieceHeightMm < minSizeMm) errors.push(`${prefix}切り抜き後のサイズが小さすぎます（最小 ${minSizeMm} mm）。`);
+    }
+  }
+  if (!(cutLengthMm >= 0) || !(pathCount >= 0)) errors.push(`${prefix}カット長・パス数が不正です。`);
+  if (errors.length) return { errors };
+  const areaCm2 = (widthMm * heightMm) / 100;
+  const materialFee = th ? yen(Math.max(100, areaCm2 * th.materialPerCm2)) : 0;
+  const processingFee = th ? yen(cutLengthMm * th.cutPerMm) : 0;
+  const quantityFee = (materialFee + processingFee) * (quantity - 1);
+  const minutesPerUnit = th ? cutLengthMm / th.speedMmPerMin + (pathCount * th.pierceSeconds) / 60 : 0;
+  return {
+    errors: [],
+    item: {
+      label: item.label ?? null,
+      widthMm,
+      heightMm,
+      pieceWidthMm,
+      pieceHeightMm,
+      cutLengthMm,
+      pathCount,
+      quantity,
+      baseFee: catalog.baseFee,
+      materialFee,
+      processingFee,
+      quantityFee,
+      // Base fee per SVG (decided 2026-09-30) + material + cutting, × quantity.
+      price: catalog.baseFee + materialFee + processingFee + quantityFee,
+      estimatedProcessingMinutes: Number((minutesPerUnit * quantity).toFixed(1)),
+    },
+  };
+}
+// Validates an order of one or more SVGs and returns the price breakdown.
+// Material, thickness and lead time are shared; each SVG has its quantity.
+//   item price       = baseFee + materialFee + processingFee + quantityFee
+//   processingPrice  = Σ item price × delivery multiplier (1 for NORMAL)
+//   totalPrice       = processingPrice + shippingPrice (one envelope per order)
+// `inquiryRequired` is set instead of a price when the total quantity reaches
+// the bulk threshold or the material is inquiry-only; the Worker refuses
+// checkout in that case.
+export function quoteOrder(input, catalog = CATALOG) {
+  const errors = [];
+  const list = Array.isArray(input.items) ? input.items : [];
+  const deliveryType = String(input.deliveryType ?? "NORMAL");
   const mat = material(catalog, input.material);
   if (!mat) errors.push("材料を選んでください。");
   const th = mat && !mat.inquiryOnly ? thickness(catalog, mat.id, input.thicknessMm) : null;
   if (mat && !mat.inquiryOnly && !th) errors.push("厚さを選んでください。");
-  if (!Number.isInteger(quantity) || quantity < 1) errors.push("数量は1以上の整数です。");
-  else if (quantity > catalog.limits.maxQuantity) errors.push(`数量は${catalog.limits.maxQuantity}以下です。`);
   if (!catalog.delivery[deliveryType]) errors.push("納期の種類が不正です。");
-  if (!(widthMm > 0 && heightMm > 0)) errors.push("SVGの実寸（mm）が必要です。");
-  else {
-    const { sheet, piece, minSizeMm } = catalog.limits;
-    if (!fitsWithin(widthMm, heightMm, sheet)) errors.push(`SVGが用紙に収まりません（${widthMm.toFixed(1)} × ${heightMm.toFixed(1)} mm。${sizeLimitText(sheet)}）。`);
-    if (!(pieceWidthMm > 0 && pieceHeightMm > 0)) errors.push("切り抜き後のサイズが不正です。");
-    else {
-      if (!fitsWithin(pieceWidthMm, pieceHeightMm, piece)) errors.push(`切り抜き後のサイズが封筒に収まりません（${pieceWidthMm.toFixed(1)} × ${pieceHeightMm.toFixed(1)} mm。${sizeLimitText(piece)}）。`);
-      if (pieceWidthMm < minSizeMm || pieceHeightMm < minSizeMm) errors.push(`切り抜き後のサイズが小さすぎます（最小 ${minSizeMm} mm）。`);
-    }
-  }
-  if (!(cutLengthMm >= 0) || !(pathCount >= 0)) errors.push("カット長・パス数が不正です。");
+  if (!list.length) errors.push("SVGを追加してください。");
+  else if (list.length > catalog.limits.maxItems) errors.push(`1回の注文に入れられるSVGは${catalog.limits.maxItems}個までです。`);
+  const priced = errors.length ? [] : list.map((it, i) => priceItem(catalog, th, it, list.length > 1 ? `${it.label ? `「${it.label}」` : `SVG ${i + 1}`}: ` : ""));
+  for (const p of priced) errors.push(...p.errors);
   if (errors.length) return { ok: false, errors };
+  const items = priced.map((p) => p.item);
+  const sum = (k) => items.reduce((n, it) => n + it[k], 0);
+  const quantity = sum("quantity");
   const inquiry = [];
   if (mat.inquiryOnly) inquiry.push("この材料は事前にお問い合わせください。");
   if (quantity >= catalog.bulkThreshold)
     inquiry.push(
-      `${catalog.bulkThreshold}個以上の大量注文は、材料在庫・加工時間・納期を確認する必要があるため、事前にお問い合わせください。`,
+      `合計${catalog.bulkThreshold}個以上の大量注文は、材料在庫・加工時間・納期を確認する必要があるため、事前にお問い合わせください。`,
     );
   const delivery = catalog.delivery[deliveryType];
-  const areaCm2 = (widthMm * heightMm) / 100;
-  const materialFee = th ? yen(Math.max(100, areaCm2 * th.materialPerCm2)) : 0;
-  const processingFee = th ? yen(cutLengthMm * th.cutPerMm) : 0;
-  const unitPrice = materialFee + processingFee;
-  const quantityFee = unitPrice * (quantity - 1);
-  const fabricationPrice = catalog.baseFee + materialFee + processingFee + quantityFee;
+  const fabricationPrice = sum("price");
   const processingPrice = fabricationPrice * delivery.multiplier;
-  const ship = shippingRule(catalog, { widthMm: pieceWidthMm, heightMm: pieceHeightMm, quantity });
+  // One envelope: the rule must hold for the largest piece and all pieces.
+  const ship = shippingRule(catalog, {
+    widthMm: Math.max(...items.map((it) => Math.max(it.pieceWidthMm, it.pieceHeightMm))),
+    heightMm: Math.max(...items.map((it) => Math.min(it.pieceWidthMm, it.pieceHeightMm))),
+    quantity,
+  });
   const shippingPrice = ship.price;
-  const minutesPerUnit = th
-    ? cutLengthMm / th.speedMmPerMin + (pathCount * th.pierceSeconds) / 60
-    : 0;
   return {
     ok: true,
     errors: [],
@@ -169,28 +211,34 @@ export function quote(input, catalog = CATALOG) {
     material: mat.id,
     materialName: mat.name,
     thicknessMm: th?.mm ?? null,
-    quantity,
     deliveryType,
     leadTimeDays: delivery.leadTimeDays,
-    widthMm,
-    heightMm,
-    pieceWidthMm,
-    pieceHeightMm,
-    cutLengthMm,
-    pathCount,
+    items: items.map((it) => ({ ...it, price: it.price * delivery.multiplier })),
+    quantity,
+    cutLengthMm: sum("cutLengthMm"),
+    pathCount: sum("pathCount"),
     baseFee: catalog.baseFee,
-    materialFee,
-    processingFee,
-    quantityFee,
+    basePrice: sum("baseFee"),
+    materialFee: sum("materialFee"),
+    processingFee: sum("processingFee"),
+    quantityFee: sum("quantityFee"),
     fabricationPrice,
     deliveryMultiplier: delivery.multiplier,
-    basePrice: catalog.baseFee,
     processingPrice: inquiry.length ? null : processingPrice,
     shippingPrice: inquiry.length ? null : shippingPrice,
     shippingLabel: ship.label,
     totalPrice: inquiry.length ? null : processingPrice + shippingPrice,
-    estimatedProcessingMinutes: Number((minutesPerUnit * quantity).toFixed(1)),
+    estimatedProcessingMinutes: Number(sum("estimatedProcessingMinutes").toFixed(1)),
   };
+}
+// One SVG (the order page before 2026-09-30, the /api/quote endpoint, tests):
+// quoteOrder with a single item, flattened to the item's size fields.
+export function quote(input, catalog = CATALOG) {
+  if (Array.isArray(input.items)) return quoteOrder(input, catalog);
+  const q = quoteOrder({ material: input.material, thicknessMm: input.thicknessMm, deliveryType: input.deliveryType, items: [input] }, catalog);
+  if (!q.ok) return q;
+  const it = q.items[0];
+  return { ...q, widthMm: it.widthMm, heightMm: it.heightMm, pieceWidthMm: it.pieceWidthMm, pieceHeightMm: it.pieceHeightMm };
 }
 // Ship-by date: paid date + lead time (calendar days; holidays ignored in MVP).
 export function shipByDate(paidAt, deliveryType, catalog = CATALOG) {

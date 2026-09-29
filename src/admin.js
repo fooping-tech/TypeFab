@@ -126,6 +126,19 @@ function renderDetail(d) {
   <div class="note" style="margin-top:8px"><b>通知メール</b><ul class="checks" style="margin:4px 0">${notes}</ul>${canResend || canNotify ? `<button data-action="notify">${canNotify ? "通知メールを送信" : "未送信の通知メールを再送"}</button>` : ""}</div>
   <div class="note" style="margin-top:8px"><b>履歴</b><ul class="checks" style="margin:4px 0">${d.events.map((e) => `<li class="info">${when(e.at)} ${esc(e.fromStatus ?? "—")} → ${esc(e.toStatus)}${e.note ? ` · ${esc(e.note)}` : ""}</li>`).join("")}</ul></div>`;
 }
+// The SVGs of an order (several since 2026-09-30); one row each with its
+// own view / download buttons. Older API responses have no `items`.
+function renderItems(o) {
+  const items = o.items?.length ? o.items : [{ position: 1, fileName: o.originalFileName, widthMm: o.widthMm, heightMm: o.heightMm, pieceWidthMm: o.pieceWidthMm, pieceHeightMm: o.pieceHeightMm, quantity: o.quantity, cutLengthMm: o.cutLengthMm, pathCount: o.pathCount }];
+  const mm = (w, h) => `${Number(w).toFixed(1)} × ${Number(h).toFixed(1)} mm`;
+  return `<ol class="admin-items">${items
+    .map(
+      (it) => `<li data-item="${esc(it.position)}"><b>${esc(it.fileName)}</b> × ${esc(it.quantity)}<span class="note" style="margin:0"> · ${mm(it.widthMm, it.heightMm)}${it.pieceWidthMm ? `（切り抜き後 ${mm(it.pieceWidthMm, it.pieceHeightMm)}）` : ""} · カット ${Math.round(it.cutLengthMm ?? 0).toLocaleString("ja-JP")} mm / パス ${esc(it.pathCount ?? "—")}${it.price != null && items.length > 1 ? ` · ${yen(it.price)}` : ""}</span>${
+        o.personalDataDeletedAt ? "" : ` <button data-action="view" data-item="${esc(it.position)}">表示</button><button data-action="download" data-item="${esc(it.position)}">ダウンロード</button>`
+      }</li>`,
+    )
+    .join("")}</ol>`;
+}
 function render() {
   $("#filters").innerHTML =
     FILTERS.map(([v, label]) => `<button data-filter="${v}" aria-pressed="${filter === v}">${label}</button>`).join("") +
@@ -144,21 +157,18 @@ function render() {
     <div class="meta"><span>注文日 <b>${day(o.createdAt)}</b></span><span>決済 <b>${day(o.paidAt)}</b></span><span class="deadline ${overdue ? "overdue" : ""}">発送期限 <b>${day(o.shipBy)}</b>${overdue ? " 超過" : ""}</span></div>
     <div class="spec">
       <div><span>購入者</span>${esc(o.customerName ?? "—")}</div>
-      ${o.pieceWidthMm ? `<div><span>切り抜き後</span>${Number(o.pieceWidthMm).toFixed(1)} × ${Number(o.pieceHeightMm).toFixed(1)} mm</div>` : ""}
       <div><span>材料</span>${esc(materialName(o.material))} ${esc(o.thicknessMm)} mm</div>
-      <div><span>サイズ</span>${Number(o.widthMm).toFixed(1)} × ${Number(o.heightMm).toFixed(1)} mm</div>
-      <div><span>数量</span>${esc(o.quantity)}</div>
-      <div><span>カット長 / パス</span>${Math.round(o.cutLengthMm ?? 0).toLocaleString("ja-JP")} mm / ${esc(o.pathCount ?? "—")}</div>
+      <div><span>${(o.items?.length ?? 1) > 1 ? `SVG ${o.items.length} 件 · 合計数量` : "数量"}</span>${esc(o.quantity)}</div>
+      <div><span>カット長 / パス（合計）</span>${Math.round(o.cutLengthMm ?? 0).toLocaleString("ja-JP")} mm / ${esc(o.pathCount ?? "—")}</div>
       <div><span>予測加工時間</span>${o.estimatedProcessingMinutes ?? "—"} 分</div>
-      <div><span>ファイル</span>${esc(o.originalFileName)}</div>
     </div>
+    ${renderItems(o)}
   </div>
   <div class="price">${yen(o.totalPrice)}<div class="note" style="margin:2px 0 0">加工 ${yen(o.processingPrice)} + 送料 ${yen(o.shippingPrice)}</div></div>
   <div class="address">${o.shippingTrackingNumber ? `追跡番号 <b>${esc(o.shippingTrackingNumber)}</b>${o.shippingCarrier ? `（${esc(o.shippingCarrier)}）` : ""} · ` : ""}${o.notes ? `メモ: ${esc(o.notes)}` : ""}</div>
   <div class="detail ${d ? "" : "hidden"}" data-detail>${d ? renderDetail(d) : ""}</div>
   <div class="buttons">
     <button data-action="detail">${d ? "詳細を閉じる" : "詳細を表示（配送先・通知・領収書）"}</button>
-    ${o.personalDataDeletedAt ? "" : `<button data-action="view">SVGを表示</button><button data-action="download">SVGをダウンロード</button>`}
     ${next.map((s) => `<button data-action="status" data-status="${s}" class="${s === "CANCELLED" ? "danger" : ""}">${LABELS[s]}</button>`).join("")}
   </div>
 </article>`;
@@ -166,8 +176,8 @@ function render() {
         .join("")
     : `<p class="note">該当する注文はありません。</p>`;
 }
-async function svgBlob(id) {
-  const res = await api(`/api/admin/orders/${id}/svg`);
+async function svgBlob(id, item = 1) {
+  const res = await api(`/api/admin/orders/${id}/svg?item=${encodeURIComponent(item)}`);
   return { blob: await res.blob(), name: /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] };
 }
 async function loadDetail(id) {
@@ -206,12 +216,12 @@ document.addEventListener("click", async (e) => {
       await loadDetail(id);
       render();
     } else if (b.dataset.action === "view") {
-      const { blob } = await svgBlob(id);
-      const url = URL.createObjectURL(new File([blob], `${id}.svg`, { type: "image/svg+xml" }));
+      const { blob } = await svgBlob(id, b.dataset.item);
+      const url = URL.createObjectURL(new File([blob], `${id}-${b.dataset.item}.svg`, { type: "image/svg+xml" }));
       window.open(url, "_blank", "noopener");
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } else if (b.dataset.action === "download") {
-      const { blob, name } = await svgBlob(id);
+      const { blob, name } = await svgBlob(id, b.dataset.item);
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = decodeURIComponent(name || `${id}.svg`);

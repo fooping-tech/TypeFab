@@ -3,6 +3,7 @@
 -- Existing databases: apply the migrations in order instead of this file.
 --   before 2026-09-16: migrations/0002_privacy_mail_receipt.sql (issues #8/#9/#10)
 --   before 2026-09-17: migrations/0003_piece_size.sql (piece_width_mm / piece_height_mm / terms_accepted_at)
+--   before 2026-09-30: migrations/0004_order_items.sql (order_items: several SVGs per order)
 CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
   status TEXT NOT NULL,
@@ -85,4 +86,31 @@ CREATE TABLE IF NOT EXISTS order_notifications (
   attempts INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (order_id, type)
+);
+
+-- One row per SVG of an order (2026-09-30: several SVGs per order). The
+-- orders row keeps the totals and the first SVG; orders created before this
+-- table have no rows here and are shown as one item from the orders columns.
+-- The SVG objects are deleted by the retention purge; the rows (sizes,
+-- quantities, prices) are kept for accounting like the rest of the order.
+CREATE TABLE IF NOT EXISTS order_items (
+  order_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  svg_object_key TEXT NOT NULL,
+  original_file_name TEXT,
+  svg_hash TEXT,
+  svg_bytes INTEGER,
+  width_mm REAL NOT NULL,
+  height_mm REAL NOT NULL,
+  piece_width_mm REAL,
+  piece_height_mm REAL,
+  path_count INTEGER,
+  cut_length_mm REAL,
+  estimated_processing_minutes REAL,
+  quantity INTEGER NOT NULL,
+  base_price INTEGER NOT NULL,
+  material_fee INTEGER,
+  processing_fee INTEGER,
+  item_price INTEGER NOT NULL,
+  PRIMARY KEY (order_id, position)
 );

@@ -23,9 +23,11 @@
           <section class="card" id="svg-card">
             <h2><span>01</span>SVG</h2>
             <div class="drop" id="drop">
-              <label><input type="file" id="file" accept=".svg,image/svg+xml" />
-                <b>SVGファイルをここにドロップ</b>、または <u>クリックして選択</u><br /><small>TypeFabの「このデザインを加工注文する」から来た場合は、そのSVGが下に表示されます。</small><br /><small id="size-limit">材料は黒クラフトペーパーのみです。SVG は A4 横（297 × 210 mm）の用紙に周囲 10 mm のマージンを取って配置します（SVG の最大 277 × 190 mm）。注文できるかどうかは、切り抜き後の紙片が長形3号封筒（120 × 235 mm）に周囲 10 mm の余裕を持って収まるか（最大 215 × 100 mm、縦横どちらの向きでも可）で判定します。</small></label>
+              <label><input type="file" id="file" accept=".svg,image/svg+xml" multiple />
+                <b>SVGファイルをここにドロップ</b>、または <u>クリックして選択</u>（複数可）<br /><small>複数の SVG をまとめて 1 回の注文にできます（基本料金は SVG ごと、送料・梱包料は 1 注文につき 1 回）。エディタで「このデザインを加工注文する」を押すと、ここに追加されます。</small><br /><small id="size-limit">材料は黒クラフトペーパーのみです。SVG は A4 横（297 × 210 mm）の用紙に周囲 10 mm のマージンを取って配置します（SVG の最大 277 × 190 mm）。注文できるかどうかは、切り抜き後の紙片が長形3号封筒（120 × 235 mm）に周囲 10 mm の余裕を持って収まるか（最大 215 × 100 mm、縦横どちらの向きでも可）で判定します。</small></label>
             </div>
+            <ol class="items hidden" id="items" aria-label="注文する SVG"></ol>
+            <h3 class="sub hidden" id="detail-title"></h3>
             <div class="file-line" id="file-line"></div>
             <div class="preview" id="preview"><span class="empty">SVGがまだありません</span></div>
             <ul class="checks" id="checks"></ul>
@@ -62,10 +64,10 @@
         <div>
           <section class="card">
             <h2><span>02</span>加工内容</h2>
+            <p class="note" style="margin:0 0 10px">材料・厚さ・納期は注文内のすべての SVG に共通です。数量は SVG ごとに上の一覧で指定します（合計 <span data-bulk-max>9</span> 個まで）。</p>
             <div class="fields">
               <label>材料<select id="material"></select></label>
               <label>厚さ<select id="thickness"></select></label>
-              <label>数量<input type="number" id="quantity" min="1" step="1" value="1" /></label>
             </div>
             <div class="radios" id="delivery" style="margin-top:12px"></div>
             <div id="bulk" class="banner hidden" style="margin-top:12px"></div>

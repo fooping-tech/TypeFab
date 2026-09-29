@@ -48,6 +48,39 @@ export const ORDER_COLUMNS = {
   termsAcceptedAt: "terms_accepted_at",
   personalDataDeletedAt: "personal_data_deleted_at",
 };
+// One SVG of an order (order_items, 2026-09-30).
+export const ITEM_COLUMNS = {
+  orderId: "order_id",
+  position: "position",
+  svgObjectKey: "svg_object_key",
+  originalFileName: "original_file_name",
+  svgHash: "svg_hash",
+  svgBytes: "svg_bytes",
+  widthMm: "width_mm",
+  heightMm: "height_mm",
+  pieceWidthMm: "piece_width_mm",
+  pieceHeightMm: "piece_height_mm",
+  pathCount: "path_count",
+  cutLengthMm: "cut_length_mm",
+  estimatedProcessingMinutes: "estimated_processing_minutes",
+  quantity: "quantity",
+  basePrice: "base_price",
+  materialFee: "material_fee",
+  processingFee: "processing_fee",
+  itemPrice: "item_price",
+};
+// Orders created before order_items have no rows: their single SVG is the
+// orders columns, shown as item 1.
+export const legacyItems = (o) => [
+  {
+    orderId: o.id,
+    position: 1,
+    ...Object.fromEntries(["svgObjectKey", "originalFileName", "svgHash", "svgBytes", "widthMm", "heightMm", "pieceWidthMm", "pieceHeightMm", "pathCount", "cutLengthMm", "estimatedProcessingMinutes", "quantity", "basePrice"].map((k) => [k, o[k] ?? null])),
+    materialFee: null,
+    processingFee: null,
+    itemPrice: o.processingPrice ?? null,
+  },
+];
 // Columns cleared by the retention purge (issue #8). Everything else —
 // order id, amounts, dates, Stripe ids, specs, status — is kept for
 // accounting.
@@ -75,6 +108,8 @@ const fromRow = (row) =>
   row
     ? Object.fromEntries(Object.entries(ORDER_COLUMNS).map(([k, col]) => [k, row[col] ?? null]))
     : null;
+const itemToRow = (item) => Object.fromEntries(Object.entries(ITEM_COLUMNS).map(([k, col]) => [col, item[k] ?? null]));
+const itemFromRow = (row) => Object.fromEntries(Object.entries(ITEM_COLUMNS).map(([k, col]) => [k, row[col] ?? null]));
 const notificationFromRow = (r) => ({ orderId: r.order_id, type: r.type, sentAt: r.sent_at ?? null, providerId: r.provider_id ?? null, error: r.error ?? null, attempts: r.attempts ?? 0, updatedAt: r.updated_at ?? null });
 
 export function d1Store(db) {
@@ -90,6 +125,25 @@ export function d1Store(db) {
     },
     async getOrder(id) {
       return fromRow(await db.prepare("SELECT * FROM orders WHERE id = ?").bind(id).first());
+    },
+    async insertItems(items) {
+      if (!items.length) return;
+      const cols = Object.values(ITEM_COLUMNS);
+      await db.batch(items.map((it) => {
+        const row = itemToRow(it);
+        return db.prepare(`INSERT INTO order_items (${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`).bind(...cols.map((c) => row[c]));
+      }));
+    },
+    // Items of the given orders, keyed by order id (empty for old orders).
+    async listItems(orderIds) {
+      const out = new Map(orderIds.map((id) => [id, []]));
+      if (!orderIds.length) return out;
+      const { results } = await db
+        .prepare(`SELECT * FROM order_items WHERE order_id IN (${orderIds.map(() => "?").join(",")}) ORDER BY order_id, position`)
+        .bind(...orderIds)
+        .all();
+      for (const r of results) out.get(r.order_id)?.push(itemFromRow(r));
+      return out;
     },
     async updateOrder(id, patch) {
       const row = toRow(patch),
@@ -162,11 +216,13 @@ export function d1Store(db) {
 
 export function memoryStore() {
   const orders = new Map(),
+    items = [],
     events = new Set(),
     log = [],
     notifications = new Map();
   return {
     orders,
+    items,
     log,
     notifications,
     async insertOrder(order) {
@@ -176,6 +232,15 @@ export function memoryStore() {
     },
     async getOrder(id) {
       return orders.has(id) ? { ...orders.get(id) } : null;
+    },
+    async insertItems(list) {
+      for (const it of list) {
+        if (items.some((x) => x.orderId === it.orderId && x.position === it.position)) throw Error("duplicate item");
+        items.push(itemFromRow(itemToRow(it)));
+      }
+    },
+    async listItems(orderIds) {
+      return new Map(orderIds.map((id) => [id, items.filter((it) => it.orderId === id).sort((a, b) => a.position - b.position).map((it) => ({ ...it }))]));
     },
     async updateOrder(id, patch) {
       const o = orders.get(id);

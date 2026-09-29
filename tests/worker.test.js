@@ -153,12 +153,15 @@ test("order creation: SVG validated, price recomputed on the server, SVG stored 
   assert.equal(order.pathCount, 2);
   assert.equal(order.shippingPostalCode, "1000001");
   // SVG lives in R2 under a generated key, not the user's file name
-  assert.match(order.svgObjectKey, /^orders\/TF-00001\/[0-9a-f]{16}\.svg$/);
+  assert.match(order.svgObjectKey, /^orders\/TF-00001\/1-[0-9a-f]{16}\.svg$/);
   assert.equal((await bucket.get(order.svgObjectKey)).body, SVG);
   assert.ok(!order.svgObjectKey.includes("terminal-bookmark"));
-  // Stripe received the server total in yen and the order id
+  // Stripe received the server prices in yen (the SVG, then shipping) and the order id
   const form = new URLSearchParams(stripeCalls[0].init.body);
-  assert.equal(form.get("line_items[0][price_data][unit_amount]"), String(expected.totalPrice));
+  assert.equal(form.get("line_items[0][price_data][unit_amount]"), String(expected.processingPrice));
+  assert.equal(form.get("line_items[1][price_data][unit_amount]"), String(expected.shippingPrice));
+  assert.match(form.get("line_items[1][price_data][product_data][name]"), /送料・梱包料/);
+  assert.equal(form.get("line_items[2][price_data][unit_amount]"), null);
   assert.equal(form.get("line_items[0][price_data][currency]"), "jpy");
   assert.equal(form.get("client_reference_id"), "TF-00001");
   assert.match(form.get("success_url"), /order\/\?order=TF-00001&token=[0-9a-f]{32}&result=success&session_id=\{CHECKOUT_SESSION_ID\}/);
@@ -728,4 +731,98 @@ test("order terms: checkout is refused until every condition is accepted, and th
   assert.equal(out.order.termsAcceptedAt, undefined, "not part of the customer view");
   const detail = await (await s.admin(`/api/admin/orders/${out.orderId}`)).json();
   assert.equal(detail.order.termsAcceptedAt, "2026-09-14T03:00:00.000Z");
+});
+
+const SVG2 = '<svg xmlns="http://www.w3.org/2000/svg" width="60mm" height="30mm" viewBox="0 0 60 30"><path d="M5 5 H55 V25 H5 Z"/></svg>';
+const multi = (items) => {
+  const { svg, fileName, quantity, ...rest } = base;
+  return { ...rest, items };
+};
+
+test("several SVGs per order (2026-09-30): base fee per SVG, one shipping, items stored, one Stripe line each", async () => {
+  const s = setup();
+  const res = await s.call("/api/orders", { method: "POST", body: multi([{ svg: SVG, fileName: "a.svg", quantity: 2 }, { svg: SVG2, fileName: "b.svg", quantity: 1 }]) });
+  const text = await res.text();
+  assert.equal(res.status, 201, text);
+  const out = JSON.parse(text);
+  const one = (svg, quantity) => quote({ material: "kraft-black", thicknessMm: 0.3, quantity, deliveryType: "NORMAL", ...(svg === SVG ? { widthMm: 82.3, heightMm: 142 } : { widthMm: 60, heightMm: 30 }), cutLengthMm: out.quote.items[svg === SVG ? 0 : 1].cutLengthMm, pieceWidthMm: out.quote.items[svg === SVG ? 0 : 1].pieceWidthMm, pieceHeightMm: out.quote.items[svg === SVG ? 0 : 1].pieceHeightMm });
+  const a = one(SVG, 2), b = one(SVG2, 1);
+  assert.equal(out.quote.items.length, 2);
+  assert.equal(out.quote.basePrice, 1000, "the base fee is charged per SVG");
+  assert.equal(out.quote.processingPrice, a.processingPrice + b.processingPrice);
+  assert.equal(out.quote.shippingPrice, 300, "one envelope per order");
+  assert.equal(out.quote.totalPrice, a.processingPrice + b.processingPrice + 300);
+  assert.equal(out.quote.quantity, 3);
+  // Rows and objects per SVG; the orders row keeps the totals and the first SVG.
+  const order = await s.store.getOrder(out.orderId);
+  assert.equal(order.quantity, 3);
+  assert.equal(order.totalPrice, out.quote.totalPrice);
+  assert.equal(order.originalFileName, "a.svg");
+  const items = (await s.store.listItems([out.orderId])).get(out.orderId);
+  assert.deepEqual(items.map((it) => [it.position, it.originalFileName, it.quantity]), [[1, "a.svg", 2], [2, "b.svg", 1]]);
+  assert.match(items[1].svgObjectKey, /^orders\/TF-00001\/2-[0-9a-f]{16}\.svg$/);
+  assert.equal((await s.bucket.get(items[0].svgObjectKey)).body, SVG);
+  assert.equal((await s.bucket.get(items[1].svgObjectKey)).body, SVG2);
+  assert.equal(order.svgObjectKey, items[0].svgObjectKey);
+  // Stripe: one line per SVG and the shipping, adding up to the total.
+  const form = new URLSearchParams(s.stripeCalls[0].init.body);
+  const lines = [0, 1, 2].map((i) => Number(form.get(`line_items[${i}][price_data][unit_amount]`)));
+  assert.deepEqual(lines, [a.processingPrice, b.processingPrice, 300]);
+  assert.match(form.get("line_items[1][price_data][product_data][description]"), /^b\.svg · 60\.0 × 30\.0 mm/);
+  // The customer sees both SVGs, without object keys.
+  const view = (await (await s.call(`/api/orders/${out.orderId}?token=${out.accessToken}`)).json()).order;
+  assert.deepEqual(view.items.map((it) => [it.position, it.fileName, it.quantity]), [[1, "a.svg", 2], [2, "b.svg", 1]]);
+  assert.ok(!JSON.stringify(view).includes("orders/"), "no object keys in the customer view");
+  // Mails list every SVG.
+  await s.webhook(paidEvent(out.orderId, "cs_test_1", out.quote.totalPrice));
+  const [customer, admin] = s.mailCalls;
+  assert.match(customer.body.text, /SVG: 2 件（合計数量 3）\n  1\. a\.svg · 82\.3 × 142\.0 mm.* · 数量 2\n  2\. b\.svg · 60\.0 × 30\.0 mm.* · 数量 1/);
+  assert.match(admin.body.text, /2\. b\.svg/);
+  // Admin: items in the list and the detail, one download per SVG.
+  const list = (await (await s.admin("/api/admin/orders")).json()).orders;
+  assert.deepEqual(list[0].items.map((it) => it.fileName), ["a.svg", "b.svg"]);
+  assert.equal(list[0].items[1].price, b.processingPrice);
+  const second = await s.admin(`/api/admin/orders/${out.orderId}/svg?item=2`);
+  assert.equal(second.status, 200);
+  assert.equal(await second.text(), SVG2);
+  assert.match(second.headers.get("Content-Disposition"), /filename="TF-00001-2-b\.svg"/);
+  assert.equal(await (await s.admin(`/api/admin/orders/${out.orderId}/svg`)).text(), SVG, "the first SVG by default");
+  assert.equal((await s.admin(`/api/admin/orders/${out.orderId}/svg?item=3`)).status, 404);
+  // The retention purge deletes every SVG of the order.
+  for (const st of ["PROCESSING", "READY", "SHIPPED", "COMPLETED"]) await s.admin(`/api/admin/orders/${out.orderId}/status`, { method: "POST", body: { status: st } });
+  s.tick(91 * DAY);
+  assert.deepEqual((await s.app.purgeExpiredData()).purged, [out.orderId]);
+  for (const it of items) assert.equal(s.bucket.objects.has(it.svgObjectKey), false, it.svgObjectKey);
+  assert.equal((await s.store.listItems([out.orderId])).get(out.orderId).length, 2, "item rows (sizes, prices) are kept for accounting");
+});
+
+test("several SVGs: the total quantity decides the bulk inquiry; a bad SVG names its position; nothing is stored", async () => {
+  const s = setup();
+  const bulk = await s.call("/api/orders", { method: "POST", body: multi([{ svg: SVG, quantity: 5 }, { svg: SVG2, quantity: 5 }]) });
+  assert.equal(bulk.status, 400);
+  const bb = await bulk.json();
+  assert.equal(bb.inquiryRequired, true);
+  assert.match(bb.details[0], /合計10個以上/);
+  const nine = await s.call("/api/orders", { method: "POST", body: multi([{ svg: SVG, quantity: 5 }, { svg: SVG2, quantity: 4 }]) });
+  assert.equal(nine.status, 201, "a total of 9 is accepted");
+  const bad = await s.call("/api/orders", { method: "POST", body: multi([{ svg: SVG, quantity: 1 }, { svg: '<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm"><script>1</script><rect width="5" height="5"/></svg>', quantity: 1 }]) });
+  assert.equal(bad.status, 400);
+  const bj = await bad.json();
+  assert.equal(bj.item, 2);
+  assert.match(bj.details[0], /^SVG 2: .*script/);
+  assert.equal((await s.call("/api/orders", { method: "POST", body: multi([]) })).status, 400);
+  assert.equal((await s.call("/api/orders", { method: "POST", body: multi(Array.from({ length: 21 }, () => ({ svg: SVG2, quantity: 1 }))) })).status, 400);
+  assert.equal(s.store.orders.size, 1, "only the accepted order was stored");
+  assert.equal(s.stripeCalls.length, 1);
+});
+
+test("orders stored before order_items are shown and downloaded as one SVG", async () => {
+  const s = setup();
+  const out = await (await s.call("/api/orders", { method: "POST", body: base })).json();
+  s.store.items.length = 0; // as if created before 2026-09-30
+  const view = (await (await s.call(`/api/orders/${out.orderId}?token=${out.accessToken}`)).json()).order;
+  assert.deepEqual(view.items.map((it) => [it.position, it.fileName, it.quantity]), [[1, "terminal-bookmark.svg", 2]]);
+  const detail = (await (await s.admin(`/api/admin/orders/${out.orderId}`)).json()).order;
+  assert.equal(detail.items.length, 1);
+  assert.equal(await (await s.admin(`/api/admin/orders/${out.orderId}/svg?item=1`)).text(), SVG);
 });

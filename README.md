@@ -311,8 +311,9 @@ TypeFabで作ったSVG、または手元のSVGをそのままレーザー加工�
    - **封筒**: **切り抜き後の紙片**（すべての切断線を囲む閉じた外形があればその外形。なければ SVG 全体を1枚の紙片とみなす。しおりの完成イメージと同じ規則）が **長形3号封筒（120 × 235 mm）に周囲 10 mm の余裕を持って収まる**（215 × 100 mm 以内、縦横どちらでも）ことが条件です。TypeFab の書き出しは加工エリア全体が SVG になるため、しおりの外形だけを封筒と比べます。最小は 5 mm です。
    - 注文ページは用紙への配置図（SVG の枠と紙片）と封筒との比較図を表示し、Worker も同じ規則で再検査します。送料区分は紙片のサイズで決めます。`script`・`foreignObject`・`iframe`・イベント属性・外部URL・外部エンティティを含むSVGは受け付けません。プレビューはこれらを取り除いたSVGを `<img>` で表示します。
 3. TypeFab内部では **1 SVGユーザー単位 = 1 mm** とし、書き出すSVGには `width="240mm" height="160mm" viewBox="0 0 240 160"` のように物理サイズを明示します。width/heightが px や単位なしで実寸が決まらないSVGは「実寸の幅 (mm)」の入力を求め、確定するまで注文できません。
-4. 材料は**黒クラフトペーパー（約 0.3 mm）のみ**です（`CATALOG.materials`。複数材料・厚さや「要相談」材料の仕組みは残しているので、追加はカタログの編集だけで済みます）。数量を選ぶと概算を表示します（納期は通常＝決済から 7 日以内の発送のみ。特急は 2026-09-30 に廃止）。料金は `src/pricing.js` の設定値（仮）で `基本料金 + 材料費 + 加工費 + 数量加算` です。「加工費」はカット長に応じた費用、「加工料金」は基本料金＋材料費＋加工費＋数量加算（特急なら×2）の小計で、これに送料・梱包料を足したものが合計です。**最終金額はWorker側で必ず再計算**し、ブラウザから送られた金額は使いません。
-5. 数量が閾値（初期値10個、`BULK_THRESHOLD`）以上は事前問い合わせとし、「大量注文について問い合わせる」（`CONTACT_URL`）へ案内します。
+4. 材料は**黒クラフトペーパー（約 0.3 mm）のみ**です（`CATALOG.materials`。複数材料・厚さや「要相談」材料の仕組みは残しているので、追加はカタログの編集だけで済みます）。数量を選ぶと概算を表示します（納期は通常＝決済から 7 日以内の発送のみ。特急は 2026-09-30 に廃止）。料金は `src/pricing.js` の設定値（仮）で、SVG ごとに `基本料金 + 材料費 + 加工費 + 数量加算` です。「加工費」はカット長に応じた費用、「加工料金」は基本料金＋材料費＋加工費＋数量加算（特急なら×2）の小計で、これに送料・梱包料を足したものが合計です。**最終金額はWorker側で必ず再計算**し、ブラウザから送られた金額は使いません。
+5. **複数の SVG をまとめて 1 回の注文にできます**（2026-09-30）。注文ページには SVG を複数ドロップ／選択でき、エディタの「このデザインを加工注文する」は注文中の一覧に**追加**します（同じ SVG は重ねて追加しません）。一覧から選んだ SVG のチェック・用紙配置・完成イメージを表示し、数量は SVG ごと、材料・厚さ・納期は注文全体で共通です。料金は SVG ごとに `基本料金 + 材料費 + 加工費 + 数量加算`（**基本料金は SVG ごと**）を合計し、**送料・梱包料は 1 注文につき 1 回**（`quoteOrder`）。Stripe の明細は SVG ごと＋送料の行です。追加した SVG（データ・ファイル名・数量だけ）は `localStorage` の `typefab-order-cart` に保存し、注文作成時に削除します。Worker は `items`（SVG ごとの `svg`・`fileName`・`quantity`）を受け付け（1 注文 20 件・合計 8 MB まで。1 件だけの旧形式も可）、R2 に SVG ごとに保存し、D1 の `order_items` に明細を持ちます（`orders` は合計と先頭の SVG。明細のない旧注文は 1 件として表示）。管理画面は SVG ごとに表示・ダウンロードでき、メールにも SVG ごとの明細が載ります。
+   全 SVG の数量の**合計**が閾値（初期値10個、`BULK_THRESHOLD`）以上は事前問い合わせとし、「大量注文について問い合わせる」（`CONTACT_URL`）へ案内します。
 6. 注文ページの「ご注文前の注意」と確認画面の同意欄に、次の注意事項を表示します（`CATALOG.terms`。Worker は `agreedTerms` にすべての id が無い注文を 400 で拒否し、同意日時を `terms_accepted_at` に保存します）。
    - レーザー加工するため、切断面に黒い焦げ粉や匂いがつく場合があります。匂いは数日で消えます。
    - 接続部位が小さいと千切れる可能性があります。推奨 4 mm 以上のネック幅を確保してください。
@@ -320,7 +321,7 @@ TypeFabで作ったSVG、または手元のSVGをそのままレーザー加工�
    - オーダーメイド品のため、決済後のお客様のご都合によるキャンセル・返品・交換はお受けできません。当方の加工ミスによりご注文のデータと異なる商品が届いた場合は、到着から 7 日以内の連絡で再製作または返金で対応します。
 7. **発送について**: 日本郵便の定形郵便で発送し、送料・梱包料は全国一律 300 円です（`CATALOG.shipping`）。追跡番号・配達状況の確認・補償はなく、発送後の配送状況を個別に確認することはできません（`CATALOG.shippingNote`。注文ページ・確認画面・注文受付メールに記載）。管理画面の「発送済みにする」の追跡番号入力は任意のままです。
 8. 配送先を入力し、確認画面で注意事項とプライバシーポリシーのチェックをすべて入れると「Stripeで支払う」が押せるようになり、Stripe Checkoutへ移動します。決済後は注文ページに戻り、注文番号とステータスを表示します。決済完了はリダイレクトではなく **Stripe Webhook（`checkout.session.completed`）** で確定し、同じイベントを複数回受け取っても1回だけ処理します。確定後に注文受付メール（下記）を送り、注文状況ページに「領収書を表示（Stripe）」を出します。
-9. 注文フォームに入力した氏名・メールアドレス・住所・電話番号はブラウザに保存しません（材料・厚さ・数量・納期の選択だけをタブ内の `sessionStorage` に保持）。エディタから渡したSVG（`localStorage` の `typefab-order`）は注文作成時に削除します。注文状況ページのURLに含まれる確認用トークンは表示後にアドレスバーから取り除きます。個人情報の取り扱いは [プライバシーポリシー](https://fooping-tech.github.io/TypeFab/privacy/)（`privacy/index.html`）に記載し、注文フォームと確認画面からリンクしています。販売条件（販売価格・送料・支払方法・引き渡し時期・返品とキャンセル・問い合わせ先）は [特定商取引法に基づく表記](https://fooping-tech.github.io/TypeFab/legal/)（`legal/index.html`）に記載し、紹介ページのフッター、注文ページの「ご注文前の注意」と確認画面、プライバシーポリシーからリンクしています。販売事業者・所在地・電話番号は「請求があった場合、遅滞なく開示」とし、問い合わせはメール（`CONTACT_URL = "mailto:…"`）で受け付けます。
+9. 注文フォームに入力した氏名・メールアドレス・住所・電話番号はブラウザに保存しません（材料・厚さ・数量・納期の選択だけをタブ内の `sessionStorage` に保持）。エディタから渡したSVG（`localStorage` の `typefab-order`）は注文中の一覧に移して削除し、一覧（`typefab-order-cart`。SVG・ファイル名・数量のみ）は注文作成時に削除します。注文状況ページのURLに含まれる確認用トークンは表示後にアドレスバーから取り除きます。個人情報の取り扱いは [プライバシーポリシー](https://fooping-tech.github.io/TypeFab/privacy/)（`privacy/index.html`）に記載し、注文フォームと確認画面からリンクしています。販売条件（販売価格・送料・支払方法・引き渡し時期・返品とキャンセル・問い合わせ先）は [特定商取引法に基づく表記](https://fooping-tech.github.io/TypeFab/legal/)（`legal/index.html`）に記載し、紹介ページのフッター、注文ページの「ご注文前の注意」と確認画面、プライバシーポリシーからリンクしています。販売事業者・所在地・電話番号は「請求があった場合、遅滞なく開示」とし、問い合わせはメール（`CONTACT_URL = "mailto:…"`）で受け付けます。
 
 ### 完成イメージ（文庫本しおりのプレビュー）
 
@@ -478,7 +479,7 @@ npx wrangler login
 
 ルートの `npm ci` は Worker も使う `src/` のモジュールのため、`npm --prefix worker ci` は wrangler のためです。以降の `npx wrangler …` は `worker/` で実行します。
 
-1. **D1**: `npx wrangler d1 create typefab-orders` を実行し、表示された `database_id` を `worker/wrangler.toml` に書きます。スキーマを適用します: `npm run db:remote`（ルートからも `npm run db:remote`）。既存 DB は `npm run db:migrate:remote`（最新のマイグレーション `migrations/0003_piece_size.sql`）を適用します。2026-09-16 より前に作った DB は先に `npx wrangler d1 execute typefab-orders --remote --file=migrations/0002_privacy_mail_receipt.sql` を適用します。
+1. **D1**: `npx wrangler d1 create typefab-orders` を実行し、表示された `database_id` を `worker/wrangler.toml` に書きます。スキーマを適用します: `npm run db:remote`（ルートからも `npm run db:remote`）。既存 DB は `npm run db:migrate:remote`（最新のマイグレーション `migrations/0004_order_items.sql`。2026-09-17 より前の DB は先に `migrations/0003_piece_size.sql`）を適用します。2026-09-16 より前に作った DB は先に `npx wrangler d1 execute typefab-orders --remote --file=migrations/0002_privacy_mail_receipt.sql` を適用します。
 2. **R2**: `npx wrangler r2 bucket create typefab-order-svgs`（名前を変えた場合は `wrangler.toml` の `bucket_name` も変更）。
 3. **Stripe**: ダッシュボードで本番の秘密鍵（`sk_live_…`）を取得します。Webhookエンドポイントに `https://<worker>.workers.dev/api/stripe/webhook` を登録し、イベント `checkout.session.completed`、`checkout.session.async_payment_succeeded`、`checkout.session.async_payment_failed`、`checkout.session.expired` を選び、署名シークレット（`whsec_…`）を控えます。
 4. **Stripe の領収書メール**: ダッシュボードの Settings → Emails で「Successful payments」を有効にします（Issue #10）。

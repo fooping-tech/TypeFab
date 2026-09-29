@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { quote, CATALOG, shipByDate, shippingRule, publicCatalog, TRANSITIONS, ORDER_STATUSES, fitsWithin, missingTerms } from "../src/pricing.js";
+import { quote, quoteOrder, CATALOG, shipByDate, shippingRule, publicCatalog, TRANSITIONS, ORDER_STATUSES, fitsWithin, missingTerms } from "../src/pricing.js";
 
 const base = { material: "kraft-black", thicknessMm: 0.3, quantity: 1, deliveryType: "NORMAL", widthMm: 82.3, heightMm: 142, cutLengthMm: 3428, pathCount: 12 };
 
@@ -156,4 +156,36 @@ test("public catalogue is JSON-serialisable and statuses/transitions are consist
     for (const t of tos) assert.ok(ORDER_STATUSES.includes(t));
   }
   assert.deepEqual(TRANSITIONS.READY, ["SHIPPED", "CANCELLED"]);
+});
+
+test("quoteOrder (2026-09-30): base fee per SVG, one shipping per order, bulk decided by the total quantity", () => {
+  const a = { label: "a.svg", widthMm: 50, heightMm: 120, cutLengthMm: 400, pathCount: 3, quantity: 2 };
+  const b = { label: "b.svg", widthMm: 60, heightMm: 30, cutLengthMm: 180, pathCount: 1, quantity: 1 };
+  const opts = { material: "kraft-black", thicknessMm: 0.3, deliveryType: "NORMAL" };
+  const q = quoteOrder({ ...opts, items: [a, b] });
+  const qa = quote({ ...opts, ...a }), qb = quote({ ...opts, ...b });
+  assert.equal(q.ok, true);
+  assert.equal(q.items.length, 2);
+  assert.equal(q.basePrice, CATALOG.baseFee * 2);
+  assert.equal(q.processingPrice, qa.processingPrice + qb.processingPrice);
+  assert.equal(q.shippingPrice, 300);
+  assert.equal(q.totalPrice, qa.processingPrice + qb.processingPrice + 300, "shipping once, not per SVG");
+  assert.equal(q.totalPrice, qa.totalPrice + qb.totalPrice - 300);
+  assert.equal(q.quantity, 3);
+  assert.equal(q.cutLengthMm, 580);
+  assert.deepEqual(q.items.map((it) => it.price), [qa.processingPrice, qb.processingPrice]);
+  // Total quantity 9 is fine, 10 needs an inquiry.
+  assert.equal(quoteOrder({ ...opts, items: [{ ...a, quantity: 5 }, { ...b, quantity: 4 }] }).inquiryRequired, false);
+  const bulk = quoteOrder({ ...opts, items: [{ ...a, quantity: 5 }, { ...b, quantity: 5 }] });
+  assert.equal(bulk.inquiryRequired, true);
+  assert.equal(bulk.totalPrice, null);
+  // Errors name the SVG when there are several.
+  const bad = quoteOrder({ ...opts, items: [a, { ...b, widthMm: 400 }] });
+  assert.equal(bad.ok, false);
+  assert.match(bad.errors[0], /^「b\.svg」: SVGが用紙に収まりません/);
+  assert.match(quoteOrder({ ...opts, items: [{ ...b, widthMm: 400 }] }).errors[0], /^SVGが用紙に収まりません/, "no prefix for one SVG");
+  assert.deepEqual(quoteOrder({ ...opts, items: [] }).errors, ["SVGを追加してください。"]);
+  assert.match(quoteOrder({ ...opts, items: Array.from({ length: CATALOG.limits.maxItems + 1 }, () => b) }).errors[0], /までです/);
+  // quote() with one SVG is the same as quoteOrder with one item.
+  assert.equal(quote({ ...opts, ...a }).totalPrice, quoteOrder({ ...opts, items: [a] }).totalPrice);
 });

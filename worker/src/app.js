@@ -1,14 +1,15 @@
 // Request handlers for the TypeFab order API. Everything that touches the
 // outside world (D1, R2, Stripe, mail, Access, time, randomness) comes in
 // through `deps` so the flow can be tested end to end without Cloudflare.
-import { quote, publicCatalog, shipByDate, TRANSITIONS, CATALOG, missingTerms } from "../../src/pricing.js";
+import { quote, quoteOrder, publicCatalog, shipByDate, TRANSITIONS, CATALOG, missingTerms } from "../../src/pricing.js";
 import { analyzeSVG, withPhysicalSize } from "../../src/svganalyze.js";
 import { createCheckoutSession, verifyStripeSignature, timingSafeEqual, fetchReceipt } from "./stripe.js";
 import { createAccessVerifier } from "./access.js";
 import { sendMail, customerPaidMail, adminPaidMail, consoleMailText } from "./mail.js";
-import { PERSONAL_DATA_FIELDS, NOTIFICATION_TYPES } from "./store.js";
+import { PERSONAL_DATA_FIELDS, NOTIFICATION_TYPES, legacyItems } from "./store.js";
 
-const MAX_BODY = 3 * 1024 * 1024;
+// Several SVGs per order (CATALOG.limits.maxOrderSvgBytes) plus JSON escaping.
+const MAX_BODY = 12 * 1024 * 1024;
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 const ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 // Statuses in which a payment exists (receipt available) and in which the
@@ -41,9 +42,25 @@ export function catalogFromConfig(config = {}) {
   if (config.normalLeadTimeDays > 0) c.delivery.NORMAL.leadTimeDays = Number(config.normalLeadTimeDays);
   return c;
 }
+// The SVGs of an order as shown to the customer and in the admin list (no
+// object keys or hashes).
+const itemView = (it) => ({
+  position: it.position,
+  fileName: it.originalFileName,
+  widthMm: it.widthMm,
+  heightMm: it.heightMm,
+  pieceWidthMm: it.pieceWidthMm ?? null,
+  pieceHeightMm: it.pieceHeightMm ?? null,
+  quantity: it.quantity,
+  cutLengthMm: it.cutLengthMm ?? null,
+  pathCount: it.pathCount ?? null,
+  estimatedProcessingMinutes: it.estimatedProcessingMinutes ?? null,
+  price: it.itemPrice ?? null,
+});
+const itemsOr = (o, items) => (items?.length ? items : legacyItems(o));
 // Customer-facing view of an order (no address, no e-mail, no tokens, no
 // Stripe ids). The receipt link only exists once the order was paid.
-export const customerView = (o) => ({
+export const customerView = (o, items) => ({
   id: o.id,
   status: o.status,
   createdAt: o.createdAt,
@@ -65,6 +82,10 @@ export const customerView = (o) => ({
   trackingNumber: o.shippingTrackingNumber,
   carrier: o.shippingCarrier,
   receiptUrl: PAID_STATUSES.includes(o.status) && o.receiptUrl ? o.receiptUrl : null,
+  items: itemsOr(o, items).map((it) => {
+    const { position, fileName, widthMm, heightMm, pieceWidthMm, pieceHeightMm, quantity } = itemView(it);
+    return { position, fileName, widthMm, heightMm, pieceWidthMm, pieceHeightMm, quantity };
+  }),
 });
 // Admin list view: what the order board needs, without contact details.
 const ADMIN_LIST_FIELDS = [
@@ -72,11 +93,11 @@ const ADMIN_LIST_FIELDS = [
   "pathCount", "cutLengthMm", "estimatedProcessingMinutes", "material", "thicknessMm", "quantity", "deliveryType", "basePrice", "processingPrice",
   "shippingPrice", "totalPrice", "currency", "shippingTrackingNumber", "shippingCarrier", "notes", "termsAcceptedAt", "personalDataDeletedAt",
 ];
-export const adminListView = (o) => Object.fromEntries(ADMIN_LIST_FIELDS.map((k) => [k, o[k] ?? null]));
+export const adminListView = (o, items) => ({ ...Object.fromEntries(ADMIN_LIST_FIELDS.map((k) => [k, o[k] ?? null])), items: itemsOr(o, items).map(itemView) });
 // Admin detail view: adds Stripe ids and the receipt; shipping details only
 // while the order still needs to be produced or shipped (issue #8 §5).
-export const adminDetailView = (o) => {
-  const v = { ...adminListView(o), stripeCheckoutSessionId: o.stripeCheckoutSessionId, stripePaymentIntentId: o.stripePaymentIntentId, stripeChargeId: o.stripeChargeId, receiptUrl: o.receiptUrl, shippingVisible: false };
+export const adminDetailView = (o, items) => {
+  const v = { ...adminListView(o, items), stripeCheckoutSessionId: o.stripeCheckoutSessionId, stripePaymentIntentId: o.stripePaymentIntentId, stripeChargeId: o.stripeChargeId, receiptUrl: o.receiptUrl, shippingVisible: false };
   if (SHIPPING_VISIBLE_STATUSES.includes(o.status) && !o.personalDataDeletedAt) {
     v.shippingVisible = true;
     for (const k of PERSONAL_DATA_FIELDS) v[k] = o[k] ?? null;
@@ -157,36 +178,60 @@ export function createApp(deps) {
     }
   };
   const orderUrl = (o) => `${siteUrl}order/?order=${o.id}&token=${o.accessToken}`;
+  const itemsOf = async (o) => itemsOr(o, (await store.listItems([o.id])).get(o.id));
 
-  async function createOrder(body) {
-    let svg = typeof body.svg === "string" ? body.svg : "";
-    if (!svg) return error("SVGがありません。");
-    if (svg.length > catalog.limits.maxSvgBytes) return error("SVGが大きすぎます。", 413);
-    const fileName = clean(body.fileName, 120).replace(/[\\/:*?"<>|]/g, "_") || "design.svg";
-    const confirmedWidth = Number(body.confirmedWidthMm);
-    const analyze = (text) => analyzeSVG(text, { limits: catalog.limits, sheet: catalog.sheet });
+  // One SVG of an order request: sanitised name, SVG checks (with the width
+  // the customer confirmed for px/unitless files) and its analysis.
+  const analyze = (text) => analyzeSVG(text, { limits: catalog.limits, sheet: catalog.sheet });
+  function readItem(raw, label) {
+    let svg = typeof raw?.svg === "string" ? raw.svg : "";
+    if (!svg) return { error: `${label}SVGがありません。` };
+    if (svg.length > catalog.limits.maxSvgBytes) return { error: `${label}SVGが大きすぎます。`, status: 413 };
+    const fileName = clean(raw.fileName, 120).replace(/[\\/:*?"<>|]/g, "_") || "design.svg";
+    const confirmedWidth = Number(raw.confirmedWidthMm);
     let analysis = analyze(svg);
     if (!analysis.ok && analysis.size && !analysis.size.known && confirmedWidth > 0) {
       try {
         svg = withPhysicalSize(svg, confirmedWidth);
       } catch (e) {
-        return error(e.message);
+        return { error: `${label}${e.message}` };
       }
       analysis = analyze(svg);
     }
-    if (!analysis.ok) return error("SVGに問題があります。", 400, { details: analysis.errors, analysis });
-    const q = quote(
+    if (!analysis.ok) return { error: `${label}SVGに問題があります。`, details: analysis.errors.map((e) => `${label}${e}`), analysis };
+    return { svg, fileName, analysis, quantity: raw.quantity };
+  }
+
+  async function createOrder(body) {
+    // Since 2026-09-30 an order holds `items` (several SVGs, each with its
+    // quantity); the single-SVG body of earlier pages is one item.
+    const rawItems = Array.isArray(body.items) ? body.items : [{ svg: body.svg, fileName: body.fileName, confirmedWidthMm: body.confirmedWidthMm, quantity: body.quantity }];
+    if (!rawItems.length) return error("SVGがありません。");
+    if (rawItems.length > catalog.limits.maxItems) return error(`1回の注文に入れられるSVGは${catalog.limits.maxItems}個までです。`);
+    if (rawItems.reduce((n, it) => n + (typeof it?.svg === "string" ? it.svg.length : 0), 0) > catalog.limits.maxOrderSvgBytes)
+      return error(`SVGの合計が大きすぎます（最大 ${Math.round(catalog.limits.maxOrderSvgBytes / 1024 / 1024)} MB）。`, 413);
+    const read = [];
+    for (const [i, raw] of rawItems.entries()) {
+      const r = readItem(raw, rawItems.length > 1 ? `SVG ${i + 1}: ` : "");
+      if (r.error && r.details) return error(rawItems.length > 1 ? r.error : "SVGに問題があります。", 400, { details: r.details, analysis: r.analysis, item: i + 1 });
+      if (r.error) return error(r.error, r.status ?? 400, { item: i + 1 });
+      read.push(r);
+    }
+    const q = quoteOrder(
       {
         material: body.material,
         thicknessMm: body.thicknessMm,
-        quantity: body.quantity,
         deliveryType: body.deliveryType,
-        widthMm: analysis.size.widthMm,
-        heightMm: analysis.size.heightMm,
-        pieceWidthMm: analysis.piece?.widthMm,
-        pieceHeightMm: analysis.piece?.heightMm,
-        cutLengthMm: analysis.cutLengthMm,
-        pathCount: analysis.pathCount,
+        items: read.map((r) => ({
+          label: r.fileName,
+          quantity: r.quantity,
+          widthMm: r.analysis.size.widthMm,
+          heightMm: r.analysis.size.heightMm,
+          pieceWidthMm: r.analysis.piece?.widthMm,
+          pieceHeightMm: r.analysis.piece?.heightMm,
+          cutLengthMm: r.analysis.cutLengthMm,
+          pathCount: r.analysis.pathCount,
+        })),
       },
       catalog,
     );
@@ -210,10 +255,37 @@ export function createApp(deps) {
 
     const at = now().toISOString();
     const id = makeOrderId(),
-      accessToken = makeToken(),
-      hash = await sha256(svg);
-    const key = `orders/${id}/${hash.slice(0, 16)}.svg`;
-    await bucket.put(key, svg, { httpMetadata: { contentType: "image/svg+xml" }, customMetadata: { orderId: id, fileName } });
+      accessToken = makeToken();
+    const items = [];
+    for (const [i, r] of read.entries()) {
+      const hash = await sha256(r.svg);
+      const key = `orders/${id}/${i + 1}-${hash.slice(0, 16)}.svg`;
+      await bucket.put(key, r.svg, { httpMetadata: { contentType: "image/svg+xml" }, customMetadata: { orderId: id, position: String(i + 1), fileName: r.fileName } });
+      const p = q.items[i];
+      items.push({
+        orderId: id,
+        position: i + 1,
+        svgObjectKey: key,
+        originalFileName: r.fileName,
+        svgHash: hash,
+        svgBytes: r.analysis.bytes,
+        widthMm: p.widthMm,
+        heightMm: p.heightMm,
+        pieceWidthMm: p.pieceWidthMm,
+        pieceHeightMm: p.pieceHeightMm,
+        pathCount: p.pathCount,
+        cutLengthMm: p.cutLengthMm,
+        estimatedProcessingMinutes: p.estimatedProcessingMinutes,
+        quantity: p.quantity,
+        basePrice: p.baseFee,
+        materialFee: p.materialFee,
+        processingFee: p.processingFee,
+        itemPrice: p.price,
+      });
+    }
+    // The orders row keeps the first SVG (columns shared with older orders)
+    // and the totals of the whole order.
+    const first = items[0];
     const order = {
       id,
       status: "PAYMENT_PENDING",
@@ -228,16 +300,16 @@ export function createApp(deps) {
       shippingAddress1: clean(shipping.address1, 200),
       shippingAddress2: clean(shipping.address2, 200),
       shippingPhone: clean(shipping.phone, 30),
-      svgObjectKey: key,
-      originalFileName: fileName,
-      svgHash: hash,
-      svgBytes: analysis.bytes,
-      widthMm: analysis.size.widthMm,
-      heightMm: analysis.size.heightMm,
-      pieceWidthMm: q.pieceWidthMm,
-      pieceHeightMm: q.pieceHeightMm,
-      pathCount: analysis.pathCount,
-      cutLengthMm: analysis.cutLengthMm,
+      svgObjectKey: first.svgObjectKey,
+      originalFileName: first.originalFileName,
+      svgHash: first.svgHash,
+      svgBytes: items.reduce((n, it) => n + it.svgBytes, 0),
+      widthMm: first.widthMm,
+      heightMm: first.heightMm,
+      pieceWidthMm: first.pieceWidthMm,
+      pieceHeightMm: first.pieceHeightMm,
+      pathCount: q.pathCount,
+      cutLengthMm: q.cutLengthMm,
       estimatedProcessingMinutes: q.estimatedProcessingMinutes,
       material: q.material,
       thicknessMm: q.thicknessMm,
@@ -260,7 +332,13 @@ export function createApp(deps) {
       personalDataDeletedAt: null,
     };
     await store.insertOrder(order);
-    await store.addOrderEvent({ orderId: id, fromStatus: null, toStatus: "PAYMENT_PENDING", at, note: "order created" });
+    try {
+      await store.insertItems(items);
+    } catch (e) {
+      await store.updateOrder(id, { status: "CANCELLED", updatedAt: now().toISOString(), notes: `saving items failed: ${e.message}` });
+      throw e;
+    }
+    await store.addOrderEvent({ orderId: id, fromStatus: null, toStatus: "PAYMENT_PENDING", at, note: items.length > 1 ? `order created (${items.length} SVGs)` : "order created" });
     const url = orderUrl(order);
     let session;
     try {
@@ -276,18 +354,20 @@ export function createApp(deps) {
           // receipt_email makes Stripe send its receipt to the customer when
           // "Successful payments" e-mails are enabled in the dashboard (#10).
           payment_intent_data: { metadata: { orderId: id }, receipt_email: email },
+          // One line per SVG plus the shipping; they add up to totalPrice.
           line_items: [
-            {
+            ...items.map((it) => ({
               quantity: 1,
               price_data: {
                 currency: "jpy",
-                unit_amount: q.totalPrice,
+                unit_amount: it.itemPrice,
                 product_data: {
-                  name: `レーザー加工 ${q.materialName} ${q.thicknessMm} mm × ${q.quantity}（${catalog.delivery[q.deliveryType].label}）`,
-                  description: `${fileName} · ${analysis.size.widthMm.toFixed(1)} × ${analysis.size.heightMm.toFixed(1)} mm · 注文 ${id}`,
+                  name: `レーザー加工 ${q.materialName} ${q.thicknessMm} mm × ${it.quantity}（${catalog.delivery[q.deliveryType].label}）`,
+                  description: `${it.originalFileName} · ${it.widthMm.toFixed(1)} × ${it.heightMm.toFixed(1)} mm · 注文 ${id}`,
                 },
               },
-            },
+            })),
+            { quantity: 1, price_data: { currency: "jpy", unit_amount: q.shippingPrice, product_data: { name: `送料・梱包料（${q.shippingLabel}）` } } },
           ],
         },
         fetchImpl,
@@ -298,7 +378,7 @@ export function createApp(deps) {
       return error("決済ページ（Checkout Session）の作成に失敗しました。時間をおいて再度お試しください。", 502);
     }
     await store.updateOrder(id, { stripeCheckoutSessionId: session.id, updatedAt: now().toISOString() });
-    return json({ orderId: id, accessToken, checkoutUrl: session.url, quote: q, order: customerView(await store.getOrder(id)) }, 201);
+    return json({ orderId: id, accessToken, checkoutUrl: session.url, quote: q, order: customerView(await store.getOrder(id), items) }, 201);
   }
 
   // Looks the receipt up at Stripe and caches it. Best effort: returns the
@@ -320,6 +400,7 @@ export function createApp(deps) {
   // SITE_URL (GitHub Pages), so it is the default link in the admin mail.
   async function sendPaidNotifications(order, { retry = false, origin } = {}) {
     const results = {};
+    const items = await itemsOf(order);
     const existing = Object.fromEntries((await store.listNotifications(order.id)).map((n) => [n.type, n]));
     for (const type of NOTIFICATION_TYPES) {
       const prev = existing[type];
@@ -335,10 +416,10 @@ export function createApp(deps) {
       let to, mail;
       if (type === "customer_paid") {
         to = order.customerEmail;
-        mail = customerPaidMail(order, { orderUrl: orderUrl(order), contactUrl: config.contactUrl ?? siteUrl });
+        mail = customerPaidMail(order, { orderUrl: orderUrl(order), contactUrl: config.contactUrl ?? siteUrl, items });
       } else {
         to = config.adminNotificationEmail;
-        mail = adminPaidMail(order, { adminUrl: config.adminUrl ?? (origin ? `${origin}/admin/` : `${siteUrl}admin/`) });
+        mail = adminPaidMail(order, { adminUrl: config.adminUrl ?? (origin ? `${origin}/admin/` : `${siteUrl}admin/`), items });
       }
       if (!mailConfigured || !to) {
         const reason = !mailConfigured ? "mail not configured" : "no recipient configured";
@@ -440,7 +521,7 @@ export function createApp(deps) {
     const updated = await store.updateOrder(order.id, patch);
     const note = [clean(body.note, 200), who?.email ? `by ${who.email}` : ""].filter(Boolean).join(" · ") || null;
     await store.addOrderEvent({ orderId: order.id, fromStatus: order.status, toStatus: to, at, note });
-    return json({ order: adminDetailView(updated) });
+    return json({ order: adminDetailView(updated, await itemsOf(updated)) });
   }
 
   // Retention purge (#8 §2): closed orders older than the retention period
@@ -456,7 +537,8 @@ export function createApp(deps) {
       }
       const at = now().toISOString();
       try {
-        if (o.svgObjectKey) await bucket.delete(o.svgObjectKey);
+        const keys = new Set([o.svgObjectKey, ...(await itemsOf(o)).map((it) => it.svgObjectKey)].filter(Boolean));
+        for (const key of keys) await bucket.delete(key);
       } catch (e) {
         log(`svg delete failed for ${o.id}: ${e.message}`);
         continue;
@@ -491,7 +573,7 @@ export function createApp(deps) {
         const token = url.searchParams.get("token") ?? "";
         if (!order || !token || !timingSafeEqual(token, order.accessToken)) return error("注文が見つかりません。", 404);
         if (PAID_STATUSES.includes(order.status)) order = await cacheReceipt(order);
-        return json({ order: customerView(order) });
+        return json({ order: customerView(order, await itemsOf(order)) });
       }
       if (isAdminPath) {
         if (adminAuth === "none") return error("本番環境（APP_ENV=production）では Cloudflare Access（ACCESS_TEAM_DOMAIN / ACCESS_AUD）の設定が必要です。ADMIN_TOKEN は使えません。", 503, { authMode: "none" });
@@ -502,7 +584,8 @@ export function createApp(deps) {
           const filter = url.searchParams.get("status");
           const statuses = filter === "open" ? ["PAID", "PROCESSING", "READY"] : filter ? filter.split(",") : null;
           const orders = await store.listOrders({ statuses });
-          return json({ orders: orders.map(adminListView) });
+          const items = await store.listItems(orders.map((o) => o.id));
+          return json({ orders: orders.map((o) => adminListView(o, items.get(o.id))) });
         }
         if (path === "/api/admin/maintenance/purge" && request.method === "POST") {
           const body = await readJson(request).catch(() => ({}));
@@ -513,14 +596,20 @@ export function createApp(deps) {
         const order = await store.getOrder(m[1]);
         if (!order) return error("注文が見つかりません。", 404);
         if (!m[2] && request.method === "GET")
-          return json({ order: adminDetailView(order), events: await store.listOrderEvents(order.id), notifications: await store.listNotifications(order.id) });
+          return json({ order: adminDetailView(order, await itemsOf(order)), events: await store.listOrderEvents(order.id), notifications: await store.listNotifications(order.id) });
         if (m[2] === "/svg" && request.method === "GET") {
           if (order.personalDataDeletedAt) return error("保持期間を過ぎたため、このSVGは削除されています。", 410);
-          const obj = await bucket.get(order.svgObjectKey);
+          // ?item=N picks one SVG of the order (1-based); the first by default.
+          const items = await itemsOf(order);
+          const position = Number(url.searchParams.get("item") ?? 1);
+          const item = items.find((it) => it.position === position);
+          if (!item) return error("SVGが見つかりません。", 404);
+          const obj = await bucket.get(item.svgObjectKey);
           if (!obj) return error("SVGが見つかりません。", 404);
-          const name = (order.originalFileName || "design.svg").replace(/"/g, "");
+          const name = (item.originalFileName || "design.svg").replace(/"/g, "");
+          const prefix = items.length > 1 ? `${order.id}-${item.position}` : order.id;
           return new Response(obj.body, {
-            headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Content-Disposition": `attachment; filename="${order.id}-${encodeURIComponent(name)}"`, "Cache-Control": "no-store" },
+            headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Content-Disposition": `attachment; filename="${prefix}-${encodeURIComponent(name)}"`, "Cache-Control": "no-store" },
           });
         }
         if (m[2] === "/status" && request.method === "POST") return adminStatus(request, order, who);

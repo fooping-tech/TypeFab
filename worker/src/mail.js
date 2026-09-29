@@ -20,19 +20,31 @@ const pieceNote = (o) =>
   o.pieceWidthMm > 0 && o.pieceHeightMm > 0 && (Math.abs(o.pieceWidthMm - o.widthMm) > 0.05 || Math.abs(o.pieceHeightMm - o.heightMm) > 0.05)
     ? `（切り抜き後 ${Number(o.pieceWidthMm).toFixed(1)} × ${Number(o.pieceHeightMm).toFixed(1)} mm）`
     : "";
-export function orderSummaryLines(order) {
+const sizeLine = (it) => `${Number(it.widthMm).toFixed(1)} × ${Number(it.heightMm).toFixed(1)} mm${pieceNote(it)}`;
+// `items` are the SVGs of the order (order_items); orders created before
+// 2026-09-30 have none and are described from the orders columns.
+export function orderSummaryLines(order, items = null) {
+  if (!items || items.length <= 1) {
+    const it = items?.[0] ?? order;
+    return [
+      `材料: ${materialName(order.material)} ${order.thicknessMm} mm`,
+      `サイズ: ${sizeLine(it)}`,
+      `数量: ${it.quantity ?? order.quantity}`,
+      `納期: ${deliveryLabel(order.deliveryType)}`,
+      `ファイル: ${it.originalFileName ?? "design.svg"}`,
+    ];
+  }
   return [
     `材料: ${materialName(order.material)} ${order.thicknessMm} mm`,
-    `サイズ: ${Number(order.widthMm).toFixed(1)} × ${Number(order.heightMm).toFixed(1)} mm${pieceNote(order)}`,
-    `数量: ${order.quantity}`,
+    `SVG: ${items.length} 件（合計数量 ${order.quantity}）`,
+    ...items.map((it) => `  ${it.position}. ${it.originalFileName ?? "design.svg"} · ${sizeLine(it)} · 数量 ${it.quantity}`),
     `納期: ${deliveryLabel(order.deliveryType)}`,
-    `ファイル: ${order.originalFileName ?? "design.svg"}`,
   ];
 }
 
 // Customer: order accepted. `orderUrl` includes the access token; the page
 // it opens never shows the address or e-mail.
-export function customerPaidMail(order, { orderUrl, contactUrl }) {
+export function customerPaidMail(order, { orderUrl, contactUrl, items = null }) {
   const subject = `【TypeFab】ご注文を承りました（${order.id}）`;
   const text = [
     "TypeFabをご利用いただきありがとうございます。",
@@ -42,7 +54,7 @@ export function customerPaidMail(order, { orderUrl, contactUrl }) {
     `決済日時: ${jpDateTime(order.paidAt)}`,
     "",
     "▼ ご注文内容",
-    ...orderSummaryLines(order),
+    ...orderSummaryLines(order, items),
     "",
     `加工料金: ${yen(order.processingPrice)}`,
     `送料: ${yen(order.shippingPrice)}`,
@@ -70,7 +82,7 @@ export function customerPaidMail(order, { orderUrl, contactUrl }) {
 
 // Admin: new paid order. No address or phone number — those are in the
 // Access-protected admin page.
-export function adminPaidMail(order, { adminUrl }) {
+export function adminPaidMail(order, { adminUrl, items = null }) {
   const subject = `新規注文 ${order.id} ${yen(order.totalPrice)}`;
   const text = [
     "新しい注文が入りました。",
@@ -81,8 +93,8 @@ export function adminPaidMail(order, { adminUrl }) {
     `決済日時: ${jpDateTime(order.paidAt)}`,
     `発送期限: ${jpDate(order.shipBy)}`,
     "",
-    ...orderSummaryLines(order),
-    `カット長: ${Math.round(order.cutLengthMm ?? 0)} mm / パス ${order.pathCount ?? "—"}`,
+    ...orderSummaryLines(order, items),
+    `カット長: ${Math.round(order.cutLengthMm ?? 0)} mm / パス ${order.pathCount ?? "—"}${items?.length > 1 ? "（全 SVG の合計）" : ""}`,
     "",
     "配送先・SVGは管理画面で確認してください:",
     adminUrl,

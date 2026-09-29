@@ -113,7 +113,8 @@ test("特定商取引法 page: required items, disclosure on request, mail conta
   for (const s of ["販売事業者", "所在地", "電話番号", "お問い合わせ先", "販売価格", "商品代金以外の必要料金", "支払方法", "支払時期", "商品の引き渡し時期", "返品・キャンセル"]) assert.ok(html.includes(`<th>${s}</th>`), s);
   assert.equal(html.match(/請求があった場合、遅滞なく開示いたします。/g).length, 3);
   assert.match(html, /mailto:tomei-kakushin@chikuwa-tech\.com/);
-  assert.match(html, /全国一律 300 円/);
+  assert.match(html, /1 回の注文につき全国一律 300 円/);
+  assert.match(html, /SVG ごとに基本料金/);
   assert.match(html, /決済完了から 7 日以内に発送/);
   assert.ok(!html.includes("特急"), "express was withdrawn");
   assert.match(html, /キャンセル・返品・交換はお受けできません/);
