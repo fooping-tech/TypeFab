@@ -728,3 +728,6 @@
 - Stripe サンドボックス: 利用者がテストキーと Webhook（4 イベント、`/api/stripe/webhook`）を登録し、`STRIPE_SECRET_KEY`・`STRIPE_WEBHOOK_SECRET` を Secret に設定。`/api/health` が `stripeConfigured: true`、署名なしの Webhook POST は 400 を確認。
 - 利用者が Cloudflare の Budget alert（$1 / $5 / $10、アカウント全体の従量課金のみ）をダッシュボードで作成する予定（wrangler の権限・公開 API では作成できないため）。
 - 未完了: Resend（`MAIL_FROM`・`MAIL_API_KEY`・`ADMIN_NOTIFICATION_EMAIL`）、Cloudflare Access、テスト注文の通し確認、本番キーへの切り替え（本番用 Webhook の別登録、テスト注文の削除）、`ORDER_API_URL`、紹介ページの Coming Soon の削除、料金の決定。
+- 2026-09-29 追記: 利用者の指示により、正式な注文受付はまだ開始しない（注意事項・免責事項の表示を整えてから）。公開サイトの注文ページを Worker につながない（リポジトリ変数 `ORDER_API_URL` を設定しない）、Stripe はサンドボックスのキーのまま、紹介ページの Coming Soon も残す。これらは利用者の指示があるまで変えない。サンドボックスでの確認は手元のビルド（`VITE_ORDER_API_URL` に本番 Worker、`npm run preview` の 127.0.0.1:4173）から行う。
+- 2026-09-29 追記: Cloudflare Access を設定（`ACCESS_TEAM_DOMAIN`・`ACCESS_AUD` を `wrangler.toml` に記載）。利用者が再デプロイし `/api/health` は stripe・mail・access すべて true、`/admin/` は Access のログイン後に表示された（利用者が確認）。未ログインでは `/admin/`・`/api/admin/*` が Access のログインへ 302、公開 API（`/api/config`・`/api/health`）は 200、Webhook は Access を通らず Worker に届く（署名なしは 400）。
+- 2026-09-29 修正: 管理者向け通知メールの管理画面リンクの既定値が `<SITE_URL>admin/`（GitHub Pages、存在しない）だったため、Worker 自身の `/admin/` に変更（`worker/src/app.js`、テスト 1 件追加、`npm test` 214 件成功、README 更新）。Worker への反映は利用者の `npm run deploy` 待ち。
