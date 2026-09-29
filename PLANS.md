@@ -731,3 +731,7 @@
 - 2026-09-29 追記: 利用者の指示により、正式な注文受付はまだ開始しない（注意事項・免責事項の表示を整えてから）。公開サイトの注文ページを Worker につながない（リポジトリ変数 `ORDER_API_URL` を設定しない）、Stripe はサンドボックスのキーのまま、紹介ページの Coming Soon も残す。これらは利用者の指示があるまで変えない。サンドボックスでの確認は手元のビルド（`VITE_ORDER_API_URL` に本番 Worker、`npm run preview` の 127.0.0.1:4173）から行う。
 - 2026-09-29 追記: Cloudflare Access を設定（`ACCESS_TEAM_DOMAIN`・`ACCESS_AUD` を `wrangler.toml` に記載）。利用者が再デプロイし `/api/health` は stripe・mail・access すべて true、`/admin/` は Access のログイン後に表示された（利用者が確認）。未ログインでは `/admin/`・`/api/admin/*` が Access のログインへ 302、公開 API（`/api/config`・`/api/health`）は 200、Webhook は Access を通らず Worker に届く（署名なしは 400）。
 - 2026-09-29 修正: 管理者向け通知メールの管理画面リンクの既定値が `<SITE_URL>admin/`（GitHub Pages、存在しない）だったため、Worker 自身の `/admin/` に変更（`worker/src/app.js`、テスト 1 件追加、`npm test` 214 件成功、README 更新）。Worker への反映は利用者の `npm run deploy` 待ち。
+- 2026-09-29 サンドボックスでの通しテスト（手元のビルド → 本番 Worker、Stripe サンドボックス、テストカード）: 注文 1 件を作成（PAYMENT_PENDING）→ Stripe Checkout で決済 → Webhook で PAID（約 1 分後）。D1 に同意日時・発送期限・PaymentIntent・領収書 URL が保存され、R2 に SVG（10 KB）が保存された。通知 2 件（購入者・管理者）は Resend への送信成功として記録され、利用者が 2 通の受信を確認。利用者が管理画面（Access ログイン）で SVG と決済を確認し、状態を PAID → PROCESSING に変更した（`order_events` で確認）。
+- 未確認: SHIPPED（追跡番号）→ COMPLETED の遷移と保持期限後の削除は本番では未実施（ローカルのテストでは確認済み）。管理画面リンクの修正（Worker の `/admin/`）は未デプロイのため、今回の管理者向けメールのリンクは旧既定値（Pages の `/TypeFab/admin/`）だった。Stripe の領収書メールはサンドボックスでは自動送信されない。
+- 利用者の希望: Stripe の領収書に出る問い合わせ先を `tomei-kakushin@chikuwa-tech.com` にする（Stripe ダッシュボードの公開情報で設定。本番切り替え時にも確認する）。
+- テスト注文 `TF-V5LB6V` は本番開始時に D1・R2 から削除する。
