@@ -21,12 +21,14 @@ test("normal order: base + material + processing + quantity, shipping separate",
   assert.ok(Number.isInteger(q.totalPrice));
 });
 
-test("express doubles the fabrication price but not the shipping", () => {
-  const n = quote(base), e = quote({ ...base, deliveryType: "EXPRESS" });
-  assert.equal(e.processingPrice, n.processingPrice * 2);
-  assert.equal(e.shippingPrice, n.shippingPrice);
-  assert.equal(e.totalPrice, n.processingPrice * 2 + n.shippingPrice);
-  assert.equal(e.leadTimeDays, 3);
+test("express was withdrawn: only the normal lead time is offered and EXPRESS quotes are refused", () => {
+  assert.deepEqual(Object.keys(CATALOG.delivery), ["NORMAL"]);
+  const n = quote(base);
+  assert.equal(n.deliveryMultiplier, 1);
+  assert.equal(n.totalPrice, n.processingPrice + n.shippingPrice);
+  const e = quote({ ...base, deliveryType: "EXPRESS" });
+  assert.equal(e.ok, false);
+  assert.ok(e.errors.includes("納期の種類が不正です。"));
 });
 
 test("quantity 1 and 9 price normally; 10 requires an inquiry; 0 and fractions are rejected", () => {
@@ -138,7 +140,8 @@ test("processing time estimate grows with cut length, path count and quantity", 
 
 test("ship-by date adds the configured lead time", () => {
   assert.equal(shipByDate("2026-09-14T00:00:00.000Z", "NORMAL"), "2026-09-21T00:00:00.000Z");
-  assert.equal(shipByDate("2026-09-14T00:00:00.000Z", "EXPRESS"), "2026-09-17T00:00:00.000Z");
+  // A stored order with the withdrawn type still gets a date (the normal lead time).
+  assert.equal(shipByDate("2026-09-14T00:00:00.000Z", "EXPRESS"), "2026-09-21T00:00:00.000Z");
 });
 
 test("public catalogue is JSON-serialisable and statuses/transitions are consistent", () => {

@@ -13,7 +13,7 @@ const jpDate = (iso) => {
 };
 const jpDateTime = (iso) => (iso ? new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", dateStyle: "medium", timeStyle: "short" }).format(new Date(iso)) : "—");
 const materialName = (id) => CATALOG.materials.find((m) => m.id === id)?.name ?? id;
-const deliveryLabel = (t) => (t === "EXPRESS" ? "特急" : "通常");
+const deliveryLabel = (t) => CATALOG.delivery[t]?.label ?? t;
 
 // "（切り抜き後 50.0 × 140.0 mm）" when the finished piece differs from the SVG.
 const pieceNote = (o) =>
@@ -71,16 +71,15 @@ export function customerPaidMail(order, { orderUrl, contactUrl }) {
 // Admin: new paid order. No address or phone number — those are in the
 // Access-protected admin page.
 export function adminPaidMail(order, { adminUrl }) {
-  const express = order.deliveryType === "EXPRESS";
-  const subject = `${express ? "【特急】" : ""}新規注文 ${order.id} ${yen(order.totalPrice)}${express ? " ※特急" : ""}`;
+  const subject = `新規注文 ${order.id} ${yen(order.totalPrice)}`;
   const text = [
-    express ? "＝＝＝ 特急注文です。発送期限に注意してください ＝＝＝" : "新しい注文が入りました。",
+    "新しい注文が入りました。",
     "",
     `注文番号: ${order.id}`,
     `購入者: ${order.customerName ?? ""}`,
     `金額: ${yen(order.totalPrice)}（加工 ${yen(order.processingPrice)} + 送料 ${yen(order.shippingPrice)}）`,
     `決済日時: ${jpDateTime(order.paidAt)}`,
-    `発送期限: ${jpDate(order.shipBy)}${express ? "（特急）" : ""}`,
+    `発送期限: ${jpDate(order.shipBy)}`,
     "",
     ...orderSummaryLines(order),
     `カット長: ${Math.round(order.cutLengthMm ?? 0)} mm / パス ${order.pathCount ?? "—"}`,

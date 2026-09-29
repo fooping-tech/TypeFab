@@ -130,18 +130,17 @@ function render() {
   $("#filters").innerHTML =
     FILTERS.map(([v, label]) => `<button data-filter="${v}" aria-pressed="${filter === v}">${label}</button>`).join("") +
     `<button id="reload" style="margin-left:auto">↻ 更新</button>`;
-  $("#count").textContent = `${orders.length} 件 · 特急は赤い帯、発送期限を過ぎたものは赤字。配送先は「詳細を表示」で開きます`;
+  $("#count").textContent = `${orders.length} 件 · 発送期限を過ぎたものは赤字。配送先は「詳細を表示」で開きます`;
   const now = Date.now();
   $("#orders").innerHTML = orders.length
     ? orders
         .map((o) => {
-          const express = o.deliveryType === "EXPRESS";
           const overdue = o.shipBy && ["PAID", "PROCESSING", "READY"].includes(o.status) && new Date(o.shipBy).getTime() < now;
           const next = (TRANSITIONS[o.status] ?? []).filter((s) => LABELS[s]);
           const d = details.get(o.id);
-          return `<article class="order ${express ? "express" : ""}" data-id="${esc(o.id)}">
+          return `<article class="order" data-id="${esc(o.id)}">
   <div>
-    <div class="id">#${esc(o.id)} <span class="badge status-${esc(o.status)}">${esc(o.status)}</span> <span class="badge ${express ? "express" : ""}">${express ? "特急" : "通常便"}</span>${o.personalDataDeletedAt ? ` <span class="badge">個人情報削除済み</span>` : ""}</div>
+    <div class="id">#${esc(o.id)} <span class="badge status-${esc(o.status)}">${esc(o.status)}</span>${o.personalDataDeletedAt ? ` <span class="badge">個人情報削除済み</span>` : ""}</div>
     <div class="meta"><span>注文日 <b>${day(o.createdAt)}</b></span><span>決済 <b>${day(o.paidAt)}</b></span><span class="deadline ${overdue ? "overdue" : ""}">発送期限 <b>${day(o.shipBy)}</b>${overdue ? " 超過" : ""}</span></div>
     <div class="spec">
       <div><span>購入者</span>${esc(o.customerName ?? "—")}</div>

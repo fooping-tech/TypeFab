@@ -39,7 +39,6 @@ export function catalogFromConfig(config = {}) {
   const c = structuredClone(CATALOG);
   if (config.bulkThreshold > 0) c.bulkThreshold = Number(config.bulkThreshold);
   if (config.normalLeadTimeDays > 0) c.delivery.NORMAL.leadTimeDays = Number(config.normalLeadTimeDays);
-  if (config.expressLeadTimeDays > 0) c.delivery.EXPRESS.leadTimeDays = Number(config.expressLeadTimeDays);
   return c;
 }
 // Customer-facing view of an order (no address, no e-mail, no tokens, no

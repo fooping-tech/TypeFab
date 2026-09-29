@@ -222,7 +222,7 @@ function renderOptions() {
   $("#delivery").innerHTML = Object.entries(c.delivery)
     .map(
       ([id, d]) =>
-        `<label><input type="radio" name="delivery" value="${id}" ${id === state.deliveryType ? "checked" : ""}><span><b>${esc(d.label)}${id === "EXPRESS" ? "（加工料金 ×2）" : ""}</b><small>注文確定後 ${d.leadTimeDays} 日以内を目安に発送${id === "EXPRESS" ? "。送料は変わりません" : ""}</small></span></label>`,
+        `<label><input type="radio" name="delivery" value="${id}" ${id === state.deliveryType ? "checked" : ""}><span><b>${esc(d.label)}</b><small>注文確定後 ${d.leadTimeDays} 日以内を目安に発送</small></span></label>`,
     )
     .join("");
 }
@@ -252,7 +252,6 @@ function updateQuote() {
     rows.push([`材料費（${q.materialName} ${q.thicknessMm ?? "—"} mm）`, yen(q.materialFee)]);
     rows.push([`加工費（カット長 ${Math.round(q.cutLengthMm).toLocaleString("ja-JP")} mm）`, yen(q.processingFee)]);
     if (q.quantity > 1) rows.push([`数量加算（${q.quantity - 1} 個分）`, yen(q.quantityFee)]);
-    if (q.deliveryMultiplier > 1) rows.push(["特急（加工料金 ×2）", `× ${q.deliveryMultiplier}`]);
     if (!q.inquiryRequired) {
       rows.push(["加工料金", yen(q.processingPrice)]);
       rows.push([`送料・梱包料（${q.shippingLabel}）`, yen(q.shippingPrice)]);
@@ -300,7 +299,7 @@ function loadDraft() {
     for (const k of LEGACY_KEYS) localStorage.removeItem(k);
     const d = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null");
     if (!d) return;
-    Object.assign(state, { material: d.material ?? state.material, thicknessMm: d.thicknessMm ?? state.thicknessMm, quantity: d.quantity ?? 1, deliveryType: d.deliveryType ?? "NORMAL" });
+    Object.assign(state, { material: d.material ?? state.material, thicknessMm: d.thicknessMm ?? state.thicknessMm, quantity: d.quantity ?? 1, deliveryType: d.deliveryType in state.catalog.delivery ? d.deliveryType : "NORMAL" });
   } catch {}
 }
 function clearDraft() {
@@ -411,7 +410,7 @@ async function showStatus(orderId, token, result) {
   const render = (order, note) => {
     view.innerHTML = `<h2>注文 ${esc(orderId)}</h2>${note ? `<div class="banner ${order?.status === "PAID" ? "ok" : ""}">${note}</div>` : ""}${
       order
-        ? `<dl class="summary"><dt>ステータス</dt><dd><span class="badge status-${esc(order.status)}">${esc(STATUS_LABEL[order.status] ?? order.status)}</span></dd><dt>SVG</dt><dd>${esc(order.fileName)}（${Number(order.widthMm).toFixed(1)} × ${Number(order.heightMm).toFixed(1)} mm${order.pieceWidthMm ? `、切り抜き後 ${Number(order.pieceWidthMm).toFixed(1)} × ${Number(order.pieceHeightMm).toFixed(1)} mm` : ""}）</dd><dt>内容</dt><dd>${esc(order.material)} ${esc(order.thicknessMm)} mm × ${esc(order.quantity)} · ${order.deliveryType === "EXPRESS" ? "特急" : "通常"}</dd><dt>合計</dt><dd>${yen(order.totalPrice)}</dd>${order.shipBy ? `<dt>発送予定</dt><dd>${new Date(order.shipBy).toLocaleDateString("ja-JP")} まで</dd>` : ""}${order.trackingNumber ? `<dt>追跡番号</dt><dd>${esc(order.trackingNumber)}${order.carrier ? `（${esc(order.carrier)}）` : ""}</dd>` : ""}${
+        ? `<dl class="summary"><dt>ステータス</dt><dd><span class="badge status-${esc(order.status)}">${esc(STATUS_LABEL[order.status] ?? order.status)}</span></dd><dt>SVG</dt><dd>${esc(order.fileName)}（${Number(order.widthMm).toFixed(1)} × ${Number(order.heightMm).toFixed(1)} mm${order.pieceWidthMm ? `、切り抜き後 ${Number(order.pieceWidthMm).toFixed(1)} × ${Number(order.pieceHeightMm).toFixed(1)} mm` : ""}）</dd><dt>内容</dt><dd>${esc(order.material)} ${esc(order.thicknessMm)} mm × ${esc(order.quantity)} · ${esc(state.catalog.delivery[order.deliveryType]?.label ?? order.deliveryType)}</dd><dt>合計</dt><dd>${yen(order.totalPrice)}</dd>${order.shipBy ? `<dt>発送予定</dt><dd>${new Date(order.shipBy).toLocaleDateString("ja-JP")} まで</dd>` : ""}${order.trackingNumber ? `<dt>追跡番号</dt><dd>${esc(order.trackingNumber)}${order.carrier ? `（${esc(order.carrier)}）` : ""}</dd>` : ""}${
             order.receiptUrl ? `<dt>領収書</dt><dd><a href="${esc(order.receiptUrl)}" target="_blank" rel="noopener" id="receipt-link"><button>領収書を表示（Stripe）</button></a><span class="note" style="display:block;margin:4px 0 0">Stripe が発行する領収書です。決済時のメールアドレスにも Stripe から領収書メールが届きます。</span></dd>` : PAID_LIKE.includes(order.status) ? `<dt>領収書</dt><dd><span class="note" style="margin:0">領収書を準備しています。しばらくしてからこのページを再読み込みしてください。</span></dd>` : ""
           }</dl>`
         : ""

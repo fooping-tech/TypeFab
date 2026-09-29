@@ -30,7 +30,6 @@ export function configFromEnv(env) {
     adminAllowedOrigins: list(env.ADMIN_ALLOWED_ORIGINS || ""),
     bulkThreshold: Number(env.BULK_THRESHOLD) || undefined,
     normalLeadTimeDays: Number(env.NORMAL_LEAD_TIME_DAYS) || undefined,
-    expressLeadTimeDays: Number(env.EXPRESS_LEAD_TIME_DAYS) || undefined,
     personalDataRetentionDays: Number(env.PERSONAL_DATA_RETENTION_DAYS) || undefined,
     // Mail (issue #9): Resend. MAIL_MODE=console (issue #11) logs the mail
     // instead of sending it; only allowed in development.

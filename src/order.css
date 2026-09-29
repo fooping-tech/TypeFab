@@ -552,11 +552,6 @@ main.page {
   background: #fff;
   vertical-align: middle;
 }
-.badge.express {
-  color: #fff;
-  background: var(--red);
-  border-color: var(--red);
-}
 .badge.status-PAID {
   color: #1f6b41;
   border-color: #bfe3cc;
@@ -609,9 +604,6 @@ main.page {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 12px 20px;
-}
-.order.express {
-  border-left: 5px solid var(--red);
 }
 .order .id {
   font-family: ui-monospace, Menlo, monospace;

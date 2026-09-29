@@ -752,3 +752,16 @@
 - ブラウザ（Chromium、`vite preview`）: `/legal/` はデスクトップ・幅 390 px とも 10 行の表で横スクロールなし。注文ページの「ご注文前の注意」は 4 項目と特商法ページへのリンク。紹介ページのフッターとプライバシーポリシーにリンク、プライバシーポリシーの窓口は mailto。console error なし。
 - 未確認・注意: 表記の法的な十分性は確認していない（利用者が最終確認する）。事業者名等を「請求時に開示」とする書き方を Stripe の審査が受け入れるかは未確認。Worker 側の変更（同意 4 項目、`CONTACT_URL`、メール本文）は利用者の `npm run deploy` 後に反映される。
 - 公開: GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/36569063428 は success。https://fooping-tech.github.io/TypeFab/legal/ は HTTP 200 で開示文言 3 件を含む。
+
+## 特急の廃止（2026-09-30）
+
+### 要求
+- 特急（加工料金 ×2、3 日以内発送）を廃止し、納期は通常（決済から 7 日以内に発送）だけにする。
+
+### 結果
+- `src/pricing.js`: `DELIVERY` を `NORMAL` のみに。`EXPRESS` の見積もり・注文は「納期の種類が不正です。」で 400（Worker は保存も Stripe 呼び出しもしない）。保存済みの注文の `delivery_type` 列はそのまま残し、`shipByDate` は未知の種類に通常の日数を使う。
+- Worker: `EXPRESS_LEAD_TIME_DAYS`（`wrangler.toml`・`index.js`・`catalogFromConfig`）を削除。管理者向けメールの【特急】表示を削除し、件名は「新規注文 注文番号 ¥金額」のみ。
+- 画面: 注文ページの納期は「通常 注文確定後 7 日以内を目安に発送」の 1 件、料金表の特急行と「特急でも変わりません」を削除。注文状況ページの納期はカタログの表示名。管理画面の特急バッジ・赤帯（`admin.js`・`order.css`）を削除。特定商取引法のページを「決済完了から 7 日以内に発送」に（最終更新 2026-09-30）。README を更新。
+- テスト: `npm test` 215 件成功（特急の見積もり・注文が拒否されること、発送期限 7 日、メールに特急が出ないこと、特商法ページに特急がないこと）。`npm run build` 成功。
+- ブラウザ（Chromium、`vite preview`）: 注文ページに SVG（100 × 40 mm）を読み込み、納期のラジオは 1 件（通常）、ページ内に「特急」の文字なし、合計 ¥920。特商法ページに「特急」なし。console error なし。
+- Worker 側（特急の拒否、メール）は利用者の `npm run deploy` 後に反映。

@@ -97,8 +97,10 @@ test("config and quote endpoints expose the catalogue and server-side pricing wi
   const cfg = await res.json();
   assert.equal(cfg.stripeConfigured, true);
   assert.equal(cfg.catalog.bulkThreshold, 10);
-  const q = await (await call("/api/quote", { method: "POST", body: { material: "kraft-black", thicknessMm: 0.3, quantity: 1, deliveryType: "EXPRESS", widthMm: 50, heightMm: 50, cutLengthMm: 500, pathCount: 2 } })).json();
-  assert.equal(q.quote.deliveryMultiplier, 2);
+  const q = await (await call("/api/quote", { method: "POST", body: { material: "kraft-black", thicknessMm: 0.3, quantity: 1, deliveryType: "NORMAL", widthMm: 50, heightMm: 50, cutLengthMm: 500, pathCount: 2 } })).json();
+  assert.equal(q.quote.deliveryMultiplier, 1);
+  const ex = await call("/api/quote", { method: "POST", body: { material: "kraft-black", thicknessMm: 0.3, quantity: 1, deliveryType: "EXPRESS", widthMm: 50, heightMm: 50, cutLengthMm: 500, pathCount: 2 } });
+  assert.equal(ex.status, 400, "express was withdrawn");
   const preflight = await call("/api/orders", { method: "OPTIONS" });
   assert.equal(preflight.status, 204);
   const other = await createApp({ store: memoryStore(), bucket: memoryBucket(), config: { allowedOrigins: [ORIGIN] } })(new Request("https://api.test/api/health", { headers: { Origin: "https://evil.example" } }));
@@ -234,10 +236,13 @@ test("webhook: signature required, PAID with ship-by date, duplicates ignored, e
   assert.equal(s.store.log.filter((e) => e.toStatus === "PAID").length, 1);
   // unknown order is acknowledged
   assert.match(JSON.stringify(await (await s.webhook(paidEvent("TF-NOPE", "cs_x", 1, "evt_3"))).json()), /unknown order/);
-  // express ship-by is 3 days; expiry cancels only pending orders
-  const ex = await (await s.call("/api/orders", { method: "POST", body: { ...base, deliveryType: "EXPRESS" } })).json();
+  // express was withdrawn: such orders are refused before anything is stored
+  const refused = await s.call("/api/orders", { method: "POST", body: { ...base, deliveryType: "EXPRESS" } });
+  assert.equal(refused.status, 400);
+  // ship-by is 7 days; expiry cancels only pending orders
+  const ex = await (await s.call("/api/orders", { method: "POST", body: base })).json();
   await s.webhook(paidEvent(ex.orderId, "cs_test_2", ex.quote.totalPrice, "evt_4"));
-  assert.equal((await s.store.getOrder(ex.orderId)).shipBy, "2026-09-17T03:00:00.000Z");
+  assert.equal((await s.store.getOrder(ex.orderId)).shipBy, "2026-09-21T03:00:00.000Z");
   await s.webhook({ id: "evt_5", type: "checkout.session.expired", data: { object: { id: "cs_test_2", metadata: { orderId: ex.orderId } } } });
   assert.equal((await s.store.getOrder(ex.orderId)).status, "PAID", "expiry after payment is ignored");
   const pending = await (await s.call("/api/orders", { method: "POST", body: base })).json();
@@ -253,7 +258,7 @@ test("admin: token required, filters, SVG download and status transitions with t
   const s = setup();
   const a = await (await s.call("/api/orders", { method: "POST", body: base })).json();
   await s.webhook(paidEvent(a.orderId, "cs_test_1", a.quote.totalPrice, "evt_a"));
-  const b = await (await s.call("/api/orders", { method: "POST", body: { ...base, deliveryType: "EXPRESS" } })).json();
+  const b = await (await s.call("/api/orders", { method: "POST", body: base })).json();
   assert.equal((await s.call("/api/admin/orders")).status, 401);
   assert.equal((await s.call("/api/admin/orders", { headers: { Authorization: "Bearer wrong" } })).status, 401);
   const all = await (await s.admin("/api/admin/orders")).json();
@@ -366,11 +371,11 @@ test("notifications (#9): one customer mail and one admin mail on the first PAID
   const resend = await (await s.admin(`/api/admin/orders/${created.orderId}/notify`, { method: "POST", body: {} })).json();
   assert.equal(resend.results.customer_paid.status, "already-sent");
   assert.equal(s.mailCalls.length, 2, "manual resend skips sent notifications");
-  // Express orders are flagged in the admin subject.
-  const ex = await (await s.call("/api/orders", { method: "POST", body: { ...base, deliveryType: "EXPRESS" } })).json();
+  // A second order notifies again, with the plain subject (no express flag any more).
+  const ex = await (await s.call("/api/orders", { method: "POST", body: base })).json();
   await s.webhook(paidEvent(ex.orderId, "cs_test_2", ex.quote.totalPrice, "evt_ex"));
-  assert.match(s.mailCalls.at(-1).body.subject, /^【特急】新規注文/);
-  assert.match(s.mailCalls.at(-1).body.text, /特急注文です/);
+  assert.match(s.mailCalls.at(-1).body.subject, /^新規注文 /);
+  assert.ok(!s.mailCalls.at(-1).body.text.includes("特急"));
   // Expired / failed / unpaid sessions never notify.
   const pending = await (await s.call("/api/orders", { method: "POST", body: base })).json();
   await s.webhook({ id: "evt_exp", type: "checkout.session.expired", data: { object: { id: "cs_test_3", metadata: { orderId: pending.orderId } } } });
@@ -422,13 +427,14 @@ test("notifications: provider failure keeps PAID, records the error and can be r
 });
 
 test("mail templates never include the shipping address or phone number", () => {
-  const order = { id: "TF-X", status: "PAID", paidAt: "2026-09-14T03:00:00.000Z", shipBy: "2026-09-21T03:00:00.000Z", customerName: "山田 太郎", customerEmail: "taro@example.com", shippingPostalCode: "1000001", shippingPrefecture: "東京都", shippingAddress1: "千代田区1-1", shippingAddress2: "ビル2F", shippingPhone: "0300000000", material: "mdf", thicknessMm: 3, widthMm: 40, heightMm: 120, quantity: 1, deliveryType: "EXPRESS", processingPrice: 2000, shippingPrice: 300, totalPrice: 2300, originalFileName: "a.svg", cutLengthMm: 500, pathCount: 3 };
+  const order = { id: "TF-X", status: "PAID", paidAt: "2026-09-14T03:00:00.000Z", shipBy: "2026-09-21T03:00:00.000Z", customerName: "山田 太郎", customerEmail: "taro@example.com", shippingPostalCode: "1000001", shippingPrefecture: "東京都", shippingAddress1: "千代田区1-1", shippingAddress2: "ビル2F", shippingPhone: "0300000000", material: "mdf", thicknessMm: 3, widthMm: 40, heightMm: 120, quantity: 1, deliveryType: "NORMAL", processingPrice: 2000, shippingPrice: 300, totalPrice: 2300, originalFileName: "a.svg", cutLengthMm: 500, pathCount: 3 };
   const c = customerPaidMail(order, { orderUrl: "https://site/order/?order=TF-X&token=t", contactUrl: "https://contact" });
   const a = adminPaidMail(order, { adminUrl: "https://admin/" });
   for (const m of [c, a]) for (const pii of ["1000001", "東京都", "千代田区", "ビル2F", "0300000000"]) assert.ok(!m.text.includes(pii) && !m.subject.includes(pii), pii);
   assert.match(c.text, /¥2,300/);
   assert.match(c.text, /▼ 発送について\n.*定形郵便には追跡番号・配達状況の確認・補償はなく/);
-  assert.match(c.text, /特急/);
+  assert.match(c.text, /納期: 通常/);
+  assert.ok(!c.text.includes("特急") && !a.text.includes("特急"));
   assert.match(c.text, /2026-09-21/);
   assert.ok(!a.text.includes("taro@example.com"), "admin mail has no customer e-mail");
   assert.match(a.text, /山田 太郎/);

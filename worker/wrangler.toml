@@ -50,10 +50,9 @@ MAIL_MODE = "resend"
 MAIL_FROM = "TypeFab <orders@mail.chikuwa-tech.com>"
 # Link in the admin notification mail. Defaults to <Worker origin>/admin/ when empty.
 ADMIN_URL = ""
-# Bulk-order threshold and lead times (days). Prices live in src/pricing.js.
+# Bulk-order threshold and lead time (days). Prices live in src/pricing.js.
 BULK_THRESHOLD = "10"
 NORMAL_LEAD_TIME_DAYS = "7"
-EXPRESS_LEAD_TIME_DAYS = "3"
 # Where "大量注文について問い合わせる" and the mails' contact line send people.
 CONTACT_URL = "mailto:tomei-kakushin@chikuwa-tech.com"
 

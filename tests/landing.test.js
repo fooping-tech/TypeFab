@@ -114,6 +114,7 @@ test("特定商取引法 page: required items, disclosure on request, mail conta
   assert.equal(html.match(/請求があった場合、遅滞なく開示いたします。/g).length, 3);
   assert.match(html, /mailto:tomei-kakushin@chikuwa-tech\.com/);
   assert.match(html, /全国一律 300 円/);
-  assert.match(html, /通常納期は 7 日以内、特急は 3 日以内/);
+  assert.match(html, /決済完了から 7 日以内に発送/);
+  assert.ok(!html.includes("特急"), "express was withdrawn");
   assert.match(html, /キャンセル・返品・交換はお受けできません/);
 });

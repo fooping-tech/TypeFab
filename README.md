@@ -311,14 +311,14 @@ TypeFabで作ったSVG、または手元のSVGをそのままレーザー加工�
    - **封筒**: **切り抜き後の紙片**（すべての切断線を囲む閉じた外形があればその外形。なければ SVG 全体を1枚の紙片とみなす。しおりの完成イメージと同じ規則）が **長形3号封筒（120 × 235 mm）に周囲 10 mm の余裕を持って収まる**（215 × 100 mm 以内、縦横どちらでも）ことが条件です。TypeFab の書き出しは加工エリア全体が SVG になるため、しおりの外形だけを封筒と比べます。最小は 5 mm です。
    - 注文ページは用紙への配置図（SVG の枠と紙片）と封筒との比較図を表示し、Worker も同じ規則で再検査します。送料区分は紙片のサイズで決めます。`script`・`foreignObject`・`iframe`・イベント属性・外部URL・外部エンティティを含むSVGは受け付けません。プレビューはこれらを取り除いたSVGを `<img>` で表示します。
 3. TypeFab内部では **1 SVGユーザー単位 = 1 mm** とし、書き出すSVGには `width="240mm" height="160mm" viewBox="0 0 240 160"` のように物理サイズを明示します。width/heightが px や単位なしで実寸が決まらないSVGは「実寸の幅 (mm)」の入力を求め、確定するまで注文できません。
-4. 材料は**黒クラフトペーパー（約 0.3 mm）のみ**です（`CATALOG.materials`。複数材料・厚さや「要相談」材料の仕組みは残しているので、追加はカタログの編集だけで済みます）。数量、通常／特急を選ぶと概算を表示します。料金は `src/pricing.js` の設定値（仮）で `基本料金 + 材料費 + 加工費 + 数量加算`、特急は加工料金×2（送料は2倍にしない）です。「加工費」はカット長に応じた費用、「加工料金」は基本料金＋材料費＋加工費＋数量加算（特急なら×2）の小計で、これに送料・梱包料を足したものが合計です。**最終金額はWorker側で必ず再計算**し、ブラウザから送られた金額は使いません。
+4. 材料は**黒クラフトペーパー（約 0.3 mm）のみ**です（`CATALOG.materials`。複数材料・厚さや「要相談」材料の仕組みは残しているので、追加はカタログの編集だけで済みます）。数量を選ぶと概算を表示します（納期は通常＝決済から 7 日以内の発送のみ。特急は 2026-09-30 に廃止）。料金は `src/pricing.js` の設定値（仮）で `基本料金 + 材料費 + 加工費 + 数量加算` です。「加工費」はカット長に応じた費用、「加工料金」は基本料金＋材料費＋加工費＋数量加算（特急なら×2）の小計で、これに送料・梱包料を足したものが合計です。**最終金額はWorker側で必ず再計算**し、ブラウザから送られた金額は使いません。
 5. 数量が閾値（初期値10個、`BULK_THRESHOLD`）以上は事前問い合わせとし、「大量注文について問い合わせる」（`CONTACT_URL`）へ案内します。
 6. 注文ページの「ご注文前の注意」と確認画面の同意欄に、次の注意事項を表示します（`CATALOG.terms`。Worker は `agreedTerms` にすべての id が無い注文を 400 で拒否し、同意日時を `terms_accepted_at` に保存します）。
    - レーザー加工するため、切断面に黒い焦げ粉や匂いがつく場合があります。匂いは数日で消えます。
    - 接続部位が小さいと千切れる可能性があります。推奨 4 mm 以上のネック幅を確保してください。
    - 商品は折れ・水濡れ防止の梱包を行い、日本郵便の定形郵便で発送します。定形郵便には追跡番号・配達状況の確認・補償はありません。
    - オーダーメイド品のため、決済後のお客様のご都合によるキャンセル・返品・交換はお受けできません。当方の加工ミスによりご注文のデータと異なる商品が届いた場合は、到着から 7 日以内の連絡で再製作または返金で対応します。
-7. **発送について**: 日本郵便の定形郵便で発送し、送料・梱包料は全国一律 300 円です（`CATALOG.shipping`。特急でも変わりません）。追跡番号・配達状況の確認・補償はなく、発送後の配送状況を個別に確認することはできません（`CATALOG.shippingNote`。注文ページ・確認画面・注文受付メールに記載）。管理画面の「発送済みにする」の追跡番号入力は任意のままです。
+7. **発送について**: 日本郵便の定形郵便で発送し、送料・梱包料は全国一律 300 円です（`CATALOG.shipping`）。追跡番号・配達状況の確認・補償はなく、発送後の配送状況を個別に確認することはできません（`CATALOG.shippingNote`。注文ページ・確認画面・注文受付メールに記載）。管理画面の「発送済みにする」の追跡番号入力は任意のままです。
 8. 配送先を入力し、確認画面で注意事項とプライバシーポリシーのチェックをすべて入れると「Stripeで支払う」が押せるようになり、Stripe Checkoutへ移動します。決済後は注文ページに戻り、注文番号とステータスを表示します。決済完了はリダイレクトではなく **Stripe Webhook（`checkout.session.completed`）** で確定し、同じイベントを複数回受け取っても1回だけ処理します。確定後に注文受付メール（下記）を送り、注文状況ページに「領収書を表示（Stripe）」を出します。
 9. 注文フォームに入力した氏名・メールアドレス・住所・電話番号はブラウザに保存しません（材料・厚さ・数量・納期の選択だけをタブ内の `sessionStorage` に保持）。エディタから渡したSVG（`localStorage` の `typefab-order`）は注文作成時に削除します。注文状況ページのURLに含まれる確認用トークンは表示後にアドレスバーから取り除きます。個人情報の取り扱いは [プライバシーポリシー](https://fooping-tech.github.io/TypeFab/privacy/)（`privacy/index.html`）に記載し、注文フォームと確認画面からリンクしています。販売条件（販売価格・送料・支払方法・引き渡し時期・返品とキャンセル・問い合わせ先）は [特定商取引法に基づく表記](https://fooping-tech.github.io/TypeFab/legal/)（`legal/index.html`）に記載し、紹介ページのフッター、注文ページの「ご注文前の注意」と確認画面、プライバシーポリシーからリンクしています。販売事業者・所在地・電話番号は「請求があった場合、遅滞なく開示」とし、問い合わせはメール（`CONTACT_URL = "mailto:…"`）で受け付けます。
 
@@ -339,7 +339,7 @@ Stripe Webhook で注文が初めて `PAID` になった時点で、Worker が2�
 | 宛先 | 内容 | 含めないもの |
 | --- | --- | --- |
 | 購入者（`customer_email`） | 件名「【TypeFab】ご注文を承りました（注文番号）」。注文番号、決済日時、材料・厚さ・サイズ・数量・納期、加工料金・送料・合計、発送予定日、注文状況ページのURL（確認用トークン付き）、領収書の案内、問い合わせ先（`CONTACT_URL`） | 配送先住所、電話番号 |
-| 管理者（`ADMIN_NOTIFICATION_EMAIL`） | 件名「新規注文 注文番号 ¥金額」（特急は「【特急】」を先頭に付け、本文にも強調）。購入者名、金額、決済日時、発送期限、注文内容、カット長、管理画面のURL（`ADMIN_URL`） | 住所、電話番号、メールアドレス（Access で保護された管理画面で確認） |
+| 管理者（`ADMIN_NOTIFICATION_EMAIL`） | 件名「新規注文 注文番号 ¥金額」。購入者名、金額、決済日時、発送期限、注文内容、カット長、管理画面のURL（`ADMIN_URL`） | 住所、電話番号、メールアドレス（Access で保護された管理画面で確認） |
 
 送信サービスは **Resend** を使います。理由: Worker から HTTPS の JSON API だけで送れる、API キーを Cloudflare Secret にできる、独自ドメインで SPF / DKIM / DMARC を設定できる、UTF-8 の日本語件名・本文に対応、少量なら無料枠で運用できる、です。送信結果は D1 の `order_notifications`（注文ID × 種別で1行、`sent_at` / `provider_id` / `error` / `attempts`）に記録し、同じ注文に同じ種別を二重送信しません。Webhook の再送は `stripe_events` で弾き、別イベントで `PAID` 済みの注文も再通知しません。送信に失敗しても注文は `PAID` のまま確定し（Webhook は 200 を返す）、失敗理由を記録して Worker のログに注文番号と理由だけを出します。管理画面の「詳細を表示」に送信状況が出て、「未送信の通知メールを再送」で再送できます（送信済みの種別は再送しません）。`MAIL_API_KEY` / `MAIL_FROM` が未設定の環境では送信をスキップして「mail not configured」と記録します。状態変更（加工開始・発送済みなど）の通知は未実装です。
 
@@ -354,7 +354,7 @@ Stripe Webhook で注文が初めて `PAID` になった時点で、Worker が2�
 
 管理画面は GitHub Pages には置かず、注文 API と同じ Cloudflare Worker が `/admin/` で配信します（`npm run build:admin` → `worker/admin-dist`、`wrangler.toml` の `[assets]`）。これにより管理画面と `/api/admin/*` を同じオリジンで **Cloudflare Access** の対象にでき、ブラウザの Access ログイン Cookie がそのまま管理 API に付きます。
 
-- 注文一覧（未処理＝PAID・PROCESSING・READY、状態別、すべて）には注文日・決済日・通常／特急・発送期限・購入者名・加工内容・金額を表示し、**メールアドレス・住所・電話番号は含めません**（`GET /api/admin/orders` も返しません）。
+- 注文一覧（未処理＝PAID・PROCESSING・READY、状態別、すべて）には注文日・決済日・発送期限・購入者名・加工内容・金額を表示し、**メールアドレス・住所・電話番号は含めません**（`GET /api/admin/orders` も返しません）。
 - 「詳細を表示（配送先・通知・領収書）」で `GET /api/admin/orders/:id` を呼び、配送先（発送が必要な PAID・PROCESSING・READY・SHIPPED のときだけ）、Stripe の ID と領収書リンク、通知メールの送信状況と再送ボタン、状態の履歴を表示します。`COMPLETED` / `CANCELLED` の注文と保持期限で削除済みの注文では、詳細を開いても個人情報を返しません。
 - 「SVGを表示」「SVGをダウンロード」（R2から取得）、「加工開始」「加工完了」「発送済みにする」（追跡番号・配送会社を任意入力）、「完了にする」「キャンセル」で状態を変えます。状態遷移は `NEW → PAYMENT_PENDING → PAID → PROCESSING → READY → SHIPPED → COMPLETED`（各段階から `CANCELLED`）で、許可されない遷移はWorkerが拒否します。Access でログインした管理者のメールアドレスは状態履歴に残ります。返金はStripeダッシュボードで行います。
 - 「保持期限切れの個人情報・SVGの削除」から、削除対象の確認（dry run）と手動実行ができます（下記「個人情報の保持期間」）。
@@ -484,7 +484,7 @@ npx wrangler login
 4. **Stripe の領収書メール**: ダッシュボードの Settings → Emails で「Successful payments」を有効にします（Issue #10）。
 5. **Resend**（Issue #9）: https://resend.com でアカウントを作り、送信ドメインを追加して表示された SPF / DKIM（必要なら DMARC）の DNS レコードを設定し、API キーを発行します。`MAIL_FROM`（例 `TypeFab <orders@example.com>`、検証済みドメインのアドレス）と、任意で `ADMIN_URL`（管理画面のURL。空なら Worker 自身の `/admin/`）を `wrangler.toml` の `[vars]` に書きます。`ADMIN_NOTIFICATION_EMAIL`（新規注文通知の宛先）と任意の `MAIL_REPLY_TO` は、リポジトリが公開されているため `[vars]` には書かず、次の手順で Secret として登録します（`[vars]` に同じ名前があると衝突します）。`MAIL_MODE` は `resend` のままにします。
 6. **Secrets**（`worker/` で実行）: `npx wrangler secret put STRIPE_SECRET_KEY`、`npx wrangler secret put STRIPE_WEBHOOK_SECRET`、`npx wrangler secret put MAIL_API_KEY`、`npx wrangler secret put ADMIN_NOTIFICATION_EMAIL`、任意で `npx wrangler secret put MAIL_REPLY_TO`。`ADMIN_TOKEN` は本番では使われません（設定してあれば `npx wrangler secret delete ADMIN_TOKEN` で消します）。
-7. **環境変数**（`worker/wrangler.toml` の `[vars]`）: `APP_ENV = "production"`、`SITE_URL`（決済後に戻る公開サイト）、`ALLOWED_ORIGINS`（公開APIを呼べるオリジン）、`ADMIN_ALLOWED_ORIGINS`（本番は空）、`PERSONAL_DATA_RETENTION_DAYS`、`BULK_THRESHOLD`、`NORMAL_LEAD_TIME_DAYS`、`EXPRESS_LEAD_TIME_DAYS`、`CONTACT_URL`。料金表は `src/pricing.js` の `CATALOG` を編集します。ローカル用の値（`.dev.vars`）は本番に影響しません。
+7. **環境変数**（`worker/wrangler.toml` の `[vars]`）: `APP_ENV = "production"`、`SITE_URL`（決済後に戻る公開サイト）、`ALLOWED_ORIGINS`（公開APIを呼べるオリジン）、`ADMIN_ALLOWED_ORIGINS`（本番は空）、`PERSONAL_DATA_RETENTION_DAYS`、`BULK_THRESHOLD`、`NORMAL_LEAD_TIME_DAYS`、`CONTACT_URL`。料金表は `src/pricing.js` の `CATALOG` を編集します。ローカル用の値（`.dev.vars`）は本番に影響しません。
 8. **デプロイ**: `cd worker && npm run deploy`（先に `npm run build:admin` が走り、管理画面を `worker/admin-dist` に生成します）。`https://<worker>.workers.dev/api/health` が `{"ok":true,"env":"production","stripeConfigured":true,"mailConfigured":true,"mailMode":"resend","accessConfigured":true,"adminAuth":"access"}` を返せば準備完了です。`accessConfigured` が `false`（`adminAuth` が `none`）の間は管理APIが 503 を返します。Cron Trigger はデプロイ時に登録されます。
 9. **Cloudflare Access**（Issue #8、デプロイ後）:
    1. Cloudflare ダッシュボード → Zero Trust でチーム名を決めます（チームドメイン `https://<team>.cloudflareaccess.com`）。

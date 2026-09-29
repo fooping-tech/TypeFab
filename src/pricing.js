@@ -2,9 +2,10 @@
 // Pure module shared by the order page (estimate) and the Cloudflare Worker
 // (authoritative price). Amounts are integer yen. All values below are
 // provisional placeholders (仮設定) until real fabrication costs are known.
+// One lead time only: express (×2, 3 days) was withdrawn on 2026-09-30.
+// Stored orders keep their delivery_type; quotes for unknown types fail.
 export const DELIVERY = {
   NORMAL: { leadTimeDays: 7, multiplier: 1, label: "通常" },
-  EXPRESS: { leadTimeDays: 3, multiplier: 2, label: "特急" },
 };
 export const CATALOG = {
   currency: "JPY",
@@ -106,7 +107,7 @@ export function shippingRule(catalog, { widthMm, heightMm, quantity }) {
 const yen = (n) => Math.round(n);
 // Validates the order options and returns the price breakdown.
 //   fabricationPrice = baseFee + materialFee + processingFee + quantityFee
-//   processingPrice  = fabricationPrice × delivery multiplier (EXPRESS ×2)
+//   processingPrice  = fabricationPrice × delivery multiplier (1 for NORMAL)
 //   totalPrice       = processingPrice + shippingPrice (never multiplied)
 // `inquiryRequired` is set instead of a price for bulk quantities or
 // inquiry-only materials; the Worker refuses checkout in that case.
@@ -194,7 +195,7 @@ export function quote(input, catalog = CATALOG) {
 // Ship-by date: paid date + lead time (calendar days; holidays ignored in MVP).
 export function shipByDate(paidAt, deliveryType, catalog = CATALOG) {
   const d = new Date(paidAt);
-  d.setUTCDate(d.getUTCDate() + catalog.delivery[deliveryType].leadTimeDays);
+  d.setUTCDate(d.getUTCDate() + (catalog.delivery[deliveryType] ?? catalog.delivery.NORMAL).leadTimeDays);
   return d.toISOString();
 }
 // Public, serialisable view of the catalogue for the order page.
