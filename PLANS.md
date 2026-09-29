@@ -714,3 +714,17 @@
 - 検証: `npm test` 213 件成功、`npm run build` 成功、`wrangler deploy --dry-run` のバインディング一覧に上の2つが Environment Variable として出ないことを確認した。
 - 本番の状態（2026-09-29 時点で確認）: D1 は作成済みで、`orders`・`order_events`・`stripe_events`・`order_notifications` と 0003 までの列が適用済み。R2 はアカウントで未有効（`Please enable R2 through the Cloudflare Dashboard`）、Worker は未デプロイ、GitHub のリポジトリ変数 `ORDER_API_URL` は未設定。
 - 公開: GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/36457700410 は success、https://fooping-tech.github.io/TypeFab/ は HTTP 200。
+
+## 本番環境の構築（Stripe はサンドボックスで先に確認）（2026-09-29）
+
+### 要求
+- 注文機能の本番環境を順に用意する。Stripe はまずサンドボックス（`sk_test_`）で本番 Worker を通しで確認し、その後に本番キーへ切り替える。
+- 確認が終わるまで GitHub のリポジトリ変数 `ORDER_API_URL` は設定しない（公開中の注文ページからテスト決済の注文が入らないようにする）。確認は手元でビルドした注文ページ（`npm run preview`、`ALLOWED_ORIGINS` に含まれる `http://127.0.0.1:4173`）から本番 Worker を呼んで行う。
+- 完了条件: `/api/health` が stripe・mail・access すべて設定済みを返し、テスト注文で決済 → メール → 管理画面 → 発送 → 個人情報削除までを確認する。
+
+### 経過
+- R2: 利用者がダッシュボードで R2 を有効化し、`npx wrangler r2 bucket create typefab-order-svgs` で作成（`wrangler.toml` の binding `SVG_BUCKET` のまま）。
+- Worker: 利用者が workers.dev のサブドメインを登録して `npm run deploy`。`/api/health` は `env: production` を返す。
+- Stripe サンドボックス: 利用者がテストキーと Webhook（4 イベント、`/api/stripe/webhook`）を登録し、`STRIPE_SECRET_KEY`・`STRIPE_WEBHOOK_SECRET` を Secret に設定。`/api/health` が `stripeConfigured: true`、署名なしの Webhook POST は 400 を確認。
+- 利用者が Cloudflare の Budget alert（$1 / $5 / $10、アカウント全体の従量課金のみ）をダッシュボードで作成する予定（wrangler の権限・公開 API では作成できないため）。
+- 未完了: Resend（`MAIL_FROM`・`MAIL_API_KEY`・`ADMIN_NOTIFICATION_EMAIL`）、Cloudflare Access、テスト注文の通し確認、本番キーへの切り替え（本番用 Webhook の別登録、テスト注文の削除）、`ORDER_API_URL`、紹介ページの Coming Soon の削除、料金の決定。
