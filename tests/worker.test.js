@@ -380,6 +380,15 @@ test("notifications (#9): one customer mail and one admin mail on the first PAID
   assert.equal((await s.admin(`/api/admin/orders/${pending.orderId}/notify`, { method: "POST", body: {} })).status, 409, "cannot notify an unpaid order");
 });
 
+test("notifications: without ADMIN_URL the admin mail links to this Worker's /admin/, not the Pages site", async () => {
+  const s = setup({ adminUrl: undefined });
+  const created = await (await s.call("/api/orders", { method: "POST", body: base })).json();
+  await s.webhook(paidEvent(created.orderId, "cs_test_1", created.quote.totalPrice));
+  const admin = s.mailCalls.find((m) => m.body.to[0] === "owner@typefab.test");
+  assert.match(admin.body.text, /https:\/\/api\.test\/admin\//);
+  assert.ok(!admin.body.text.includes("github.io/TypeFab/admin"), "the admin page is not on GitHub Pages");
+});
+
 test("notifications: provider failure keeps PAID, records the error and can be resent from the admin API", async () => {
   const s = setup();
   s.setMailFails(true);

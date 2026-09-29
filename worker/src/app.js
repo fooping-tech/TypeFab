@@ -317,7 +317,9 @@ export function createApp(deps) {
 
   // Sends the PAID notifications that have not been sent yet. Each type is
   // recorded separately; failures are stored and never thrown (#9 §4, §5).
-  async function sendPaidNotifications(order, { retry = false } = {}) {
+  // `origin` is this Worker's origin: the admin page is served here, not on
+  // SITE_URL (GitHub Pages), so it is the default link in the admin mail.
+  async function sendPaidNotifications(order, { retry = false, origin } = {}) {
     const results = {};
     const existing = Object.fromEntries((await store.listNotifications(order.id)).map((n) => [n.type, n]));
     for (const type of NOTIFICATION_TYPES) {
@@ -337,7 +339,7 @@ export function createApp(deps) {
         mail = customerPaidMail(order, { orderUrl: orderUrl(order), contactUrl: config.contactUrl ?? siteUrl });
       } else {
         to = config.adminNotificationEmail;
-        mail = adminPaidMail(order, { adminUrl: config.adminUrl ?? `${siteUrl}admin/` });
+        mail = adminPaidMail(order, { adminUrl: config.adminUrl ?? (origin ? `${origin}/admin/` : `${siteUrl}admin/`) });
       }
       if (!mailConfigured || !to) {
         const reason = !mailConfigured ? "mail not configured" : "no recipient configured";
@@ -408,7 +410,7 @@ export function createApp(deps) {
         paid = await cacheReceipt(paid);
         let notifications = null;
         try {
-          notifications = await sendPaidNotifications(paid);
+          notifications = await sendPaidNotifications(paid, { origin: new URL(request.url).origin });
         } catch (e) {
           log(`notifications failed for ${order.id}: ${e.message}`);
         }
@@ -527,7 +529,7 @@ export function createApp(deps) {
           if (!PAID_STATUSES.includes(order.status)) return error("決済済みの注文にのみ送信できます。", 409);
           if (order.personalDataDeletedAt) return error("保持期間を過ぎたため、送信先がありません。", 410);
           const withReceipt = await cacheReceipt(order);
-          const results = await sendPaidNotifications(withReceipt, { retry: true });
+          const results = await sendPaidNotifications(withReceipt, { retry: true, origin: new URL(request.url).origin });
           return json({ results, notifications: await store.listNotifications(order.id) });
         }
       }
