@@ -56,7 +56,8 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | `src/freehand.js` | フリーハンド（「描く」ツール）: 画面ピクセル基準の再サンプリング・角の検出（窓幅の倍化で弧と区別）・ガウス平滑化・閉合判定（始点付近で終了／通り過ぎ）と `path.js` の `fitStroke` によるベジェ近似。結果は固定パス（`outline`） |
 | `src/path.js` | パスのノード編集モデル：サブパス＋ノード（アンカー・in/outハンドル・smooth）、SVG path dの解析（MLHVCSQTZ）と出力（M/L/C/Z）、グリフ命令・長方形・楕円からの変換、輪郭のベジェ近似（Schneider）、ノード操作。固定パスは `item.path` に保持し、`contours` はその平坦化 |
 | `src/svgimport.js` | SVGファイルの読み込み：要素（path/rect/circle/ellipse/line/polyline/polygon）、transform・viewBox・単位のmm換算、Inkscapeレイヤー。ブラウザはDOMParser、Nodeのテストは同梱の簡易XMLパーサーを使う |
-| `src/dxfimport.js` | DXF（ASCII）の読み込み: LINE・ARC・CIRCLE・ELLIPSE・LWPOLYLINE/POLYLINE（bulge）・SPLINE・INSERT を SVG 読み込みと同じ形状 `{ name, path, layer }` に（`$INSUNITS` で mm 換算、Y 反転）。端点の一致する線の連結（`joinOpenPaths`）と同じレイヤーの穴の入れ子（`nestShapes`）。エディタの「読み込み」は SVG・DXF を加工エリア（ハンコでは印面のマージン内）の中央に置く |
+| `src/dxfimport.js` | DXF（ASCII）の読み込み: LINE・ARC・CIRCLE・ELLIPSE・LWPOLYLINE/POLYLINE（bulge）・SPLINE・INSERT を SVG 読み込みと同じ形状 `{ name, path, layer }` に（`$INSUNITS` で mm 換算、Y 反転）。端点の一致する線の連結（`joinOpenPaths`）と同じレイヤーの穴の入れ子（`nestShapes`）。エディタの「読み込み」は SVG・DXF・画像を加工エリア（ハンコでは印面のマージン内）の中央に置く |
+| `src/imagetrace.js` | 画像（PNG・JPEG・GIF）のトレース: 白黒化（Otsu の自動しきい値・反転・透明は背景）、ピクセル境界のループ抽出（`traceLoops`）、`freehand.js` の平滑化とベジェ近似（小さな点はピクセルどおり）、`nestShapes` で外形＋穴。エディタはダイアログで設定・プレビューし、ブラウザ内だけで処理する |
 | `src/edit.js` | 重ね順（最前面へ／前面へ／背面へ／最背面へ）、ブラウザのドロップ位置への並べ替え（`reorderItems`）、複製・貼り付け用のコピー |
 | `src/cad.js` | 拘束なしの2D CAD：正多角形、ミラー、矩形／円形パターン、オフセット（Clipper）、トリム・延長（交点計算）、フィレット・面取り（パスのノード置換）、計測、参照寸法（`project.annotations`、SVGには出さない） |
 | `src/project.js` | プロジェクトJSONの入力検証、v1→v2移行 |

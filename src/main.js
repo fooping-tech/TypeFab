@@ -62,6 +62,13 @@ import {
 import { svgShapes, shapeItem, parseXML, fromDOM } from "./svgimport.js";
 import { dxfShapes } from "./dxfimport.js";
 import {
+  imageShapes,
+  isImageFile,
+  traceSize,
+  IMAGE_DEFAULTS,
+  IMAGE_LIMITS,
+} from "./imagetrace.js";
+import {
   arrangeItems,
   reorderItems,
   cloneItems,
@@ -956,7 +963,7 @@ function stampChecks(g) {
 }
 
 $("#app").innerHTML = `
-<header><a class="brand" href="./"><span class="brand-mark">t<span>f</span></span><span class="brand-name">TypeFab</span><span class="beta">BETA</span></a><div class="document-title"><span id="project-name"></span><small id="save-status">ローカルプロジェクト</small></div><div class="mobile-actions"><button data-mobile-action="undo" title="元に戻す" aria-label="元に戻す">↶</button><button data-mobile-action="redo" title="やり直す" aria-label="やり直す">↷</button><button id="more-button" title="メニュー" aria-label="メニュー" aria-haspopup="menu">⋯</button><button id="mobile-help" class="help-round" aria-label="使い方">?</button></div><div class="header-actions"><button id="new-project" title="新規プロジェクト">新規</button><button id="open-project" title="TypeFabプロジェクト（.json）を開く、またはSVG・DXFの図形を読み込む（キャンバスへのドロップも可）">開く</button><button id="import-button" title="SVG・DXFの図形を加工エリア（ハンコでは印面）の中央に読み込む（キャンバスへのドロップも可）">読み込み</button><button id="save-project">保存</button><button id="export" class="primary">↗ <span class="long">SVGを書き出す</span><span class="short">SVG</span></button><button id="order" title="現在のデザインのSVGをそのまま加工注文ページへ渡します">⚒ このデザインを加工注文する</button></div></header>
+<header><a class="brand" href="./"><span class="brand-mark">t<span>f</span></span><span class="brand-name">TypeFab</span><span class="beta">BETA</span></a><div class="document-title"><span id="project-name"></span><small id="save-status">ローカルプロジェクト</small></div><div class="mobile-actions"><button data-mobile-action="undo" title="元に戻す" aria-label="元に戻す">↶</button><button data-mobile-action="redo" title="やり直す" aria-label="やり直す">↷</button><button id="more-button" title="メニュー" aria-label="メニュー" aria-haspopup="menu">⋯</button><button id="mobile-help" class="help-round" aria-label="使い方">?</button></div><div class="header-actions"><button id="new-project" title="新規プロジェクト">新規</button><button id="open-project" title="TypeFabプロジェクト（.json）を開く、またはSVG・DXFの図形を読み込む（キャンバスへのドロップも可）">開く</button><button id="import-button" title="SVG・DXFの図形、PNG・JPEG・GIFの画像（輪郭をトレース）を加工エリア（ハンコでは印面）の中央に読み込む（キャンバスへのドロップも可）">読み込み</button><button id="save-project">保存</button><button id="export" class="primary">↗ <span class="long">SVGを書き出す</span><span class="short">SVG</span></button><button id="order" title="現在のデザインのSVGをそのまま加工注文ページへ渡します">⚒ このデザインを加工注文する</button></div></header>
 <div class="workspace-tabs"><span class="workspace-title">DESIGN WORKSPACE</span><span class="tab active">スケッチ</span>${modeSwitch()}<span class="subtle">文字から、ものづくりへ。</span><button id="help-button">? 使い方</button></div>
 <div id="tools" class="toolbars"><div class="panel-heading sheet-only">ツール<span class="eyebrow">TOOLS</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><nav class="toolbar" aria-label="スケッチツール"><div class="tool-group">${Object.entries(
   labels,
@@ -977,12 +984,13 @@ $("#app").innerHTML = `
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><div id="properties"></div><section class="board-settings" id="board-settings"></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p id="check-note"></p></section></aside></main>
 <nav class="mobile-bar" aria-label="モバイル操作"><button data-sheet="objects"><span>☰</span>オブジェクト</button><button data-sheet="tools"><span>✚</span>ツール</button><button data-sheet="inspector"><span>⚙</span>編集<small id="bar-badge"></small></button><button id="mobile-preview"><span>◎</span>プレビュー</button><button id="mobile-fit"><span>⛶</span>全体</button></nav>
 <footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <button id="font-licenses-button" class="text-link">フォントライセンス</button> <span class="subtle">TypeFab / 0.12</span></span></footer>
-<input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,.svg,.dxf,application/json,image/svg+xml"><input hidden type="file" id="import-file" accept=".svg,.dxf,image/svg+xml">
-<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「開く」でSVGの図形も読み込めます。「読み込み」はSVG・DXFの図形を加工エリア（ハンコでは印面）の中央に配置します。「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。上部の「ハンコ」に切り替えると、加工エリアがゴム印の印面になり、文字や図形が押される部分になります。書き出すSVGは左右反転済みで、背景の彫刻（ENGRAVE）と外形のカット（CUT）に分かれます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
+<input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,.svg,.dxf,.png,.jpg,.jpeg,.gif,application/json,image/svg+xml,image/png,image/jpeg,image/gif"><input hidden type="file" id="import-file" accept=".svg,.dxf,.png,.jpg,.jpeg,.gif,image/svg+xml,image/png,image/jpeg,image/gif">
+<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「開く」でSVGの図形も読み込めます。「読み込み」はSVG・DXFの図形や、PNG・JPEG・GIFの画像をトレースした輪郭を加工エリア（ハンコでは印面）の中央に配置します。「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。上部の「ハンコ」に切り替えると、加工エリアがゴム印の印面になり、文字や図形が押される部分になります。書き出すSVGは左右反転済みで、背景の彫刻（ENGRAVE）と外形のカット（CUT）に分かれます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
 <dialog id="font-gallery" class="font-gallery" aria-labelledby="font-gallery-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">FONTS</div><h2 id="font-gallery-title">フォント一覧</h2><div class="gallery-body"></div><button class="text-link" data-open-licenses>フォントライセンスを見る</button></dialog>
 <dialog id="font-licenses" class="font-licenses" aria-labelledby="font-licenses-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">FONT LICENSES</div><h2 id="font-licenses-title">フォントライセンス</h2><div class="licenses-body"></div></dialog>
 <dialog id="font-policy" class="font-policy" aria-labelledby="font-policy-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">USER FONTS</div><h2 id="font-policy-title">ユーザー追加フォントについて</h2><div class="policy-body">${FONT_POLICY_TEXT.split("\n\n").map((t) => `<p>${esc(t)}</p>`).join("")}</div><label class="check policy-check"><input type="checkbox" id="font-policy-agree"> このフォントを使用するために必要な権利・許諾を有していることを確認しました。</label><div class="policy-actions"><button class="text-link" data-open-licenses>詳細を見る（規約全文・標準フォントのライセンス）</button><button id="font-policy-accept" class="primary" disabled>確認してフォントを選ぶ</button></div><p class="note">規約バージョン ${FONT_POLICY_VERSION} · 同意はこのブラウザに保存され、規約が更新されると再確認します。</p></dialog>
 <dialog id="auto-bridge-dialog" class="auto-bridge-dialog" aria-labelledby="auto-bridge-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">AUTO BRIDGE</div><h2 id="auto-bridge-title">自動ブリッジの設定</h2><form method="dialog" id="auto-bridge-form"><div class="fields"><label>幅 <span>mm</span><input id="auto-bridge-width" type="number" step="0.1" min="${AUTO_BRIDGE_LIMITS.min}" max="${AUTO_BRIDGE_LIMITS.max}" required></label><label>高さ <span>mm</span><input id="auto-bridge-height" type="number" step="0.1" min="${AUTO_BRIDGE_LIMITS.min}" max="${AUTO_BRIDGE_LIMITS.max}" required></label></div><p><b>幅</b>はカット線が途切れる長さ（切り残しの太さ）、<b>高さ</b>はカット線と直交する方向の帯の広がりです。文字の穴をつなぐ切り抜きブリッジでは、高さは輪郭の外へのはみ出し量になります（帯の長さは穴と外側の距離から自動で決まります）。穴のない矩形・楕円の保持ブリッジは幅 × 高さの帯になります。${AUTO_BRIDGE_LIMITS.min}〜${AUTO_BRIDGE_LIMITS.max} mm。材料の強度は保証しません。</p><p class="auto-bridge-target" id="auto-bridge-target"></p><div class="policy-actions"><button type="button" class="text-link" id="auto-bridge-reset">既定値（${AUTO_BRIDGE_DEFAULTS.width} × ${AUTO_BRIDGE_DEFAULTS.height} mm）に戻す</button><button type="submit" class="primary" id="auto-bridge-apply">ブリッジを追加</button></div></form></dialog>
+<dialog id="image-dialog" class="image-dialog" aria-labelledby="image-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">IMAGE TRACE</div><h2 id="image-title">画像をトレースして読み込む</h2><div class="image-previews"><figure><figcaption>元の画像</figcaption><img id="image-original" alt="読み込んだ画像"></figure><figure><figcaption>トレース結果</figcaption><div id="image-traced"></div></figure></div><form method="dialog" id="image-form"><label class="full-label">しきい値 <output id="image-threshold-value"></output><input id="image-threshold" type="range" min="${IMAGE_LIMITS.threshold[0]}" max="${IMAGE_LIMITS.threshold[1]}" step="1"></label><div class="image-checks"><label class="check"><input type="checkbox" id="image-auto" checked> 自動</label><label class="check"><input type="checkbox" id="image-invert"> 白黒を反転（明るい部分を形にする）</label></div><label class="full-label">なめらかさ <output id="image-smoothing-value"></output><input id="image-smoothing" type="range" min="${IMAGE_LIMITS.smoothing[0]}" max="${IMAGE_LIMITS.smoothing[1]}" step="0.5"></label><label class="full-label">ノイズ除去（この面積より小さい点を消す）<output id="image-min-area-value"></output><input id="image-min-area" type="range" min="0" max="400" step="2"></label><div class="fields" id="image-size"><label>画像の幅 <span>mm</span><input id="image-width" type="number" min="1" max="2000" step="0.5"></label><label>高さ <span>mm</span><input id="image-height" type="number" disabled></label></div><p class="note" id="image-stamp-note" hidden>ハンコモードでは印面のマージン内に収まる大きさで配置します。</p><p class="image-status" id="image-status" role="status"></p><p class="note">濃い部分が形になります（「白黒を反転」で逆に）。画像はこのブラウザの中だけで処理し、外部に送信しません。白地に黒のロゴ・イラスト・文字の画像に向いています（写真の階調は再現しません）。GIF は最初のコマを使います。</p><div class="policy-actions"><button type="button" class="text-link" data-close>キャンセル</button><button type="submit" class="primary" id="image-apply">読み込む</button></div></form></dialog>
 <div id="context-menu" class="context-menu" role="menu" aria-label="編集メニュー" hidden></div>
 <div id="text-editor" class="text-editor" hidden><textarea id="canvas-text" aria-label="文字を編集" maxlength="500" rows="2"></textarea><small>入力はすぐに反映 · Esc / ${shortcut("Enter")} で確定</small></div>`;
 
@@ -3521,6 +3529,7 @@ $("#font-file").onchange = async (e) => {
 // 「開く」 and dropped files: a .json project replaces the design, an SVG
 // adds its shapes to it as editable paths.
 async function openFile(file) {
+  if (isImageFile(file)) return openImageDialog(file);
   try {
     if (file.size > 20 * 1024 * 1024)
       throw Error("ファイルは20 MB以下にしてください。");
@@ -3672,6 +3681,7 @@ function addShapes(shapes) {
 }
 // 「読み込み」: SVG or DXF shapes added to the middle of the board.
 async function importFile(file) {
+  if (isImageFile(file)) return openImageDialog(file);
   try {
     if (file.size > 20 * 1024 * 1024)
       throw Error("ファイルは20 MB以下にしてください。");
@@ -3679,7 +3689,7 @@ async function importFile(file) {
     if (/\.dxf$/i.test(file.name)) importDXF(text, file.name);
     else if (/\.svg$/i.test(file.name) || file.type === "image/svg+xml")
       importSVG(text, file.name, { place: true });
-    else throw Error("SVG（.svg）または DXF（.dxf）を選んでください。");
+    else throw Error("SVG・DXF・PNG・JPEG・GIF のファイルを選んでください。");
   } catch (error) {
     notify(`読み込めません: ${error.message}`);
   }
@@ -3690,6 +3700,149 @@ $("#import-file").onchange = async (e) => {
   if (file) await importFile(file);
 };
 $("#import-button").onclick = () => $("#import-file").click();
+// ---- Image import: PNG / JPEG / GIF traced into outlines (imagetrace.js).
+// The dialog shows the original and the traced result; tracing runs again
+// (debounced) whenever a setting changes. Nothing leaves the browser.
+let imageJob = null;
+const imageDialog = $("#image-dialog");
+async function openImageDialog(file) {
+  try {
+    if (file.size > 20 * 1024 * 1024) throw Error("画像は20 MB以下にしてください。");
+    let bitmap;
+    try {
+      bitmap = await createImageBitmap(file);
+    } catch {
+      throw Error("画像を読み込めません。PNG・JPEG・GIF のファイルか確認してください。");
+    }
+    const size = traceSize(bitmap.width, bitmap.height),
+      canvas = document.createElement("canvas");
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bitmap, 0, 0, size.width, size.height);
+    bitmap.close?.();
+    if (imageJob?.url) URL.revokeObjectURL(imageJob.url);
+    const board = stampMode() ? null : { w: project.width * 0.8, h: project.height * 0.8 };
+    imageJob = {
+      name: file.name,
+      image: ctx.getImageData(0, 0, size.width, size.height),
+      url: URL.createObjectURL(file),
+      // The default width fills 80 % of the board; a stamp fits its margin.
+      widthMm: board
+        ? Number(Math.min(board.w, (board.h * size.width) / size.height).toFixed(1))
+        : null,
+      options: { ...IMAGE_DEFAULTS },
+      result: null,
+      timer: null,
+    };
+    renderImageDialog();
+    runImageTrace();
+    imageDialog.showModal();
+  } catch (e) {
+    notify(`読み込めません: ${e.message}`);
+  }
+}
+function renderImageDialog() {
+  const j = imageJob,
+    o = j.options;
+  $("#image-original").src = j.url;
+  $("#image-auto").checked = o.threshold === null;
+  $("#image-threshold").disabled = o.threshold === null;
+  $("#image-threshold").value = o.threshold ?? j.result?.threshold ?? 128;
+  $("#image-threshold-value").textContent = o.threshold === null ? `自動（${j.result?.threshold ?? "…"}）` : o.threshold;
+  $("#image-invert").checked = o.invert;
+  $("#image-smoothing").value = o.smoothing;
+  $("#image-smoothing-value").textContent = o.smoothing.toFixed(1);
+  $("#image-min-area").value = o.minArea;
+  $("#image-min-area-value").textContent = `${o.minArea} px²`;
+  $("#image-size").hidden = stampMode();
+  $("#image-stamp-note").hidden = !stampMode();
+  if (!stampMode()) {
+    $("#image-width").value = j.widthMm;
+    $("#image-height").value = Number(((j.widthMm * j.image.height) / j.image.width).toFixed(1));
+  }
+}
+function runImageTrace(delay = 0) {
+  const j = imageJob;
+  clearTimeout(j.timer);
+  $("#image-status").textContent = "トレース中…";
+  j.timer = setTimeout(() => {
+    try {
+      j.result = imageShapes(j.image, j.options);
+      j.error = null;
+    } catch (e) {
+      j.result = null;
+      j.error = e.message;
+    }
+    if (imageJob !== j) return;
+    const { width, height } = j.image,
+      d = j.result ? j.result.shapes.map((s) => toPathData(s.path)).join(" ") : "";
+    $("#image-traced").innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="トレース結果"><rect width="${width}" height="${height}" fill="#fff"/><path d="${d}" fill="#253748" fill-rule="nonzero"/></svg>`;
+    $("#image-status").textContent = j.error
+      ? j.error
+      : j.result.shapes.length
+        ? `図形 ${j.result.shapes.length} 個${j.result.dropped ? ` · 小さな点 ${j.result.dropped} 個を除去` : ""} · しきい値 ${j.result.threshold}`
+        : "形になる部分がありません。しきい値か白黒の反転を調整してください。";
+    $("#image-threshold-value").textContent =
+      j.options.threshold === null ? `自動（${j.result?.threshold ?? "…"}）` : j.options.threshold;
+    if (j.options.threshold === null && j.result) $("#image-threshold").value = j.result.threshold;
+    $("#image-apply").disabled = !j.result?.shapes.length;
+  }, delay);
+}
+function applyImage() {
+  const j = imageJob;
+  if (!j?.result?.shapes.length) return;
+  try {
+    // Image pixels → mm (the width the person set), then onto the board.
+    const k = stampMode() ? 1 : j.widthMm / j.image.width,
+      mm = j.result.shapes.map((s) => ({
+        ...s,
+        path: transformPath(s.path, (p) => ({ x: p.x * k, y: p.y * k })),
+      })),
+      placed = placeShapes(mm),
+      items = addShapes(placed.shapes);
+    imageDialog.close();
+    notify(
+      `${j.name} をトレースして ${items.length} 個の図形を読み込みました（${placed.note}）。ダブルクリックでノードを編集できます。`,
+    );
+  } catch (e) {
+    notify(`読み込めません: ${e.message}`);
+  }
+}
+$("#image-form").addEventListener("input", (e) => {
+  const j = imageJob;
+  if (!j) return;
+  const el = e.target,
+    o = j.options;
+  if (el.id === "image-threshold") o.threshold = el.valueAsNumber;
+  else if (el.id === "image-auto") o.threshold = el.checked ? null : (j.result?.threshold ?? 128);
+  else if (el.id === "image-invert") o.invert = el.checked;
+  else if (el.id === "image-smoothing") o.smoothing = el.valueAsNumber;
+  else if (el.id === "image-min-area") o.minArea = el.valueAsNumber;
+  else if (el.id === "image-width") {
+    if (el.checkValidity() && el.valueAsNumber > 0) {
+      j.widthMm = el.valueAsNumber;
+      $("#image-height").value = Number(((j.widthMm * j.image.height) / j.image.width).toFixed(1));
+    }
+    return;
+  } else return;
+  renderImageDialog();
+  runImageTrace(150);
+});
+$("#image-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  applyImage();
+});
+imageDialog.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => imageDialog.close()));
+imageDialog.addEventListener("close", () => {
+  if (imageJob) {
+    clearTimeout(imageJob.timer);
+    URL.revokeObjectURL(imageJob.url);
+    imageJob = null;
+  }
+});
+
 // Files dropped on the canvas open like 「開く」.
 $("#canvas-scroll").addEventListener("dragover", (e) => {
   if (loading || ![...e.dataTransfer.types].includes("Files")) return;
@@ -4426,7 +4579,7 @@ function overflowEntries() {
   return [
     ["new", "新規プロジェクト", "", true],
     ["open", "開く（JSON / SVG / DXF）", "", true],
-    ["import", "読み込み（SVG / DXF を中央に配置）", "", true],
+    ["import", "読み込み（SVG / DXF / 画像を中央に配置）", "", true],
     ["save", "保存（JSON）", "", true],
     ["export", "SVGを書き出す", "", true],
     ["order", "このデザインを加工注文する", "", !stampMode()],
@@ -4725,6 +4878,7 @@ window.addEventListener("keydown", (e) => {
     /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) ||
     $("#help").open ||
     $("#auto-bridge-dialog").open ||
+    $("#image-dialog").open ||
     !menu.hidden
   )
     return;
