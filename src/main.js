@@ -16,6 +16,23 @@ import {
   crossesContour,
 } from "./geometry.js";
 import { validateProject } from "./project.js";
+import {
+  FABRICATION_MODES,
+  fabricationMode,
+  STAMP_SHAPES,
+  ENGRAVING_MODES,
+  BOLD_PRESETS,
+  STAMP_LIMITS,
+  STAMP_SIZE_DEFAULT,
+  normalizeStamp,
+  stampOptions,
+  stampGeometry,
+  stampSVG,
+  stampPreviewSVG,
+  mirrorContours,
+  fitTransform,
+} from "./stamp.js";
+import { isClosed } from "./polygon.js";
 import { ensureLayers, visibleItems, isEditable } from "./layers.js";
 import {
   booleanContours,
@@ -674,6 +691,8 @@ function withinBoard() {
 // localStorage (same origin), so nothing needs to be saved and re-uploaded.
 function orderDesign() {
   try {
+    if (stampMode())
+      throw Error("ハンコの加工注文はまだ受け付けていません。SVGを書き出してご利用ください。");
     const svg = cutSVG();
     localStorage.setItem(
       "typefab-order",
@@ -700,6 +719,18 @@ function cutSVG() {
 }
 function exportFile() {
   try {
+    if (stampMode()) {
+      const o = stampOptions(project),
+        name = saveFile(
+          "typefab-stamp.svg",
+          stampSVG(visibleItems(project), o),
+          "image/svg+xml",
+        );
+      notify(
+        `${name} をダウンロードしました · ENGRAVE（彫刻）と CUT（外形）${o.guide ? "・GUIDE（参考線）" : ""} · ${o.mirror ? "左右反転済み" : "反転なし"}`,
+      );
+      return;
+    }
     if (!withinBoard())
       throw Error(
         "加工エリアの外にカット線があります。位置または加工エリアを調整してください。",
@@ -718,9 +749,207 @@ function exportFile() {
   }
 }
 
+// ---- Stamp Mode (issue #12). The project's fabrication mode decides what
+// the board is: a cut area, or the face of a rubber stamp whose ink is every
+// visible closed outline. The canvas always shows the stamp the way it
+// prints; only the export (and the 加工プレビュー) is mirrored.
+const stampMode = () => fabricationMode(project) === "stamp";
+// Geometry of the current stamp, or { error } when it cannot be computed.
+function currentStamp() {
+  try {
+    return stampGeometry(visibleItems(project), stampOptions(project));
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+function modeSwitch() {
+  return `<div class="mode-switch" role="group" aria-label="加工の種類">${Object.entries(
+    FABRICATION_MODES,
+  )
+    .map(
+      ([id, m]) =>
+        `<button data-fabrication="${id}" title="${esc(m.hint)}" aria-pressed="${fabricationMode(project) === id}" class="${fabricationMode(project) === id ? "active" : ""}">${esc(m.label)}</button>`,
+    )
+    .join("")}</div>`;
+}
+function setFabrication(mode) {
+  if (loading || fabricationMode(project) === mode) return;
+  if (sc) cancelSmartConnect();
+  if (cad) cadCancel();
+  checkpoint();
+  preview = false;
+  if (mode === "stamp") {
+    const first = !project.stamp,
+      max = STAMP_LIMITS.size[1];
+    project.stamp = normalizeStamp(project.stamp ?? {});
+    project.fabrication = "stamp";
+    // A first stamp starts at a stamp-like size with the design fitted in;
+    // later switches keep the face (only an oversize board is reset).
+    if (first || project.width > max || project.height > max) {
+      project.width = STAMP_SIZE_DEFAULT.width;
+      project.height = STAMP_SIZE_DEFAULT.height;
+      fitItems(stampInkItems());
+    }
+    notify(
+      "ハンコモードにしました。加工エリアが印面になり、文字や図形が押される部分になります。元に戻す操作で戻せます。",
+    );
+  } else {
+    delete project.fabrication;
+    notify("切り抜きモードに戻しました。ハンコの設定は保持しています。");
+  }
+  commit();
+}
+function updateStamp(key, value) {
+  try {
+    const next = normalizeStamp({ ...project.stamp, [key]: value });
+    checkpoint();
+    project.stamp = next;
+    commit();
+  } catch {
+    notify("有効な値を入力してください。");
+    renderBoardSettings();
+  }
+}
+// Visible, editable items with a closed outline: what a fit moves.
+const stampInkItems = () =>
+  visibleItems(project).filter(
+    (i) =>
+      i.type !== "bridge" &&
+      isEditable(project, i) &&
+      worldContours(i).some(isClosed),
+  );
+// Scales and centres the items into the margin area. Text, rectangles and
+// ellipses scale; when anything else is included the items are only
+// centred. Changes project.items in place (the caller checkpoints) and
+// returns whether the items were scaled.
+function fitItems(items) {
+  if (!items.length) return null;
+  const box = bounds(items.flatMap(worldContours)),
+    scalable = items.every(
+      (i) => i.type === "text" || (["rect", "circle"].includes(i.type) && !i.warp),
+    );
+  let { k, from, to } = fitTransform(box, stampOptions(project));
+  if (!scalable || !Number.isFinite(k)) k = 1;
+  const placed = items.map((i) => {
+    const next = { ...i, x: to.x + (i.x - from.x) * k, y: to.y + (i.y - from.y) * k };
+    if (k !== 1 && i.type === "text") {
+      next.size = Math.min(300, Math.max(1, i.size * k));
+      next.spacing = Math.max(-100, Math.min(100, i.spacing * k));
+      next.contours = textContours(next);
+    } else if (k !== 1) {
+      next.w = i.w * k;
+      next.h = i.h * k;
+      if (i.radius) next.radius = i.radius * k;
+      next.contours = shapeContours(i.type, next.w, next.h, next.radius ?? 0);
+    }
+    return next;
+  });
+  // Text does not scale exactly with its size; centre on the real outline.
+  const b = bounds(placed.flatMap(worldContours)),
+    dx = to.x - (b.x + b.w / 2),
+    dy = to.y - (b.y + b.h / 2);
+  for (const [n, item] of items.entries()) {
+    placed[n].x += dx;
+    placed[n].y += dy;
+    project.items[project.items.indexOf(item)] = placed[n];
+  }
+  return k !== 1;
+}
+function fitStampContent() {
+  try {
+    const items = stampInkItems();
+    if (!items.length) throw Error("印面に収める文字や図形がありません。");
+    checkpoint();
+    const scaled = fitItems(items);
+    commit();
+    notify(
+      scaled
+        ? "文字をマージン内に収めて中央に配置しました。"
+        : "中央に配置しました（パスやワープした図形を含むため大きさは変えていません）。",
+    );
+  } catch (e) {
+    notify(e.message);
+  }
+}
+function addStampText() {
+  try {
+    const layer = project.layers.find((l) => l.id === activeLayer);
+    if (!layer?.visible || layer.locked)
+      throw Error("表示中のロックされていないレイヤーを選んでください。");
+    const item = {
+      id: uid(),
+      type: "text",
+      name: "はんこ",
+      text: "はんこ",
+      x: 0,
+      y: 0,
+      rotation: 0,
+      font: DEFAULT_FONT,
+      size: 10,
+      spacing: 0.5,
+      vertical: false,
+      layerId: activeLayer,
+      ratioLocked: false,
+    };
+    item.contours = textContours(item);
+    checkpoint();
+    project.items.push(item);
+    fitItems([item]);
+    selectItem(item.id);
+    tool = "select";
+    commit();
+    notify("文字を印面に追加しました。プロパティで文字・書体・サイズ・字間を編集できます。");
+  } catch (e) {
+    notify(e.message);
+  }
+}
+// The board settings: the cut area's size, or the stamp's face and options.
+function renderBoardSettings() {
+  const el = $("#board-settings");
+  if (!el) return;
+  if (!stampMode()) {
+    el.innerHTML = `${modeSwitch()}<h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000" value="${project.width}"></label><label>高さ<input id="board-height" type="number" min="10" max="2000" value="${project.height}"></label></div>`;
+    return;
+  }
+  const o = stampOptions(project),
+    [lo, hi] = STAMP_LIMITS.size,
+    num = (key, label, step, [min, max]) =>
+      `<label>${label}<input data-stamp="${key}" type="number" step="${step}" min="${min}" max="${max}" value="${o[key]}"></label>`,
+    check = (key, label) =>
+      `<label class="check stamp-check"><input type="checkbox" data-stamp="${key}" ${o[key] ? "checked" : ""}> ${label}</label>`;
+  el.innerHTML = `${modeSwitch()}<h4>印面 <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" step="0.5" min="${lo}" max="${hi}" value="${project.width}"></label><label>高さ<input id="board-height" type="number" step="0.5" min="${lo}" max="${hi}" value="${project.height}"></label></div><label class="full-label">外形<select data-stamp="shape">${Object.entries(STAMP_SHAPES).map(([k, v]) => `<option value="${k}" ${o.shape === k ? "selected" : ""}>${v}</option>`).join("")}</select></label><div class="fields">${num("margin", "マージン", 0.5, STAMP_LIMITS.margin)}${o.shape === "rounded-rectangle" ? num("cornerRadius", "角の半径", 0.5, STAMP_LIMITS.cornerRadius) : ""}</div>${o.shape === "circle" && o.width !== o.height ? '<p class="note">幅と高さが違うと楕円になります。</p>' : ""}<h4>文字太さ補正 <span>mm</span></h4><div class="bold-presets">${BOLD_PRESETS.map((v) => `<button data-bold="${v}" class="${o.boldOffset === v ? "active" : ""}" aria-pressed="${o.boldOffset === v}">${v ? `+${v}` : "0"}</button>`).join("")}</div><div class="fields">${num("boldOffset", "カスタム", 0.05, STAMP_LIMITS.boldOffset)}</div><p class="note">押される部分の輪郭を外側に太らせます（マイナスで細く）。細い線の欠けを防ぐための補正で、加工結果を保証するものではありません。</p><label class="full-label">彫り方<select data-stamp="engravingMode">${Object.entries(ENGRAVING_MODES).map(([k, v]) => `<option value="${k}" ${o.engravingMode === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>${check("mirror", "加工データを左右反転（ミラー）")}<p class="note">ハンコは押すと左右が逆になるため、書き出すSVGは反転済みです。キャンバスと押印プレビューは押したときの向きです。</p>${check("guide", "ガイド（マージン・中心線）もSVGに書き出す")}<button id="stamp-fit" class="wide-button">⤢ 文字をマージン内に収めて中央へ</button><div id="stamp-preview" class="stamp-preview"></div>`;
+  renderStampPreview();
+}
+function renderStampPreview(g = currentStamp()) {
+  const el = $("#stamp-preview");
+  if (!el) return;
+  if (g.error) {
+    el.innerHTML = `<p class="cad-error">${esc(g.error)}</p>`;
+    return;
+  }
+  el.innerHTML = `<figure><figcaption>加工データ <small>${g.options.mirror ? "ミラー反転" : "反転なし"}</small></figcaption>${stampPreviewSVG(g, "laser")}</figure><figure><figcaption>押印プレビュー <small>正方向</small></figcaption>${stampPreviewSVG(g, "print")}</figure>`;
+}
+// The 加工チェック for a stamp.
+function stampChecks(g) {
+  if (g.error) return `<div class="check-summary warning">! ${esc(g.error)}</div>`;
+  const o = g.options,
+    row = (label, value, kind = "") =>
+      `<div class="check-row ${kind}"><span>${label}</span><b>${value}</b></div>`;
+  const summary = g.empty
+    ? ["", "文字や図形を印面に配置してください"]
+    : g.vanished
+      ? ["warning", "! 太さ補正で文字が消えました。補正を大きくしてください"]
+      : g.outsideFace
+        ? ["warning", "! 印面の外にはみ出した部分は彫刻されません"]
+        : g.outsideMargin
+          ? ["warning", "! マージンの外に文字があります（「文字をマージン内に収める」で調整）"]
+          : ["", "✓ 書き出せます · 押印プレビューで向きを確認"];
+  return `${row("印面", `${o.width} × ${o.height} mm · ${STAMP_SHAPES[o.shape]}`)}${row("押される面積", `${g.inkArea.toFixed(1)} mm²`)}${row("太さ補正", `${o.boldOffset > 0 ? "+" : ""}${o.boldOffset} mm`)}${row("加工データの反転", o.mirror ? "あり" : "なし", o.mirror ? "success" : "warning")}${g.open ? row("開いた線（印面に含めない）", g.open, "warning") : ""}${g.bridges ? row("ブリッジ（ハンコでは無視）", g.bridges, "warning") : ""}<div class="check-summary ${summary[0]}">${summary[1]}</div>`;
+}
+
 $("#app").innerHTML = `
 <header><a class="brand" href="./"><span class="brand-mark">t<span>f</span></span><span class="brand-name">TypeFab</span><span class="beta">BETA</span></a><div class="document-title"><span id="project-name"></span><small id="save-status">ローカルプロジェクト</small></div><div class="mobile-actions"><button data-mobile-action="undo" title="元に戻す" aria-label="元に戻す">↶</button><button data-mobile-action="redo" title="やり直す" aria-label="やり直す">↷</button><button id="more-button" title="メニュー" aria-label="メニュー" aria-haspopup="menu">⋯</button><button id="mobile-help" class="help-round" aria-label="使い方">?</button></div><div class="header-actions"><button id="new-project" title="新規プロジェクト">新規</button><button id="open-project" title="TypeFabプロジェクト（.json）を開く、またはSVGの図形を読み込む（キャンバスへのドロップも可）">開く</button><button id="save-project">保存</button><button id="export" class="primary">↗ <span class="long">SVGを書き出す</span><span class="short">SVG</span></button><button id="order" title="現在のデザインのSVGをそのまま加工注文ページへ渡します">⚒ このデザインを加工注文する</button></div></header>
-<div class="workspace-tabs"><span class="workspace-title">DESIGN WORKSPACE</span><span class="tab active">スケッチ</span><span class="subtle">文字から、ものづくりへ。</span><button id="help-button">? 使い方</button></div>
+<div class="workspace-tabs"><span class="workspace-title">DESIGN WORKSPACE</span><span class="tab active">スケッチ</span>${modeSwitch()}<span class="subtle">文字から、ものづくりへ。</span><button id="help-button">? 使い方</button></div>
 <div id="tools" class="toolbars"><div class="panel-heading sheet-only">ツール<span class="eyebrow">TOOLS</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><nav class="toolbar" aria-label="スケッチツール"><div class="tool-group">${Object.entries(
   labels,
 )
@@ -737,11 +966,11 @@ $("#app").innerHTML = `
 <nav class="toolbar cad-toolbar" aria-label="2D CADツール">${CAD_GROUPS.map((g) => `<div class="tool-group"><span class="tool-group-label">${g}</span>${Object.entries(CAD_TOOLS).filter(([, t]) => t.group === g).map(([id, t]) => `<button data-tool="${id}" class="tool cad-tool" title="${t.hint}"><span class="tool-icon">${t.icon}</span>${t.label}</button>`).join("")}</div>`).join("")}<span class="subtle cad-note">拘束なしの2D編集 · 結果は通常のパス · 寸法は参照のみ</span></nav></div>
 <main><aside class="layers-panel"><div class="panel-heading">ブラウザ<span class="eyebrow">OBJECTS</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><div class="document-row"><button id="add-layer">＋ レイヤー</button><span class="note">Shiftで範囲 · ${isMac ? "⌘" : "Ctrl"}で追加 · 右クリックでメニュー</span></div><div id="layers"></div><div class="layer-actions"><button id="duplicate">＋ 複製</button><button id="delete">⌫ 削除</button></div><div class="left-bottom"><div class="eyebrow">YOUR NEXT IDEA</div><h3>文字を、かたちに。</h3><p>文字と図形をならべて、<br>世界にひとつのデザインを。</p><button id="add-text" class="text-link">＋ 文字を追加</button></div></aside>
 <section class="canvas-panel" aria-label="デザインキャンバス"><div class="canvas-top"><span><i class="green-dot"></i> <span id="canvas-mode">スケッチ編集中</span></span><span id="board-label"></span></div><div id="canvas-scroll"><div id="canvas-stage"><div id="board-wrap"><svg id="canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="加工エリア。ツールを選んで配置、またはオブジェクトをドラッグ"><defs><pattern id="small-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M 5 0 L 0 0 0 5" fill="none" stroke="#dce2e8" stroke-width="0.12"/></pattern><pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse"><rect width="25" height="25" fill="url(#small-grid)"/><path d="M 25 0 L 0 0 0 25" fill="none" stroke="#c4cdd7" stroke-width="0.2"/></pattern></defs><rect id="paper" width="100%" height="100%" fill="url(#grid)"/><g id="objects"></g><g id="selection"></g><rect id="marquee" hidden pointer-events="none" fill="#3889c4" fill-opacity=".12" stroke="#3889c4" stroke-width=".25" stroke-dasharray="1.5 1"/><path id="ink" fill="none" stroke="#c8793f" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/></svg><span class="origin-label">0, 0</span></div></div></div><div class="canvas-bottom"><label class="check"><input type="checkbox" id="snap" checked> 1 mm スナップ</label><label class="check" title="ほかのオブジェクトや加工エリアの中心・端にそろえる"><input type="checkbox" id="align-snap" checked> 整列スナップ</label><button class="canvas-btn draw-btn" data-tool="freehand" title="フリーハンドで描く">✎ 描く</button><button class="canvas-btn select-btn" data-tool="select" title="選択">↖ 選択</button><div class="zoom-controls"><button id="zoom-out" aria-label="縮小">−</button><button id="zoom-reset">100%</button><button id="zoom-in" aria-label="拡大">＋</button></div><span class="axis"><b>Y</b> ↓ &nbsp; → <em>X</em></span></div><div id="hint" class="canvas-hint"></div></section>
-<aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><div id="properties"></div><section class="board-settings"><h4>加工エリア <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" min="10" max="2000"></label><label>高さ<input id="board-height" type="number" min="10" max="2000"></label></div></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p>ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。</p></section></aside></main>
+<aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><div id="properties"></div><section class="board-settings" id="board-settings"></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p id="check-note"></p></section></aside></main>
 <nav class="mobile-bar" aria-label="モバイル操作"><button data-sheet="objects"><span>☰</span>オブジェクト</button><button data-sheet="tools"><span>✚</span>ツール</button><button data-sheet="inspector"><span>⚙</span>編集<small id="bar-badge"></small></button><button id="mobile-preview"><span>◎</span>プレビュー</button><button id="mobile-fit"><span>⛶</span>全体</button></nav>
 <footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <button id="font-licenses-button" class="text-link">フォントライセンス</button> <span class="subtle">TypeFab / 0.12</span></span></footer>
 <input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,.svg,application/json,image/svg+xml">
-<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「開く」でSVGの図形も読み込めます。「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
+<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「開く」でSVGの図形も読み込めます。「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。上部の「ハンコ」に切り替えると、加工エリアがゴム印の印面になり、文字や図形が押される部分になります。書き出すSVGは左右反転済みで、背景の彫刻（ENGRAVE）と外形のカット（CUT）に分かれます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
 <dialog id="font-gallery" class="font-gallery" aria-labelledby="font-gallery-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">FONTS</div><h2 id="font-gallery-title">フォント一覧</h2><div class="gallery-body"></div><button class="text-link" data-open-licenses>フォントライセンスを見る</button></dialog>
 <dialog id="font-licenses" class="font-licenses" aria-labelledby="font-licenses-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">FONT LICENSES</div><h2 id="font-licenses-title">フォントライセンス</h2><div class="licenses-body"></div></dialog>
 <dialog id="font-policy" class="font-policy" aria-labelledby="font-policy-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">USER FONTS</div><h2 id="font-policy-title">ユーザー追加フォントについて</h2><div class="policy-body">${FONT_POLICY_TEXT.split("\n\n").map((t) => `<p>${esc(t)}</p>`).join("")}</div><label class="check policy-check"><input type="checkbox" id="font-policy-agree"> このフォントを使用するために必要な権利・許諾を有していることを確認しました。</label><div class="policy-actions"><button class="text-link" data-open-licenses>詳細を見る（規約全文・標準フォントのライセンス）</button><button id="font-policy-accept" class="primary" disabled>確認してフォントを選ぶ</button></div><p class="note">規約バージョン ${FONT_POLICY_VERSION} · 同意はこのブラウザに保存され、規約が更新されると再確認します。</p></dialog>
@@ -970,33 +1199,28 @@ function renderProperties() {
   const i = selectedItem();
   if (sc) {
     $("#properties").innerHTML = scPanel();
-    $("#board-width").value = project.width;
-    $("#board-height").value = project.height;
+    renderBoardSettings();
     return;
   }
   if (cad) {
     $("#properties").innerHTML = cadPanel();
-    $("#board-width").value = project.width;
-    $("#board-height").value = project.height;
+    renderBoardSettings();
     return;
   }
   const dim = project.annotations?.find((d) => d.id === selectedAnnotation);
   if (dim) {
     $("#properties").innerHTML = `<section class="cad-panel"><div class="object-type">REFERENCE / 寸法</div><h3>${esc(DIMENSION_LABELS[dim.dimensionType])} ${esc(dimensionLabel(dim))}</h3><dl class="measure">${dim.points.map((q, k) => `<dt>点 ${k + 1}</dt><dd>${q.x.toFixed(2)}, ${q.y.toFixed(2)} mm</dd>`).join("")}</dl><p class="note">参照寸法です。値は置いたときの形状から計算したもので、形状を変えても追従せず、加工用SVGにも出力しません。</p><div class="cad-actions"><button id="annotation-delete" class="danger">この寸法を削除</button><button id="annotations-clear">寸法をすべて消す</button></div><p class="note">Delete キーでも削除できます。</p></section>`;
-    $("#board-width").value = project.width;
-    $("#board-height").value = project.height;
+    renderBoardSettings();
     return;
   }
   if (pathItem()) {
     $("#properties").innerHTML = pathPanel(i);
-    $("#board-width").value = project.width;
-    $("#board-height").value = project.height;
+    renderBoardSettings();
     return;
   }
   if (warpItem()) {
     $("#properties").innerHTML = warpPanel(i);
-    $("#board-width").value = project.width;
-    $("#board-height").value = project.height;
+    renderBoardSettings();
     return;
   }
   const freehandSection =
@@ -1008,7 +1232,9 @@ function renderProperties() {
   ${i.type === "text" ? `<section><h4>テキスト</h4><textarea id="text-content" maxlength="500" aria-label="文字内容">${esc(i.text)}</textarea>${fontField(i)}<div class="fields">${field("size", "サイズ mm", i.size, 0.5, 1, 300)}${field("spacing", "字間 mm", i.spacing, 0.1, -100, 100)}${field("stretch", "長体・平体 %", (i.stretch ?? 1) * 100, 1, 5, 2000)}</div><label class="check vertical-check"><input type="checkbox" id="vertical" ${i.vertical ? "checked" : ""}> 縦書き（右から左）</label><p class="note">四隅のハンドルで拡縮すると、サイズと長体・平体が変わります。キャンバスでダブルクリックすると文字を編集できます。</p></section><section><h4>ワープ・パス</h4><button id="enter-warp" class="wide-button">⌒ ワープ（エンベロープ変形）</button><p class="note">${i.warp ? `現在: ${esc(warpLabel(i.warp))} · ` : ""}文字のアウトラインそのものを曲線のエンベロープで変形します。</p><button id="outline-edit" class="wide-button">✎ アウトライン化してパス編集</button><p class="note">文字の輪郭をベジェ曲線のパスに変換し、ノードを直接編集します。</p></section>` : ""}
   ${["bridge", "rect", "circle", "line"].includes(i.type) ? `<section><h4>${i.type === "bridge" ? "切り残し領域" : "寸法"} <span>mm</span></h4><div class="fields">${field("w", "幅", i.w, 0.1, i.type === "line" ? 0 : 0.1)}${field("h", "高さ", i.h, 0.1, i.type === "line" ? 0 : 0.1)}${i.type === "rect" ? field("radius", "フィレット R", i.radius ?? 0, 0.1, 0, 1000) : ""}</div>${i.type === "rect" ? '<p class="note">4つの角を半径Rで丸めます。最大は短辺の半分です。</p>' : ""}${i.type === "bridge" ? '<p class="note">オレンジ色の領域に重なったカット線を除去します。</p>' : ""}</section>` : ""}`
     : freehandSection ||
-      '<section class="no-selection"><span>↖</span><h3>オブジェクトを選択</h3><p>キャンバスや左の一覧から選択して、文字・位置・寸法を編集できます。</p></section>';
+      (stampMode()
+        ? `<section class="no-selection stamp-start"><span>印</span><h3>ハンコの印面</h3><p>配置した文字や図形が押される部分になります。文字を選択すると、内容・書体・サイズ・字間を編集できます。</p><button id="stamp-add-text" class="wide-button">＋ 印面に文字を追加</button>${project.items.some((t) => t.type === "text" && isEditable(project, t)) ? '<button id="stamp-select-text" class="wide-button">文字を選択して編集</button>' : ""}</section>`
+        : '<section class="no-selection"><span>↖</span><h3>オブジェクトを選択</h3><p>キャンバスや左の一覧から選択して、文字・位置・寸法を編集できます。</p></section>');
   if (i && freehandSection)
     $("#properties").innerHTML = freehandSection + $("#properties").innerHTML;
   if (i && i.type !== "text" && canWarp(i))
@@ -1028,10 +1254,9 @@ function renderProperties() {
       $("#properties").innerHTML +=
         `<section><label class="check"><input id="ratio-lock" type="checkbox" ${i.ratioLocked ? "checked" : ""}> 縦横比を固定</label><p class="note">四隅のハンドルをドラッグして拡縮。Shiftでも比率を固定できます。</p></section>`;
     $("#properties").innerHTML +=
-      `<section><label class="full-label">所属レイヤー<select id="item-layer">${project.layers.map((l) => `<option value="${l.id}" ${i.layerId === l.id ? "selected" : ""} ${l.locked || !l.visible ? "disabled" : ""}>${esc(l.name)}</option>`).join("")}</select></label><h4>重なり順 <span>同じレイヤー内</span></h4><div class="arrange-actions"><button data-arrange="front">最前面へ</button><button data-arrange="forward">前面へ</button><button data-arrange="backward">背面へ</button><button data-arrange="back">最背面へ</button></div><button id="item-hide" class="wide-button">○ 非表示にする <small>ブラウザの ○ で再表示</small></button><button id="export-selection" class="wide-button">↗ 選択だけをSVGで書き出す <small>カット線の範囲に切り詰め</small></button><button id="item-auto-bridge" class="wide-button">✧ 選択アイテムに自動ブリッジ</button>${chosen.some((c) => ["text", "outline"].includes(c.type)) ? '<button id="item-smart-connect" class="wide-button">⟟ スマート接続（文字を一体化）</button><p class="note">文字どうし・文字内の部位を接続形状でつなぎ、1つの閉じた輪郭として切り出せるようにします。</p>' : ""}${i.targetId ? '<p class="note">このブリッジは対象アイテムのみに適用され、移動に追従します。</p>' : ""}</section>`;
+      `<section><label class="full-label">所属レイヤー<select id="item-layer">${project.layers.map((l) => `<option value="${l.id}" ${i.layerId === l.id ? "selected" : ""} ${l.locked || !l.visible ? "disabled" : ""}>${esc(l.name)}</option>`).join("")}</select></label><h4>重なり順 <span>同じレイヤー内</span></h4><div class="arrange-actions"><button data-arrange="front">最前面へ</button><button data-arrange="forward">前面へ</button><button data-arrange="backward">背面へ</button><button data-arrange="back">最背面へ</button></div><button id="item-hide" class="wide-button">○ 非表示にする <small>ブラウザの ○ で再表示</small></button>${stampMode() ? "" : '<button id="export-selection" class="wide-button">↗ 選択だけをSVGで書き出す <small>カット線の範囲に切り詰め</small></button>'}<button id="item-auto-bridge" class="wide-button">✧ 選択アイテムに自動ブリッジ</button>${chosen.some((c) => ["text", "outline"].includes(c.type)) ? '<button id="item-smart-connect" class="wide-button">⟟ スマート接続（文字を一体化）</button><p class="note">文字どうし・文字内の部位を接続形状でつなぎ、1つの閉じた輪郭として切り出せるようにします。</p>' : ""}${i.targetId ? '<p class="note">このブリッジは対象アイテムのみに適用され、移動に追従します。</p>' : ""}</section>`;
   }
-  $("#board-width").value = project.width;
-  $("#board-height").value = project.height;
+  renderBoardSettings();
 }
 // Envelope editor: the four Bézier sides, a light mesh showing the patch,
 // corners (squares) and handles (dots). Sizes are in screen pixels.
@@ -1164,9 +1389,20 @@ function renderCanvas() {
   const visible = visibleItems(project),
     bridges = visible.filter((i) => i.type === "bridge"),
     normal = visible.filter((i) => i.type !== "bridge");
+  const stamp = stampMode() ? currentStamp() : null,
+    stampFace =
+      stamp && !stamp.error
+        ? `<g pointer-events="none"><path d="${pathData(stamp.base)}" fill="#f3e7d6" stroke="#b49c7e" stroke-width="0.25"/>${stamp.options.margin > 0 ? `<path d="${pathData(stamp.marginArea)}" fill="none" stroke="#c9a77f" stroke-width="0.15" stroke-dasharray="1 0.8"/>` : ""}</g>`
+        : "",
+    mirrored = (c) =>
+      stamp.options.mirror ? mirrorContours(c, stamp.options.width) : c;
   $("#objects").innerHTML = preview
-    ? `<path d="${pathData(cutGeometry(visibleItems(project)).paths)}" fill="none" stroke="#d84435" stroke-width="0.25"/>`
-    : normal
+    ? stamp
+      ? stamp.error
+        ? ""
+        : `<path d="${pathData(mirrored(stamp.base))}" fill="#f3e7d6"/><path d="${pathData(mirrored(stamp.engrave))}" fill="#4a4038" fill-rule="evenodd"/><path d="${pathData(mirrored(stamp.base))}" fill="none" stroke="#d84435" stroke-width="0.25"/>`
+      : `<path d="${pathData(cutGeometry(visibleItems(project)).paths)}" fill="none" stroke="#d84435" stroke-width="0.25"/>`
+    : stampFace + normal
         .map(
           (i) =>
             `<g data-object="${i.id}" class="canvas-object"><path d="${pathData(stencilContours(i, bridges))}" fill="${openOnly(i) ? "none" : selectionIds().includes(i.id) ? "#d9e9f5" : "#354859"}" fill-opacity="${openOnly(i) ? 0 : 0.9}" fill-rule="nonzero" stroke="${selectionIds().includes(i.id) ? "#276c9c" : "#243b50"}" stroke-width="${openOnly(i) ? 0.35 : 0.22}"/><path d="${pathData(worldContours(i))}" fill="none" stroke="transparent" stroke-width="2"/></g>`,
@@ -1220,7 +1456,9 @@ function renderCanvas() {
       ? "default"
       : "crosshair";
   $("#canvas-mode").textContent = preview
-    ? "加工プレビュー · 実際に出力されるカット線"
+    ? stamp
+      ? `加工プレビュー · ハンコ（${stamp.options?.mirror ? "左右反転済み" : "反転なし"}）· 濃い部分を彫刻、赤線で外形カット`
+      : "加工プレビュー · 実際に出力されるカット線"
     : sc
       ? "スマート接続 · 接続案のプレビュー（確定まで保存データは変わりません）"
       : warpId
@@ -1229,11 +1467,15 @@ function renderCanvas() {
         ? "パス編集中 · ノードを直接変形"
         : cad
           ? `${CAD_TOOLS[cad.tool].label} · 2D CAD`
-          : "スケッチ編集中";
+          : stamp
+            ? "ハンコ編集中 · 押したときの向きで表示（書き出しは左右反転）"
+            : "スケッチ編集中";
   $("#hint").textContent = drag?.label
     ? drag.label
     : preview
-      ? "赤い線をカットします。自動ブリッジは帯の側面を含む切り抜き輪郭です。"
+      ? stamp
+        ? "濃い部分を彫刻し、赤い線で外形を切ります。押印プレビューはプロパティの下に表示しています。"
+        : "赤い線をカットします。自動ブリッジは帯の側面を含む切り抜き輪郭です。"
       : sc
         ? sc.addMode
           ? "接続したい2つの部品の輪郭付近を順にクリック · Escでキャンセル"
@@ -1247,7 +1489,7 @@ function renderCanvas() {
             : tool === "freehand"
               ? "ペン・指・マウスでドラッグして描く · 始点の近くで終えると閉じた図形 · タップで選択"
               : (CAD_TOOLS[tool]?.hint ?? `${labels[tool]}を配置する場所をクリック`);
-  $("#board-label").textContent = `${project.width} × ${project.height} mm`;
+  $("#board-label").textContent = `${stamp ? "印面 " : ""}${project.width} × ${project.height} mm`;
   $("#zoom-reset").textContent = `${Math.round(zoom * 100)}%`;
 }
 // While typing, the inspector is left intact so the text box keeps focus and IME state.
@@ -1317,10 +1559,30 @@ function render({ properties = true } = {}) {
       ![...PATHABLE, "text"].includes(selectedItem()?.type));
   $("#edit-path").classList.toggle("active", Boolean(pathEdit));
   $("#delete").disabled = $("#duplicate").disabled = !selectedItem();
+  $("#order").disabled = stampMode();
+  $("#order").title = stampMode()
+    ? "ハンコの加工注文は未対応です（SVGを書き出してご利用ください）"
+    : "現在のデザインのSVGをそのまま加工注文ページへ渡します";
+  document.querySelectorAll("[data-fabrication]").forEach((b) => {
+    const on = b.dataset.fabrication === fabricationMode(project);
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", String(on));
+  });
+  $(".cut-check h4").lastChild.textContent = stampMode() ? " ハンコのチェック" : " 加工チェック";
+  if (stampMode()) {
+    const g = currentStamp();
+    $("#checks").innerHTML = stampChecks(g);
+    $("#check-note").textContent =
+      "線の太さや小さな文字が押印で残るかは保証しません。ゴム材・加工機でテスト加工してください。";
+    if (!properties) renderStampPreview(g);
+  } else {
+  $("#check-note").textContent =
+    "ブリッジは切り残しです。材料・厚さに応じて幅を調整し、テスト加工してください。";
   const c = cutGeometry(visibleItems(project)),
     outside = !withinBoard();
   $("#checks").innerHTML =
     `<div class="check-row"><span>閉じた輪郭</span><b>${c.closed}</b></div><div class="check-row ${c.untouched ? "warning" : "success"}"><span>切り残しなし</span><b>${c.untouched}</b></div><div class="check-row ${c.unbridgedIslands ? "warning" : "success"}"><span>内外が未接続の島</span><b>${c.unbridgedIslands}</b></div><div class="check-row"><span>ブリッジ</span><b>${project.items.filter((i) => i.type === "bridge").length}</b></div>${c.vanished ? `<div class="check-row warning"><span>完全に隠れた輪郭</span><b>${c.vanished}</b></div>` : ""}<div class="check-summary ${outside || c.vanished ? "warning" : ""}">${c.vanished ? "! ブリッジ幅を縮めて輪郭を残してください" : outside ? "! 加工エリア外にカット線があります" : c.unbridgedIslands ? "! 内側の島に自動ブリッジを適用してください" : c.untouched ? "! 脱落させたくない輪郭にブリッジを追加" : c.closed ? "✓ ブリッジ処理済み · 加工プレビューを確認" : "図形や文字を追加してください"}</div>`;
+  }
   if (loading)
     document.querySelectorAll("button,input,select,textarea").forEach((el) => {
       el.dataset.loadingDisabled = String(el.disabled);
@@ -1502,6 +1764,15 @@ $("#properties").addEventListener("click", (e) => {
     cad.points = axisThrough(selectionCenter(chosen, itemBounds), e.target.closest("#cad-axis-v") ? "vertical" : "horizontal");
     return render();
   }
+  if (e.target.closest("#stamp-add-text")) return addStampText();
+  if (e.target.closest("#stamp-select-text")) {
+    const text = project.items.find((t) => t.type === "text" && isEditable(project, t));
+    if (text) {
+      selectItem(text.id);
+      render();
+    }
+    return;
+  }
   if (e.target.closest("#add-font")) requestFontFile();
   if (e.target.closest("#font-gallery-button")) openFontGallery();
   if (e.target.closest("#item-auto-bridge")) applyAutoBridges();
@@ -1615,6 +1886,8 @@ const showAllItems = () =>
 // the size of their cut lines.
 function exportSelection() {
   try {
+    if (stampMode())
+      throw Error("ハンコモードでは印面全体を書き出します。「SVGを書き出す」を使ってください。");
     const chosen = selectedItems().filter((i) => i.type !== "bridge");
     if (!chosen.length) throw Error("書き出すオブジェクトを選択してください。");
     const ids = chosen.map((i) => i.id),
@@ -3178,16 +3451,39 @@ $("#new-project").onclick = () => {
   commit();
   notify("新規プロジェクトを作成しました。元に戻す操作で復元できます。");
 };
-for (const key of ["width", "height"])
-  $(`#board-${key}`).onchange = (e) => {
-    if (!e.target.checkValidity() || !Number.isFinite(e.target.valueAsNumber)) {
-      renderProperties();
+$("#board-settings").addEventListener("change", (e) => {
+  const el = e.target,
+    key = el.id === "board-width" ? "width" : el.id === "board-height" ? "height" : null;
+  if (key) {
+    if (!el.checkValidity() || !Number.isFinite(el.valueAsNumber)) {
+      notify("有効な数値を入力してください。");
+      renderBoardSettings();
       return;
     }
     checkpoint();
-    project[key] = e.target.valueAsNumber;
+    project[key] = el.valueAsNumber;
     commit();
-  };
+  } else if (el.dataset.stamp) {
+    if (el.type === "checkbox") return updateStamp(el.dataset.stamp, el.checked);
+    if (el.type === "number") {
+      if (!el.checkValidity() || !Number.isFinite(el.valueAsNumber)) {
+        notify("有効な数値を入力してください。");
+        return renderBoardSettings();
+      }
+      return updateStamp(el.dataset.stamp, el.valueAsNumber);
+    }
+    updateStamp(el.dataset.stamp, el.value);
+  }
+});
+$("#board-settings").addEventListener("click", (e) => {
+  const bold = e.target.closest("[data-bold]");
+  if (bold) updateStamp("boldOffset", Number(bold.dataset.bold));
+  if (e.target.closest("#stamp-fit")) fitStampContent();
+});
+document.addEventListener("click", (e) => {
+  const mode = e.target.closest("[data-fabrication]");
+  if (mode) setFabrication(mode.dataset.fabrication);
+});
 $("#font-file").onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -4039,6 +4335,7 @@ const menuActions = {
   hide: hideSelection,
   "show-all": showAllItems,
   "export-selection": exportSelection,
+  fabrication: () => setFabrication(stampMode() ? "cut" : "stamp"),
 };
 // The phone header's 「⋯」 menu: file actions, then the toolbar buttons
 // that do not fit on a small screen (their enabled state is the buttons').
@@ -4049,8 +4346,9 @@ function overflowEntries() {
     ["open", "開く（JSON / SVG）", "", true],
     ["save", "保存（JSON）", "", true],
     ["export", "SVGを書き出す", "", true],
-    ["order", "このデザインを加工注文する", "", true],
-    ["export-selection", "選択だけをSVGで書き出す", "", selectedItems().length > 0],
+    ["order", "このデザインを加工注文する", "", !stampMode()],
+    ["export-selection", "選択だけをSVGで書き出す", "", selectedItems().length > 0 && !stampMode()],
+    ["fabrication", stampMode() ? "切り抜きモードに切り替え" : "ハンコモードに切り替え", "", true],
     "-",
     ["select-all", "すべて選択", "", true],
     ["hide", "選択を非表示にする", "", selectedItems().length > 0],
