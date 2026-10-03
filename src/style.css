@@ -2207,3 +2207,71 @@ dialog .primary {
 .stamp-start .wide-button {
   margin: 10px 0 0;
 }
+
+/* Image import: trace preview and settings. */
+.image-dialog {
+  width: min(640px, 94vw);
+  max-width: 640px;
+  max-height: 92vh;
+}
+.image-previews {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.image-previews figure {
+  margin: 0;
+  min-width: 0;
+}
+.image-previews figcaption {
+  font-size: 11px;
+  color: #56697a;
+  margin-bottom: 4px;
+}
+.image-previews img,
+.image-previews svg {
+  display: block;
+  width: 100%;
+  height: 200px;
+  object-fit: contain;
+  background: repeating-conic-gradient(#f1f3f5 0 25%, #fff 0 50%) 0 0 / 16px 16px;
+  border: 1px solid #e3e7eb;
+  border-radius: 6px;
+}
+.image-dialog .full-label output {
+  color: #344b5c;
+  font-weight: 600;
+}
+.image-dialog input[type="range"] {
+  width: 100%;
+}
+.image-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 8px 0 4px;
+  font-size: 12px;
+  color: #56697a;
+}
+.image-dialog .fields {
+  margin-top: 14px;
+}
+.image-dialog .fields label span {
+  color: #9aa8b3;
+}
+.image-status {
+  font-size: 12px;
+  color: #344b5c;
+  font-weight: 600;
+  min-height: 1.5em;
+}
+@media (max-width: 860px) {
+  .image-previews img,
+  .image-previews svg {
+    height: 140px;
+  }
+}
+.image-dialog [hidden] {
+  display: none;
+}
