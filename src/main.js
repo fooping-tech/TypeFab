@@ -60,6 +60,7 @@ import {
   normalizeGroups,
 } from "./grouping.js";
 import { svgShapes, shapeItem, parseXML, fromDOM } from "./svgimport.js";
+import { dxfShapes } from "./dxfimport.js";
 import {
   arrangeItems,
   reorderItems,
@@ -72,6 +73,7 @@ import {
   pathFromCommands,
   pathFromContours,
   pathContours,
+  transformPath,
   shapePath,
   toPathData,
   parsePathData,
@@ -818,15 +820,15 @@ const stampInkItems = () =>
       isEditable(project, i) &&
       worldContours(i).some(isClosed),
   );
-// Scales and centres the items into the margin area. Text, rectangles and
-// ellipses scale; when anything else is included the items are only
-// centred. Changes project.items in place (the caller checkpoints) and
+// Scales and centres the items into the margin area. Text, rectangles,
+// ellipses and fixed paths scale; when a warped shape is included the items
+// are only centred. Changes project.items in place (the caller checkpoints) and
 // returns whether the items were scaled.
 function fitItems(items) {
   if (!items.length) return null;
   const box = bounds(items.flatMap(worldContours)),
     scalable = items.every(
-      (i) => i.type === "text" || (["rect", "circle"].includes(i.type) && !i.warp),
+      (i) => i.type === "text" || (["rect", "circle", "outline"].includes(i.type) && !i.warp),
     );
   let { k, from, to } = fitTransform(box, stampOptions(project));
   if (!scalable || !Number.isFinite(k)) k = 1;
@@ -836,6 +838,12 @@ function fitItems(items) {
       next.size = Math.min(300, Math.max(1, i.size * k));
       next.spacing = Math.max(-100, Math.min(100, i.spacing * k));
       next.contours = textContours(next);
+    } else if (k !== 1 && i.type === "outline") {
+      const scale = (p) => ({ x: p.x * k, y: p.y * k });
+      if (i.path) {
+        next.path = transformPath(i.path, scale);
+        next.contours = pathContours(next.path);
+      } else next.contours = i.contours.map((c) => c.map(scale));
     } else if (k !== 1) {
       next.w = i.w * k;
       next.h = i.h * k;
@@ -865,7 +873,7 @@ function fitStampContent() {
     notify(
       scaled
         ? "文字をマージン内に収めて中央に配置しました。"
-        : "中央に配置しました（パスやワープした図形を含むため大きさは変えていません）。",
+        : "中央に配置しました（ワープした図形を含むため大きさは変えていません）。",
     );
   } catch (e) {
     notify(e.message);
@@ -948,7 +956,7 @@ function stampChecks(g) {
 }
 
 $("#app").innerHTML = `
-<header><a class="brand" href="./"><span class="brand-mark">t<span>f</span></span><span class="brand-name">TypeFab</span><span class="beta">BETA</span></a><div class="document-title"><span id="project-name"></span><small id="save-status">ローカルプロジェクト</small></div><div class="mobile-actions"><button data-mobile-action="undo" title="元に戻す" aria-label="元に戻す">↶</button><button data-mobile-action="redo" title="やり直す" aria-label="やり直す">↷</button><button id="more-button" title="メニュー" aria-label="メニュー" aria-haspopup="menu">⋯</button><button id="mobile-help" class="help-round" aria-label="使い方">?</button></div><div class="header-actions"><button id="new-project" title="新規プロジェクト">新規</button><button id="open-project" title="TypeFabプロジェクト（.json）を開く、またはSVGの図形を読み込む（キャンバスへのドロップも可）">開く</button><button id="save-project">保存</button><button id="export" class="primary">↗ <span class="long">SVGを書き出す</span><span class="short">SVG</span></button><button id="order" title="現在のデザインのSVGをそのまま加工注文ページへ渡します">⚒ このデザインを加工注文する</button></div></header>
+<header><a class="brand" href="./"><span class="brand-mark">t<span>f</span></span><span class="brand-name">TypeFab</span><span class="beta">BETA</span></a><div class="document-title"><span id="project-name"></span><small id="save-status">ローカルプロジェクト</small></div><div class="mobile-actions"><button data-mobile-action="undo" title="元に戻す" aria-label="元に戻す">↶</button><button data-mobile-action="redo" title="やり直す" aria-label="やり直す">↷</button><button id="more-button" title="メニュー" aria-label="メニュー" aria-haspopup="menu">⋯</button><button id="mobile-help" class="help-round" aria-label="使い方">?</button></div><div class="header-actions"><button id="new-project" title="新規プロジェクト">新規</button><button id="open-project" title="TypeFabプロジェクト（.json）を開く、またはSVG・DXFの図形を読み込む（キャンバスへのドロップも可）">開く</button><button id="import-button" title="SVG・DXFの図形を加工エリア（ハンコでは印面）の中央に読み込む（キャンバスへのドロップも可）">読み込み</button><button id="save-project">保存</button><button id="export" class="primary">↗ <span class="long">SVGを書き出す</span><span class="short">SVG</span></button><button id="order" title="現在のデザインのSVGをそのまま加工注文ページへ渡します">⚒ このデザインを加工注文する</button></div></header>
 <div class="workspace-tabs"><span class="workspace-title">DESIGN WORKSPACE</span><span class="tab active">スケッチ</span>${modeSwitch()}<span class="subtle">文字から、ものづくりへ。</span><button id="help-button">? 使い方</button></div>
 <div id="tools" class="toolbars"><div class="panel-heading sheet-only">ツール<span class="eyebrow">TOOLS</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><nav class="toolbar" aria-label="スケッチツール"><div class="tool-group">${Object.entries(
   labels,
@@ -969,8 +977,8 @@ $("#app").innerHTML = `
 <aside class="inspector"><div class="panel-heading">プロパティ<span class="eyebrow">INSPECTOR</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></div><div id="properties"></div><section class="board-settings" id="board-settings"></section><section class="cut-check"><h4><span class="check-icon">◇</span> 加工チェック</h4><div id="checks"></div><p id="check-note"></p></section></aside></main>
 <nav class="mobile-bar" aria-label="モバイル操作"><button data-sheet="objects"><span>☰</span>オブジェクト</button><button data-sheet="tools"><span>✚</span>ツール</button><button data-sheet="inspector"><span>⚙</span>編集<small id="bar-badge"></small></button><button id="mobile-preview"><span>◎</span>プレビュー</button><button id="mobile-fit"><span>⛶</span>全体</button></nav>
 <footer><span id="message" role="status" aria-live="polite">フォントを読み込んでいます…</span><span><i class="legend cut"></i> カット線 <i class="legend bridge"></i> 非カット &nbsp; <button id="font-licenses-button" class="text-link">フォントライセンス</button> <span class="subtle">TypeFab / 0.12</span></span></footer>
-<input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,.svg,application/json,image/svg+xml">
-<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「開く」でSVGの図形も読み込めます。「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。上部の「ハンコ」に切り替えると、加工エリアがゴム印の印面になり、文字や図形が押される部分になります。書き出すSVGは左右反転済みで、背景の彫刻（ENGRAVE）と外形のカット（CUT）に分かれます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
+<input hidden type="file" id="font-file" accept=".ttf,.otf,.woff"><input hidden type="file" id="project-file" accept=".json,.svg,.dxf,application/json,image/svg+xml"><input hidden type="file" id="import-file" accept=".svg,.dxf,image/svg+xml">
+<dialog id="help"><button class="dialog-close" id="close-help" aria-label="閉じる">×</button><div class="eyebrow">WELCOME TO TYPEFAB</div><h2>アイデアを、切り出そう。</h2><ol><li><b>文字・図形を配置</b><p>ツールを選び、加工エリアをクリック。ドラッグや数値入力で位置を調整できます。</p></li><li><b>切り残しをつくる</b><p>ブリッジを輪郭に重ねると、その部分のカット線が途切れます。自動ブリッジは文字から矩形を切り抜き、内側の島を外側につなぎます。帯の側面も閉じたカット輪郭に含まれます。</p></li><li><b>確認して書き出す</b><p>加工プレビューの赤線がSVGに出力されます。SVGはmm単位のパスのみ。カット設定は加工機側で指定してください。</p></li></ol><p class="help-note">閉輪郭のチェックは接続強度の保証ではありません。Shiftで複数選択し、右側から結合・切り抜き・交差・XORを実行できます。差分は最初の選択が土台です。オブジェクトを右クリックすると編集メニューが開きます。「グループ化」でまとめて動かせます。「グループ化解除」はグループを解き、文字を1文字ずつ、もう一度で部位ごとに分解します。長方形は角の半径（フィレット）を指定できます。文字は四隅で拡縮、ダブルクリックで編集、アウトライン化した文字や図形はダブルクリックでノード（アンカーとハンドル）を直接編集、「開く」でSVGの図形も読み込めます。「読み込み」はSVG・DXFの図形を加工エリア（ハンコでは印面）の中央に配置します。「ワープ」で文字・長方形・楕円・固定パスのアウトラインそのものを変形できます。上部の「ハンコ」に切り替えると、加工エリアがゴム印の印面になり、文字や図形が押される部分になります。書き出すSVGは左右反転済みで、背景の彫刻（ENGRAVE）と外形のカット（CUT）に分かれます。縦書きはフォントの縦用字形を使用します。カーフ補正・ルビ・縦中横は未対応です。</p><button id="start" class="primary">スケッチをはじめる →</button></dialog>
 <dialog id="font-gallery" class="font-gallery" aria-labelledby="font-gallery-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">FONTS</div><h2 id="font-gallery-title">フォント一覧</h2><div class="gallery-body"></div><button class="text-link" data-open-licenses>フォントライセンスを見る</button></dialog>
 <dialog id="font-licenses" class="font-licenses" aria-labelledby="font-licenses-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">FONT LICENSES</div><h2 id="font-licenses-title">フォントライセンス</h2><div class="licenses-body"></div></dialog>
 <dialog id="font-policy" class="font-policy" aria-labelledby="font-policy-title"><button class="dialog-close" data-close aria-label="閉じる">×</button><div class="eyebrow">USER FONTS</div><h2 id="font-policy-title">ユーザー追加フォントについて</h2><div class="policy-body">${FONT_POLICY_TEXT.split("\n\n").map((t) => `<p>${esc(t)}</p>`).join("")}</div><label class="check policy-check"><input type="checkbox" id="font-policy-agree"> このフォントを使用するために必要な権利・許諾を有していることを確認しました。</label><div class="policy-actions"><button class="text-link" data-open-licenses>詳細を見る（規約全文・標準フォントのライセンス）</button><button id="font-policy-accept" class="primary" disabled>確認してフォントを選ぶ</button></div><p class="note">規約バージョン ${FONT_POLICY_VERSION} · 同意はこのブラウザに保存され、規約が更新されると再確認します。</p></dialog>
@@ -3517,6 +3525,10 @@ async function openFile(file) {
     if (file.size > 20 * 1024 * 1024)
       throw Error("ファイルは20 MB以下にしてください。");
     const text = await file.text();
+    if (/\.dxf$/i.test(file.name)) {
+      importDXF(text, file.name);
+      return;
+    }
     if (/\.svg$/i.test(file.name) || file.type === "image/svg+xml") {
       importSVG(text, file.name);
       return;
@@ -3549,15 +3561,70 @@ function readSVG(text) {
     throw Error("SVGとして読み込めません。XMLの形式を確認してください。");
   return fromDOM(doc.documentElement);
 }
-// SVG shapes become fixed paths at their millimetre positions. Inkscape
-// layers (as TypeFab exports) go to layers of the same name; the rest to the
-// active layer. Shapes arriving together in a layer form one group.
-function importSVG(text, fileName) {
+// Imported shapes become fixed paths. Inkscape layers (as TypeFab exports)
+// and DXF layers go to layers of the same name; the rest to the active
+// layer. Shapes arriving together in a layer form one group. With `place`,
+// the shapes are moved to the middle of the board (see placeShapes);
+// otherwise they keep their millimetre positions (「開く」 of an SVG).
+function importSVG(text, fileName, { place = false } = {}) {
   const { shapes, skipped, invalid } = svgShapes(readSVG(text));
   if (!shapes.length)
     throw Error(
       "読み込める図形がありません（パス・長方形・円・楕円・線・折れ線・多角形に対応）。",
     );
+  const placed = place ? placeShapes(shapes) : null;
+  const items = addShapes(placed?.shapes ?? shapes);
+  const notes = [
+    ...Object.entries(skipped).map(([kind, n]) => `${kind} ${n} 個`),
+    ...(invalid ? [`読めない図形 ${invalid} 個`] : []),
+  ];
+  notify(
+    `${fileName} から ${items.length} 個の図形をパスとして読み込みました${placed ? `（${placed.note}）` : ""}。${notes.length ? `読み込めないもの: ${notes.join("・")}（文字はアウトライン化して保存してください）。` : "ダブルクリックでノードを編集できます。"}`,
+  );
+}
+// DXF drawings have no page, so they are always placed on the board.
+function importDXF(text, fileName) {
+  const { shapes, skipped, invalid, units } = dxfShapes(text);
+  if (!shapes.length)
+    throw Error(
+      "読み込める図形がありません（LINE・ARC・CIRCLE・ELLIPSE・LWPOLYLINE・POLYLINE・SPLINE・INSERT に対応）。",
+    );
+  const placed = placeShapes(shapes),
+    items = addShapes(placed.shapes);
+  const notes = [
+    ...Object.entries(skipped).map(([kind, n]) => `${kind} ${n} 個`),
+    ...(invalid ? [`読めない図形 ${invalid} 個`] : []),
+  ];
+  notify(
+    `${fileName} から ${items.length} 個の図形を読み込みました（単位: ${units.label} · ${placed.note}）。${notes.length ? `読み込めないもの: ${notes.join("・")}。` : "つながった線は1つの輪郭にまとめています。"}`,
+  );
+}
+// Moves shapes to the middle of the board. Cutting keeps the real size and
+// only shrinks a drawing larger than the board; a stamp fits the drawing
+// into the margin area (larger or smaller). Returns { shapes, note }.
+function placeShapes(shapes) {
+  const box = bounds(shapes.flatMap((s) => pathContours(s.path)));
+  if (!(box.w > 0 || box.h > 0)) throw Error("図形の大きさが 0 です。");
+  let k, from, to;
+  if (stampMode()) ({ k, from, to } = fitTransform(box, stampOptions(project)));
+  else {
+    k = Math.min(1, project.width / Math.max(box.w, 1e-9), project.height / Math.max(box.h, 1e-9));
+    from = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+    to = { x: project.width / 2, y: project.height / 2 };
+  }
+  const map = (p) => ({ x: to.x + (p.x - from.x) * k, y: to.y + (p.y - from.y) * k }),
+    size = `${Number((box.w * k).toFixed(2))} × ${Number((box.h * k).toFixed(2))} mm`;
+  return {
+    shapes: shapes.map((s) => ({ ...s, path: transformPath(s.path, map) })),
+    note: stampMode()
+      ? `印面のマージン内に ${size} で配置`
+      : k < 1
+        ? `加工エリアに収まるよう ${Math.round(k * 1000) / 10}% に縮小して ${size} で中央に配置`
+        : `実寸 ${size} で中央に配置`,
+  };
+}
+// Adds shapes as fixed-path items (one undo step) and selects them.
+function addShapes(shapes) {
   const active = project.layers.find((l) => l.id === activeLayer);
   if (!active?.visible || active.locked)
     throw Error("表示中のロックされていないレイヤーを選んでください。");
@@ -3601,14 +3668,28 @@ function importSVG(text, fileName) {
   warpId = null;
   pathEdit = null;
   commit();
-  const notes = [
-    ...Object.entries(skipped).map(([kind, n]) => `${kind} ${n} 個`),
-    ...(invalid ? [`読めない図形 ${invalid} 個`] : []),
-  ];
-  notify(
-    `${fileName} から ${items.length} 個の図形をパスとして読み込みました。${notes.length ? `読み込めないもの: ${notes.join("・")}（文字はアウトライン化して保存してください）。` : "ダブルクリックでノードを編集できます。"}`,
-  );
+  return items;
 }
+// 「読み込み」: SVG or DXF shapes added to the middle of the board.
+async function importFile(file) {
+  try {
+    if (file.size > 20 * 1024 * 1024)
+      throw Error("ファイルは20 MB以下にしてください。");
+    const text = await file.text();
+    if (/\.dxf$/i.test(file.name)) importDXF(text, file.name);
+    else if (/\.svg$/i.test(file.name) || file.type === "image/svg+xml")
+      importSVG(text, file.name, { place: true });
+    else throw Error("SVG（.svg）または DXF（.dxf）を選んでください。");
+  } catch (error) {
+    notify(`読み込めません: ${error.message}`);
+  }
+}
+$("#import-file").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (file) await importFile(file);
+};
+$("#import-button").onclick = () => $("#import-file").click();
 // Files dropped on the canvas open like 「開く」.
 $("#canvas-scroll").addEventListener("dragover", (e) => {
   if (loading || ![...e.dataTransfer.types].includes("Files")) return;
@@ -4326,6 +4407,7 @@ const menuActions = {
   preview: togglePreview,
   new: () => $("#new-project").click(),
   open: () => $("#project-file").click(),
+  import: () => $("#import-file").click(),
   save: () => $("#save-project").click(),
   export: exportFile,
   order: orderDesign,
@@ -4343,7 +4425,8 @@ function overflowEntries() {
   const button = (id, label) => [`click:#${id}`, label, "", !$(`#${id}`).disabled];
   return [
     ["new", "新規プロジェクト", "", true],
-    ["open", "開く（JSON / SVG）", "", true],
+    ["open", "開く（JSON / SVG / DXF）", "", true],
+    ["import", "読み込み（SVG / DXF を中央に配置）", "", true],
     ["save", "保存（JSON）", "", true],
     ["export", "SVGを書き出す", "", true],
     ["order", "このデザインを加工注文する", "", !stampMode()],

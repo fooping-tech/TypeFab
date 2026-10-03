@@ -123,6 +123,12 @@ header {
   border-left: 1px solid #e3e7eb;
   padding-left: 30px;
   font-size: 12px;
+  min-width: 0;
+}
+.document-title > * {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .document-title small {
   font-size: 10px;
@@ -133,6 +139,9 @@ header {
   display: flex;
   gap: 7px;
   align-items: center;
+}
+.header-actions button {
+  white-space: nowrap;
 }
 .primary {
   background: #c8793f;
@@ -1727,6 +1736,7 @@ dialog .primary {
   .canvas-bottom .axis,
   .header-actions #new-project,
   .header-actions #open-project,
+  .header-actions #import-button,
   .header-actions #save-project,
   .header-actions #order,
   #export .long,
