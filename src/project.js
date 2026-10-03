@@ -1,5 +1,6 @@
 import { ensureLayers } from "./layers.js";
 import { WARP_PRESETS, WARPABLE } from "./warp.js";
+import { normalizeStamp } from "./stamp.js";
 const validWarp = (w) =>
   w &&
   ["none", "custom", ...WARP_PRESETS.map(([id]) => id)].includes(w.preset) &&
@@ -180,6 +181,11 @@ export function validateProject(p) {
   // Reference dimensions (issue #4) live beside the geometry and never reach
   // the cut output. Older files simply have none.
   const annotations = validateAnnotations(p.annotations);
+  // Stamp Mode (issue #12). Files without these fields are cut projects; the
+  // stamp settings are kept while cutting so switching back restores them.
+  if (p.fabrication !== undefined && !["cut", "stamp"].includes(p.fabrication))
+    throw Error("加工の種類が不正です。");
+  const stamp = p.stamp === undefined ? null : normalizeStamp(p.stamp);
   return ensureLayers({
     version: 2,
     layers: p.layers,
@@ -188,6 +194,8 @@ export function validateProject(p) {
     height: p.height,
     items: p.items,
     ...(annotations.length ? { annotations } : {}),
+    ...(p.fabrication === "stamp" ? { fabrication: "stamp" } : {}),
+    ...(stamp ? { stamp } : {}),
   });
 }
 const DIMENSIONS = ["linear", "horizontal", "vertical", "angle", "radius", "diameter"];
