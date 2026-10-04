@@ -16,7 +16,12 @@ import {
   fitTransform,
   fabricationMode,
   STAMP_DEFAULTS,
+  PASS_COLORS,
+  passShades,
+  crc32,
+  withPhysicalSize,
 } from "../src/stamp.js";
+import { containsPoint } from "../src/polygon.js";
 
 const near = (a, b, eps = 0.05) => assert.ok(Math.abs(a - b) <= eps, `${a} ≉ ${b}`);
 const rect = (id, x, y, w, h, extra = {}) => ({
@@ -245,4 +250,69 @@ test("settings: defaults, validation and project files", () => {
   assert.equal(cut.stamp.margin, 3);
   assert.throws(() => validateProject({ ...structuredClone(base), fabrication: "engrave" }), /加工の種類が不正です/);
   assert.throws(() => validateProject({ ...structuredClone(base), stamp: { shape: "star" } }), /ハンコ設定が不正です/);
+});
+
+// Even–odd containment in a set of contours.
+const inside = (p, contours) => contours.filter((c) => containsPoint(p, c)).length % 2 === 1;
+
+test("shoulder: engraving passes step down away from the ink", () => {
+  const ink = [rect("a", 20, 5, 20, 10)],
+    g = stampGeometry(ink, { ...face, boldOffset: 0, shoulderWidth: 1, shoulderLevels: 4 });
+  assert.equal(g.shoulder, true);
+  assert.equal(g.passes.length, 4);
+  // Pass k engraves the face minus the ink grown by k × 0.25 mm.
+  g.passes.forEach((pass, k) => {
+    const d = 0.25 * k;
+    near(Math.abs(area(pass)), 1200 - (200 + 60 * d + Math.PI * d * d), 0.2);
+  });
+  near(Math.abs(area(g.passes[0])), Math.abs(area(g.engrave)));
+  // Number of passes (depth in steps) at increasing distance from the ink.
+  const depth = (x) => g.passes.filter((p) => inside({ x, y: 10 }, p)).length;
+  assert.deepEqual([40.1, 40.3, 40.6, 40.9, 41.5, 50].map(depth), [1, 2, 3, 4, 4, 4]);
+  assert.equal(depth(30), 0); // the ink itself
+  // The top of the characters (what prints) does not change.
+  near(g.inkArea, 200);
+});
+
+test("shoulder SVG: one coloured ENGRAVE-k layer per pass; off or positive keeps one ENGRAVE", () => {
+  const ink = [rect("a", 20, 5, 20, 10)];
+  const svg = stampSVG(ink, { ...face, shoulderWidth: 0.5, shoulderLevels: 3 });
+  for (const k of [1, 2, 3])
+    assert.match(svg, new RegExp(`<g id="ENGRAVE-${k}" inkscape:groupmode="layer" inkscape:label="ENGRAVE-${k}"><path d="[^"]+" fill="${PASS_COLORS[k - 1]}" fill-rule="evenodd" stroke="none"/></g>`));
+  assert.doesNotMatch(svg, /id="ENGRAVE"/);
+  assert.match(svg, /Shoulder: 0.5 mm in 3 steps/);
+  assert.ok(svg.indexOf('id="ENGRAVE-3"') < svg.indexOf('id="CUT"'));
+  assert.equal(new Set(PASS_COLORS).size, PASS_COLORS.length);
+  assert.ok(!PASS_COLORS.includes("#ff0000") && !PASS_COLORS.includes("#0000ff"));
+  assert.match(stampSVG(ink, face), /id="ENGRAVE"/);
+  const positive = stampGeometry(ink, { ...face, engravingMode: "positive", shoulderWidth: 1 });
+  assert.equal(positive.shoulder, false);
+  assert.equal(positive.passes.length, 1);
+  assert.match(stampSVG(ink, { ...face, engravingMode: "positive", shoulderWidth: 1 }), /id="ENGRAVE"/);
+});
+
+test("shoulder settings are validated; older projects have none", () => {
+  assert.equal(normalizeStamp({}).shoulderWidth, 0);
+  assert.equal(normalizeStamp({}).shoulderLevels, 4);
+  for (const bad of [{ shoulderWidth: -0.1 }, { shoulderWidth: 4 }, { shoulderLevels: 1 }, { shoulderLevels: 17 }, { shoulderLevels: 2.5 }])
+    assert.throws(() => normalizeStamp(bad), /ハンコ設定が不正です/);
+  assert.deepEqual(passShades(4), [191, 128, 64, 0]);
+});
+
+test("depth map PNG gets its physical size (pHYs) after IHDR", () => {
+  assert.equal(crc32(new TextEncoder().encode("123456789")), 0xcbf43926);
+  const ihdr = new Uint8Array(25);
+  ihdr.set([0, 0, 0, 13, 73, 72, 68, 82]);
+  const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, ...ihdr, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130]);
+  const out = withPhysicalSize(png, 20),
+    view = new DataView(out.buffer);
+  assert.equal(out.length, png.length + 21);
+  assert.equal(view.getUint32(33), 9);
+  assert.equal(new TextDecoder().decode(out.subarray(37, 41)), "pHYs");
+  assert.equal(view.getUint32(41), 20000);
+  assert.equal(view.getUint32(45), 20000);
+  assert.equal(out[49], 1);
+  assert.equal(view.getUint32(50), crc32(out.subarray(37, 50)));
+  assert.deepEqual([...out.subarray(54)], [...png.subarray(33)]);
+  assert.throws(() => withPhysicalSize(new Uint8Array(40), 20), /PNGではありません/);
 });
