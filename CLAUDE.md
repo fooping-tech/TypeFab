@@ -44,7 +44,7 @@ Vite + 素のJavaScript（フレームワークなし）+ opentype.js + HarfBuzz
 | `src/order.js` / `src/admin.js` / `src/order.css` / `src/privacy.js` / `src/legal.js` | 加工注文ページ（個人情報はブラウザ保存なし、領収書リンク）、注文管理ページ（Access／トークン、一覧は個人情報なし・詳細で配送先、通知再送、保持期限削除）、プライバシーポリシー |
 | `worker/` | Cloudflare Workers（D1・R2・Stripe Checkout・Webhook・Resend メール・Cloudflare Access JWT 検証・Cron の保持期限削除）。`src/index.js` が環境変数→設定（`configFromEnv`）と設定検証（`validateConfig`: development で `sk_live_` 拒否、production で `MAIL_MODE=console` 拒否）、`src/app.js` 本体（1 注文に複数 SVG: `order_items` と R2 の SVG ごとのオブジェクト）、`src/access.js`、`src/mail.js`、`src/stripe.js`、`src/store.js`、`schema.sql`、`migrations/`、`.dev.vars.example`（ローカル設定の雛形）。`npm test` はルートから `worker/src` を直接テストする |
 | `scripts/dev.mjs` / `.env.development` | `npm run dev` の一括起動（Vite + `wrangler dev`）と、開発サーバーだけが読む `VITE_ORDER_API_URL=http://127.0.0.1:8787` |
-| `src/stamp.js` | ハンコ（ゴム印）モード（Issue #12）: `project.fabrication`（`"stamp"` のときだけ保存）と `project.stamp` の設定、インク（表示中の閉じた輪郭の和集合）の太さ補正、彫刻領域（印面 − インク）、左右反転、ENGRAVE / CUT / GUIDE の SVG 出力、押印プレビュー、マージンへのフィット。印面は加工エリア（`project.width/height`） |
+| `src/stamp.js` | ハンコ（ゴム印）モード（Issue #12）: `project.fabrication`（`"stamp"` のときだけ保存）と `project.stamp` の設定、インク（表示中の閉じた輪郭の和集合）の太さ補正、彫刻領域（印面 − インク）、左右反転、ENGRAVE / CUT / GUIDE の SVG 出力、肩（くびれ・`shoulderWidth`/`shoulderLevels`）の多段彫刻（`passes`、SVG は色違いの `ENGRAVE-1..N`）と深さマップ PNG（`withPhysicalSize` で pHYs）、押印プレビュー、マージンへのフィット。印面は加工エリア（`project.width/height`） |
 | `src/geometry.js` | 輪郭化、ブリッジ（線の途切れ／矩形差分）、加工チェック、SVG出力（`exportSVG(project, { ids, crop })` で選択だけをカット線の範囲に切り詰めて出力） |
 | `src/operations.js` | 拡縮ハンドル、ブーリアン演算（結合・切り抜き・交差・XOR） |
 | `src/layers.js` | レイヤーと、オブジェクト単位の非表示（`item.hidden`。`isVisible`／`visibleItems` が除外し、対象付きブリッジは親に従う） |

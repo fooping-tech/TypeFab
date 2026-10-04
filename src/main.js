@@ -22,6 +22,11 @@ import {
   STAMP_SHAPES,
   ENGRAVING_MODES,
   BOLD_PRESETS,
+  SHOULDER_PRESETS,
+  passLayers,
+  passShades,
+  withPhysicalSize,
+  DEPTH_MAP_PX_PER_MM,
   STAMP_LIMITS,
   STAMP_SIZE_DEFAULT,
   normalizeStamp,
@@ -886,6 +891,41 @@ function fitStampContent() {
     notify(e.message);
   }
 }
+// Depth map for grayscale / 3D engraving: white where nothing is removed
+// (the ink and outside the face), each engraving pass a step darker, black
+// at full depth; mirrored like the SVG, at DEPTH_MAP_PX_PER_MM with the
+// physical size written into the PNG.
+async function exportDepthMap() {
+  try {
+    const g = currentStamp();
+    if (g.error) throw Error(g.error);
+    if (g.empty) throw Error("印面に文字や図形がありません。");
+    const o = g.options,
+      k = DEPTH_MAP_PX_PER_MM,
+      canvas = document.createElement("canvas");
+    canvas.width = Math.round(o.width * k);
+    canvas.height = Math.round(o.height * k);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(o.mirror ? -k : k, 0, 0, k, o.mirror ? canvas.width : 0, 0);
+    const shades = passShades(g.passes.length);
+    g.passes.forEach((pass, n) => {
+      if (!pass.length) return;
+      ctx.fillStyle = `rgb(${shades[n]} ${shades[n]} ${shades[n]})`;
+      ctx.fill(new Path2D(pathData(pass)), "evenodd");
+    });
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw Error("画像を作れませんでした。");
+    const png = withPhysicalSize(await blob.arrayBuffer(), k),
+      name = saveFile("typefab-stamp-depth.png", png, "image/png");
+    notify(
+      `${name} をダウンロードしました · ${canvas.width} × ${canvas.height} px（${o.width} × ${o.height} mm、${Math.round(k * 25.4)} dpi）· ${g.passes.length} 段 · ${o.mirror ? "左右反転済み" : "反転なし"}`,
+    );
+  } catch (e) {
+    notify(e.message);
+  }
+}
 function addStampText() {
   try {
     const layer = project.layers.find((l) => l.id === activeLayer);
@@ -932,7 +972,7 @@ function renderBoardSettings() {
       `<label>${label}<input data-stamp="${key}" type="number" step="${step}" min="${min}" max="${max}" value="${o[key]}"></label>`,
     check = (key, label) =>
       `<label class="check stamp-check"><input type="checkbox" data-stamp="${key}" ${o[key] ? "checked" : ""}> ${label}</label>`;
-  el.innerHTML = `${modeSwitch()}<h4>印面 <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" step="0.5" min="${lo}" max="${hi}" value="${project.width}"></label><label>高さ<input id="board-height" type="number" step="0.5" min="${lo}" max="${hi}" value="${project.height}"></label></div><label class="full-label">外形<select data-stamp="shape">${Object.entries(STAMP_SHAPES).map(([k, v]) => `<option value="${k}" ${o.shape === k ? "selected" : ""}>${v}</option>`).join("")}</select></label><div class="fields">${num("margin", "マージン", 0.5, STAMP_LIMITS.margin)}${o.shape === "rounded-rectangle" ? num("cornerRadius", "角の半径", 0.5, STAMP_LIMITS.cornerRadius) : ""}</div>${o.shape === "circle" && o.width !== o.height ? '<p class="note">幅と高さが違うと楕円になります。</p>' : ""}<h4>文字太さ補正 <span>mm</span></h4><div class="bold-presets">${BOLD_PRESETS.map((v) => `<button data-bold="${v}" class="${o.boldOffset === v ? "active" : ""}" aria-pressed="${o.boldOffset === v}">${v ? `+${v}` : "0"}</button>`).join("")}</div><div class="fields">${num("boldOffset", "カスタム", 0.05, STAMP_LIMITS.boldOffset)}</div><p class="note">押される部分の輪郭を外側に太らせます（マイナスで細く）。細い線の欠けを防ぐための補正で、加工結果を保証するものではありません。</p><label class="full-label">彫り方<select data-stamp="engravingMode">${Object.entries(ENGRAVING_MODES).map(([k, v]) => `<option value="${k}" ${o.engravingMode === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>${check("mirror", "加工データを左右反転（ミラー）")}<p class="note">ハンコは押すと左右が逆になるため、書き出すSVGは反転済みです。キャンバスと押印プレビューは押したときの向きです。</p>${check("guide", "ガイド（マージン・中心線）もSVGに書き出す")}<button id="stamp-fit" class="wide-button">⤢ 文字をマージン内に収めて中央へ</button><div id="stamp-preview" class="stamp-preview"></div>`;
+  el.innerHTML = `${modeSwitch()}<h4>印面 <span>mm</span></h4><div class="fields"><label>幅<input id="board-width" type="number" step="0.5" min="${lo}" max="${hi}" value="${project.width}"></label><label>高さ<input id="board-height" type="number" step="0.5" min="${lo}" max="${hi}" value="${project.height}"></label></div><label class="full-label">外形<select data-stamp="shape">${Object.entries(STAMP_SHAPES).map(([k, v]) => `<option value="${k}" ${o.shape === k ? "selected" : ""}>${v}</option>`).join("")}</select></label><div class="fields">${num("margin", "マージン", 0.5, STAMP_LIMITS.margin)}${o.shape === "rounded-rectangle" ? num("cornerRadius", "角の半径", 0.5, STAMP_LIMITS.cornerRadius) : ""}</div>${o.shape === "circle" && o.width !== o.height ? '<p class="note">幅と高さが違うと楕円になります。</p>' : ""}<h4>文字太さ補正 <span>mm</span></h4><div class="bold-presets">${BOLD_PRESETS.map((v) => `<button data-bold="${v}" class="${o.boldOffset === v ? "active" : ""}" aria-pressed="${o.boldOffset === v}">${v ? `+${v}` : "0"}</button>`).join("")}</div><div class="fields">${num("boldOffset", "カスタム", 0.05, STAMP_LIMITS.boldOffset)}</div><p class="note">押される部分の輪郭を外側に太らせます（マイナスで細く）。細い線の欠けを防ぐための補正で、加工結果を保証するものではありません。</p><label class="full-label">彫り方<select data-stamp="engravingMode">${Object.entries(ENGRAVING_MODES).map(([k, v]) => `<option value="${k}" ${o.engravingMode === k ? "selected" : ""}>${v}</option>`).join("")}</select></label><h4>肩（くびれ） <span>mm</span></h4>${o.engravingMode === "positive" ? '<p class="note">「文字を彫る」では使えません（背景を彫るときだけ文字の根元に肩を作ります）。</p>' : `<div class="bold-presets">${SHOULDER_PRESETS.map((v) => `<button data-shoulder="${v}" class="${o.shoulderWidth === v ? "active" : ""}" aria-pressed="${o.shoulderWidth === v}">${v ? v : "オフ"}</button>`).join("")}</div><div class="fields">${num("shoulderWidth", "幅", 0.1, STAMP_LIMITS.shoulderWidth)}${o.shoulderWidth > 0 ? num("shoulderLevels", "段数", 1, STAMP_LIMITS.shoulderLevels) : ""}</div><p class="note">文字の根元のまわりを段階的に浅く彫り、裾広がり（富士山形）にして細い線を欠けにくくします。${o.shoulderWidth > 0 ? `SVGは段ごとに色の違う ENGRAVE-1〜${o.shoulderLevels} の層になります。各層を同じ条件で「全体の深さ ÷ ${o.shoulderLevels}」ずつ彫ってください。文字どうしが近いところは肩が重なって浅くなります。` : ""}強度を保証するものではありません。</p>`}<button id="stamp-depth-map" class="wide-button">▦ 深さマップ（PNG） <small>濃いほど深い</small></button>${check("mirror", "加工データを左右反転（ミラー）")}<p class="note">ハンコは押すと左右が逆になるため、書き出すSVGは反転済みです。キャンバスと押印プレビューは押したときの向きです。</p>${check("guide", "ガイド（マージン・中心線）もSVGに書き出す")}<button id="stamp-fit" class="wide-button">⤢ 文字をマージン内に収めて中央へ</button><div id="stamp-preview" class="stamp-preview"></div>`;
   renderStampPreview();
 }
 function renderStampPreview(g = currentStamp()) {
@@ -959,7 +999,7 @@ function stampChecks(g) {
         : g.outsideMargin
           ? ["warning", "! マージンの外に文字があります（「文字をマージン内に収める」で調整）"]
           : ["", "✓ 書き出せます · 押印プレビューで向きを確認"];
-  return `${row("印面", `${o.width} × ${o.height} mm · ${STAMP_SHAPES[o.shape]}`)}${row("押される面積", `${g.inkArea.toFixed(1)} mm²`)}${row("太さ補正", `${o.boldOffset > 0 ? "+" : ""}${o.boldOffset} mm`)}${row("加工データの反転", o.mirror ? "あり" : "なし", o.mirror ? "success" : "warning")}${g.open ? row("開いた線（印面に含めない）", g.open, "warning") : ""}${g.bridges ? row("ブリッジ（ハンコでは無視）", g.bridges, "warning") : ""}<div class="check-summary ${summary[0]}">${summary[1]}</div>`;
+  return `${row("印面", `${o.width} × ${o.height} mm · ${STAMP_SHAPES[o.shape]}`)}${row("押される面積", `${g.inkArea.toFixed(1)} mm²`)}${o.engravingMode === "negative" ? row("肩（くびれ）", o.shoulderWidth > 0 ? `${o.shoulderWidth} mm · ${o.shoulderLevels} 段` : "なし") : ""}${row("太さ補正", `${o.boldOffset > 0 ? "+" : ""}${o.boldOffset} mm`)}${row("加工データの反転", o.mirror ? "あり" : "なし", o.mirror ? "success" : "warning")}${g.open ? row("開いた線（印面に含めない）", g.open, "warning") : ""}${g.bridges ? row("ブリッジ（ハンコでは無視）", g.bridges, "warning") : ""}<div class="check-summary ${summary[0]}">${summary[1]}</div>`;
 }
 
 $("#app").innerHTML = `
@@ -1416,7 +1456,7 @@ function renderCanvas() {
     ? stamp
       ? stamp.error
         ? ""
-        : `<path d="${pathData(mirrored(stamp.base))}" fill="#f3e7d6"/><path d="${pathData(mirrored(stamp.engrave))}" fill="#4a4038" fill-rule="evenodd"/><path d="${pathData(mirrored(stamp.base))}" fill="none" stroke="#d84435" stroke-width="0.25"/>`
+        : `<path d="${pathData(mirrored(stamp.base))}" fill="#f3e7d6"/>${passLayers(stamp, mirrored)}<path d="${pathData(mirrored(stamp.base))}" fill="none" stroke="#d84435" stroke-width="0.25"/>`
       : `<path d="${pathData(cutGeometry(visibleItems(project)).paths)}" fill="none" stroke="#d84435" stroke-width="0.25"/>`
     : stampFace + normal
         .map(
@@ -3495,6 +3535,9 @@ $("#board-settings").addEventListener("click", (e) => {
   const bold = e.target.closest("[data-bold]");
   if (bold) updateStamp("boldOffset", Number(bold.dataset.bold));
   if (e.target.closest("#stamp-fit")) fitStampContent();
+  const shoulder = e.target.closest("[data-shoulder]");
+  if (shoulder) updateStamp("shoulderWidth", Number(shoulder.dataset.shoulder));
+  if (e.target.closest("#stamp-depth-map")) exportDepthMap();
 });
 document.addEventListener("click", (e) => {
   const mode = e.target.closest("[data-fabrication]");

@@ -9,6 +9,12 @@ import { SCALE, encode, decode, isClosed } from "./polygon.js";
 //   engrave = face − ink   (negative, the default: the characters print)
 //   engrave = face ∩ ink   (positive: the characters are white in the print)
 //
+// A shoulder (肩・くびれ) makes the characters stand on a sloped base, so
+// thin strokes do not snap off: the engraving is split into N passes, pass k
+// removing the face minus the ink grown by width × k / N. A point at distance
+// r from the ink is engraved by about N × r / width passes, so the floor
+// rises in N steps towards the characters (a stepped slope, like Mt. Fuji).
+//
 // Everything is in millimetres with the board's origin at the top left.
 
 export const FABRICATION_MODES = Object.freeze({
@@ -35,13 +41,18 @@ export const STAMP_DEFAULTS = Object.freeze({
   cornerRadius: 3,
   boldOffset: 0.1,
   guide: false,
+  shoulderWidth: 0, // 0: no shoulder
+  shoulderLevels: 4,
 });
+export const SHOULDER_PRESETS = Object.freeze([0, 0.3, 0.5, 1]);
 // The face size is the board size, so it shares the board's 10 mm minimum.
 export const STAMP_LIMITS = Object.freeze({
   size: [10, 200],
   margin: [0, 20],
   cornerRadius: [0, 100],
   boldOffset: [-0.5, 1],
+  shoulderWidth: [0, 3],
+  shoulderLevels: [2, 16],
 });
 export const STAMP_SIZE_DEFAULT = Object.freeze({ width: 60, height: 20 });
 
@@ -61,7 +72,10 @@ export function normalizeStamp(stamp = {}) {
     typeof o.guide !== "boolean" ||
     !inRange(o.margin, STAMP_LIMITS.margin) ||
     !inRange(o.cornerRadius, STAMP_LIMITS.cornerRadius) ||
-    !inRange(o.boldOffset, STAMP_LIMITS.boldOffset)
+    !inRange(o.boldOffset, STAMP_LIMITS.boldOffset) ||
+    !inRange(o.shoulderWidth, STAMP_LIMITS.shoulderWidth) ||
+    !Number.isInteger(o.shoulderLevels) ||
+    !inRange(o.shoulderLevels, STAMP_LIMITS.shoulderLevels)
   )
     throw Error("ハンコ設定が不正です。");
   return o;
@@ -147,7 +161,14 @@ export function stampGeometry(items, options) {
     inside = intersection(grown, base),
     raised = o.engravingMode === "positive" ? difference(base, grown) : inside,
     engrave = o.engravingMode === "positive" ? inside : difference(base, grown),
-    marginArea = o.margin > 0 ? offset(base, -o.margin) : base;
+    marginArea = o.margin > 0 ? offset(base, -o.margin) : base,
+    // The shoulder applies when the background is engraved around ink.
+    shoulder = o.engravingMode === "negative" && o.shoulderWidth > 0 && ink.length > 0,
+    passes = shoulder
+      ? Array.from({ length: o.shoulderLevels }, (_, k) =>
+          k ? difference(base, offset(grown, (o.shoulderWidth * k) / o.shoulderLevels)) : engrave,
+        )
+      : [engrave];
   const inkArea = area(inside),
     faceArea = Math.abs(area(base));
   return {
@@ -155,6 +176,9 @@ export function stampGeometry(items, options) {
     base: base.map(decode),
     raised: raised.map(decode),
     engrave: engrave.map(decode),
+    // Engraving passes, each inside the one before (passes[0] = engrave).
+    passes: passes.map((p) => p.map(decode)),
+    shoulder,
     marginArea: marginArea.map(decode),
     empty: !ink.length,
     // Ink thinned away entirely by a negative bold offset.
@@ -202,18 +226,48 @@ export function stampSVG(items, options) {
     throw Error("太さ補正で文字が消えました。補正を大きくしてください。");
   if (!g.engrave.length) throw Error("彫刻する部分がありません。");
   const m = (c) => (o.mirror ? mirrorContours(c, o.width) : c);
-  const engrave = `<path d="${pathData(m(g.engrave))}" fill="#000000" fill-rule="evenodd" stroke="none"/>`,
+  const fill = (contours, color) =>
+      `<path d="${pathData(m(contours))}" fill="${color}" fill-rule="evenodd" stroke="none"/>`,
+    // One layer per pass with its own colour, so laser software keeps the
+    // passes apart instead of merging them into one fill.
+    engrave = g.shoulder
+      ? g.passes
+          .map((p, k) => (p.length ? layer(`ENGRAVE-${k + 1}`, fill(p, PASS_COLORS[k])) : ""))
+          .filter(Boolean)
+          .join("\n")
+      : layer("ENGRAVE", fill(g.engrave, "#000000")),
     cut = `<path d="${pathData(m(g.base))}" fill="none" stroke="#ff0000" stroke-width="0.1"/>`,
     guide = o.guide
       ? `\n${layer("GUIDE", `<path d="${pathData(m(guidePaths(g)))}" fill="none" stroke="#0000ff" stroke-width="0.05" stroke-dasharray="0.6 0.4"/>`)}`
       : "";
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${num(o.width)}mm" height="${num(o.height)}mm" viewBox="0 0 ${num(o.width)} ${num(o.height)}">\n<title>TypeFab rubber stamp</title>\n<desc>${xml(`Units: mm. ENGRAVE (black fill) is the area to engrave, CUT (red line) is the rubber outline${o.guide ? ", GUIDE (blue) is for reference only and is not meant to be processed" : ""}. ${o.mirror ? "Mirrored left to right for stamping." : "Not mirrored."} Shape: ${o.shape}. Bold offset: ${o.boldOffset} mm. Engraving: ${o.engravingMode}.`)}</desc>\n${layer("ENGRAVE", engrave)}\n${layer("CUT", cut)}${guide}\n</svg>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${num(o.width)}mm" height="${num(o.height)}mm" viewBox="0 0 ${num(o.width)} ${num(o.height)}">\n<title>TypeFab rubber stamp</title>\n<desc>${xml(`Units: mm. ENGRAVE (black fill) is the area to engrave, CUT (red line) is the rubber outline${o.guide ? ", GUIDE (blue) is for reference only and is not meant to be processed" : ""}. ${o.mirror ? "Mirrored left to right for stamping." : "Not mirrored."} Shape: ${o.shape}. Bold offset: ${o.boldOffset} mm. Engraving: ${o.engravingMode}.${g.shoulder ? ` Shoulder: ${o.shoulderWidth} mm in ${o.shoulderLevels} steps; ENGRAVE-1 is the whole engraving area and each ENGRAVE-k layer is one pass inside the previous one, so run every layer with the same settings, each removing the total depth divided by ${o.shoulderLevels}.` : ""}`)}</desc>\n${engrave}\n${layer("CUT", cut)}${guide}\n</svg>\n`;
 }
+
+// Fill colours of the shoulder passes: LightBurn palette colours other than
+// red (CUT) and blue (GUIDE), so each pass imports as a layer of its own.
+export const PASS_COLORS = Object.freeze([
+  "#000000", "#00e000", "#d0d000", "#ff8000", "#00e0e0", "#ff00ff", "#b4b4b4", "#0000a0",
+  "#a00000", "#00a000", "#a0a000", "#c08000", "#00a0ff", "#a000a0", "#808080", "#7d87b9",
+]);
+// Grey of each pass in a depth map (white = not engraved, black = deepest).
+export const passShades = (n) =>
+  Array.from({ length: n }, (_, k) => Math.round(255 * (1 - (k + 1) / n)));
 
 // Small mock-ups for the inspector, in mm with a little padding.
 // "laser": the export (mirrored when set) — engraving dark, cut line red.
 // "print": the impression on paper, always the right way round.
 export const STAMP_INK = "#c8332b";
+// The engraving darker where it is deeper (one fill per pass).
+export function passLayers(g, m = (c) => c) {
+  const n = g.passes.length;
+  return g.passes
+    .map((p, k) => {
+      const t = (k + 1) / n,
+        mix = (a, b) => Math.round(a + (b - a) * t);
+      return `<path d="${pathData(m(p))}" fill="rgb(${mix(0xc9, 0x4a)} ${mix(0xb8, 0x40)} ${mix(0xa3, 0x38)})" fill-rule="evenodd"/>`;
+    })
+    .join("");
+}
 export function stampPreviewSVG(g, view) {
   const o = g.options,
     pad = Math.max(o.width, o.height) * 0.06,
@@ -221,7 +275,7 @@ export function stampPreviewSVG(g, view) {
     m = (c) => (view === "laser" && o.mirror ? mirrorContours(c, o.width) : c);
   const body =
     view === "laser"
-      ? `<path d="${pathData(m(g.base))}" fill="#f1e6d6"/><path d="${pathData(m(g.engrave))}" fill="#4a4038" fill-rule="evenodd"/><path d="${pathData(m(g.base))}" fill="none" stroke="#e0362b" stroke-width="${num(Math.max(o.width, o.height) * 0.008)}"/>`
+      ? `<path d="${pathData(m(g.base))}" fill="#f1e6d6"/>${passLayers(g, m)}<path d="${pathData(m(g.base))}" fill="none" stroke="#e0362b" stroke-width="${num(Math.max(o.width, o.height) * 0.008)}"/>`
       : `<path d="${pathData(g.base)}" fill="none" stroke="#d9d2c6" stroke-width="${num(Math.max(o.width, o.height) * 0.005)}" stroke-dasharray="${num(pad / 3)} ${num(pad / 4)}"/><path d="${pathData(g.raised)}" fill="${STAMP_INK}" fill-opacity=".92" fill-rule="evenodd"/>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${box}" role="img" aria-label="${view === "laser" ? "加工データ" : "押印プレビュー"}">${body}</svg>`;
 }
@@ -249,3 +303,38 @@ export function fitTransform(box, options) {
     to: { x: o.width / 2, y: o.height / 2 },
   };
 }
+
+// PNG with its physical size: a pHYs chunk (pixels per metre) after IHDR,
+// so laser software opens a depth map at its real size in mm.
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+export function crc32(bytes) {
+  let c = 0xffffffff;
+  for (const b of bytes) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+export function withPhysicalSize(png, pxPerMm) {
+  const bytes = new Uint8Array(png),
+    signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (bytes.length < 33 || signature.some((b, i) => bytes[i] !== b)) throw Error("PNGではありません。");
+  const ppm = Math.round(pxPerMm * 1000),
+    chunk = new Uint8Array(21),
+    view = new DataView(chunk.buffer);
+  view.setUint32(0, 9);
+  chunk.set([0x70, 0x48, 0x59, 0x73], 4); // "pHYs"
+  view.setUint32(8, ppm);
+  view.setUint32(12, ppm);
+  chunk[16] = 1; // unit: metre
+  view.setUint32(17, crc32(chunk.subarray(4, 17)));
+  // Signature (8) + IHDR (4 length + 4 type + 13 data + 4 CRC) = 33 bytes.
+  const out = new Uint8Array(bytes.length + chunk.length);
+  out.set(bytes.subarray(0, 33));
+  out.set(chunk, 33);
+  out.set(bytes.subarray(33), 33 + chunk.length);
+  return out;
+}
+// Depth map resolution: 20 px per mm (508 dpi).
+export const DEPTH_MAP_PX_PER_MM = 20;
