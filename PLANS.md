@@ -862,4 +862,4 @@
 - テスト: `tests/stamp.test.js` に 4 件を追加し、`npm test` 260 件成功（各段の面積が「印面 − (インク + 太らせた分)」に一致、距離 0.1／0.3／0.6／0.9 mm 以上で 1／2／3／4 段、インク上は 0 段、上面の面積は不変。SVG の `ENGRAVE-1..3` と色・CUT の前に並ぶこと・肩なしと「文字を彫る」は従来どおり 1 つの ENGRAVE。設定の検証と既定値・段の灰色。pHYs の位置・値・CRC（CRC-32 の検査値 0xCBF43926 も確認））。`npm run build` 成功。
 - ブラウザ（Chromium、`vite preview`）: ハンコで「はんこ」を追加 → 肩 0.5 mm を選ぶと段数欄が出る → 5 段に変更、チェック欄に「0.5 mm · 5 段」と「✓ 書き出せます」。SVG は `ENGRAVE-1..5, CUT` で塗り色 #000000・#00e000・#d0d000・#ff8000・#00e0e0。深さマップは `typefab-stamp-depth.png` 1200 × 400 px、pHYs 20000 px/m、灰色は 0・51・102・153・204・255 の 6 値、左右反転で文字のまわりが段階的に明るい。加工プレビューは文字のまわりがぼかしたように段階的に明るい。「文字を彫る」で肩の設定が消え注記が出る。console error なし。
 - 未確認: 実機でのゴム彫刻（段の深さ・肩の強度の効果）、LightBurn・xTool Creative Space で SVG の層が別レイヤーとして読み込まれることと、深さマップを 3D／グレースケール彫刻に使えること。
-- 公開: PR を作成（マージ後に GitHub Pages へ反映）。
+- 公開: PR #16 を利用者の指示でマージ。GitHub Pages ワークフロー https://github.com/fooping-tech/TypeFab/actions/runs/37185648131 は success、https://fooping-tech.github.io/TypeFab/app/ は HTTP 200 で、公開中のエディタのスクリプトに肩（`ENGRAVE-`）の処理を含むことを確認（2026-10-04）。
